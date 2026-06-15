@@ -179,11 +179,19 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
       }
     }
 
-    // Advance the sync cursor — but if any products failed, roll back to just before
-    // the earliest failure so they are retried on the next sync cycle.
+    // Advance the sync cursor to the newest server `updatedAt` we actually saw —
+    // NOT the terminal clock. Using the terminal's `now()` skips rows whenever the
+    // terminal clock drifts ahead of the server, or after repointing the terminal
+    // to another environment (the carried-over cursor can be newer than the target
+    // env's rows, so `updatedAfter` filters them out and they never sync down).
+    // On failure, roll back to just before the earliest failure so it retries next cycle.
+    const maxUpdatedAt = products.reduce(
+      (max: number, p: { updatedAt: string }) => Math.max(max, new Date(p.updatedAt).getTime()),
+      0,
+    );
     const nextCursor = earliestFailedUpdatedAt
       ? new Date(earliestFailedUpdatedAt.getTime() - 1000).toISOString()
-      : new Date().toISOString();
+      : new Date(maxUpdatedAt).toISOString();
 
     await prisma.systemSetting.upsert({
       where: { key: 'last_product_sync' },
