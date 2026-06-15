@@ -14,6 +14,7 @@
     "deploy:telegram": "bash scripts/deploy-telegram.sh",
     "seed:paynet-mock": "node scripts/seed-paynet-mock.js",
     "import:mxik-catalog": "npx tsx scripts/import-mxik-catalog.ts",
+    "backfill:package-code": "npx tsx scripts/backfill-package-code.ts",
     "seed:mxik-categories": "npx tsx scripts/seed-mxik-categories.ts",
     "test:regos-vcr": "npx tsx scripts/regos-vcr-test.ts",
     "test:aslbelgisi": "npx tsx scripts/aslbelgisi-test.ts",

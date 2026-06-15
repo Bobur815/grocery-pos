@@ -305,6 +305,7 @@ export function ProductForm({
     active: true,
     mxik: initialData?.mxik || "",
     packageCode: initialData?.packageCode || "",
+    vatRate: "",
     productType: isBulkWeighted
       ? ("BULK_WEIGHTED" as ProductType)
       : ("REGULAR" as ProductType),
@@ -783,6 +784,7 @@ export function ProductForm({
         active: product.isActive,
         mxik: product.mxik || "",
         packageCode: product.packageCode || "",
+        vatRate: product.vatRate != null ? String(product.vatRate) : "",
         productType: product.productType || "REGULAR",
         internalCode: product.internalCode || "",
       });
@@ -833,6 +835,7 @@ export function ProductForm({
       active: formData.active,
       mxik: formData.mxik || undefined,
       packageCode: formData.packageCode || undefined,
+      vatRate: formData.vatRate === "" ? null : parseInt(formData.vatRate, 10),
       productType: formData.productType,
       internalCode: formData.internalCode || undefined,
     };
@@ -938,6 +941,18 @@ export function ProductForm({
                   </Select>
                 </FormGroup>
               )}
+              <FormGroup>
+                <Label>{t("products.vatRate", "Ставка НДС, %")}</Label>
+                <Select
+                  value={formData.vatRate}
+                  onChange={(e) => handleChange("vatRate", e.target.value)}
+                  title={t("products.vatRateHint", "Пусто — использовать ставку по умолчанию")}
+                >
+                  <option value="">{t("products.vatRateHint", "По умолчанию")}</option>
+                  <option value="0">0%</option>
+                  <option value="12">12%</option>
+                </Select>
+              </FormGroup>
               <FormGroup>
                 <Label>
                   {t("products.barcode")} <Req>*</Req>

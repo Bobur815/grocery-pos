@@ -12,6 +12,7 @@ import {
   describeVcrError,
   type VcrPosition,
   type VcrPayment,
+  type VcrReceiptResult,
 } from './regos-vcr-client';
 import type {
   RegosVcrConfig,
@@ -292,7 +293,11 @@ class RegosVcrService {
       });
       const subtotal = Number(item.subtotal);
       const amount = Math.round(subtotal * 100);
-      const vat = cfg.vatPercent > 0 ? Math.round((amount * cfg.vatPercent) / (100 + cfg.vatPercent)) : 0;
+      // VAT must match the rate registered for the product's MXIK — a mixed catalog
+      // (0% staples vs 12% goods) can't use one global rate. Prefer the product's own
+      // vatRate; fall back to the store-wide default only when it's unset.
+      const rate = product?.vatRate ?? cfg.vatPercent;
+      const vat = rate > 0 ? Math.round((amount * rate) / (100 + rate)) : 0;
       const discount =
         orderDiscount > 0 ? Math.round(((orderDiscount * subtotal) / totalSubtotal) * 100) : 0;
 
@@ -378,6 +383,33 @@ class RegosVcrService {
     } catch (e) {
       console.error(`[fiscal] ✗ fiscalize ${saleId} failed: ${this.errText(e)}`);
       const unreachable = e instanceof VcrError && e.code === 0;
+
+      // Recovery: a business-level failure may mean Receipt.Sale actually registered on
+      // the VCR but the response was lost, or this is a retry hitting the uniqueness guard
+      // (we send sale.id as `code`). Either way the receipt exists fiscally — look it up by
+      // our code and adopt it rather than orphaning a fiscalized sale as FAILED. Skipped for
+      // network errors (nothing was sent) and validation errors return null here harmlessly.
+      if (!unreachable) {
+        const recovered = await this.tryRecoverByCode(client, sale.id);
+        if (recovered) {
+          console.log(`[fiscal] recovered ${sale.receiptNumber} by code → ReceiptNo=${recovered.ReceiptNo}`);
+          await prisma.sale.update({
+            where: { id: saleId },
+            data: {
+              fiscalStatus: 'FISCALIZED',
+              regosReceiptId: recovered.Id,
+              regosFiscalSign: recovered.FiscalSign,
+              regosQrCodeUrl: recovered.QRCodeURL,
+              regosTerminalId: recovered.TerminalID,
+              regosReceiptNo: recovered.ReceiptNo,
+              regosFiscalAt: new Date(),
+              fiscalError: null,
+            },
+          }).catch(() => {});
+          return; // recovered — do not propagate the error
+        }
+      }
+
       await prisma.sale.update({
         where: { id: saleId },
         data: unreachable
@@ -385,6 +417,23 @@ class RegosVcrService {
           : { fiscalStatus: 'FAILED', fiscalAttempts: { increment: 1 }, fiscalError: this.errText(e) },
       }).catch(() => {});
       throw e;
+    }
+  }
+
+  /**
+   * Look up a receipt on the VCR by our idempotency `code` (= sale.id). Returns the
+   * fiscal result only if a fiscalized receipt with a FiscalSign is found, else null.
+   * Never throws — a failed lookup (network, not found) just means "no recovery".
+   */
+  private async tryRecoverByCode(
+    client: RegosVcrClient,
+    code: string,
+  ): Promise<(VcrReceiptResult & { Code: string }) | null> {
+    try {
+      const existing = await client.getReceiptInfo({ Code: code });
+      return existing?.FiscalSign ? existing : null;
+    } catch {
+      return null;
     }
   }
 

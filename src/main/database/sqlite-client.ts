@@ -608,6 +608,11 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
       created_at         DATETIME NOT NULL DEFAULT (datetime('now'))
     )
   `;
+
+  // Migration 24: per-product VAT rate (% — e.g. 0 or 12). Null → use global regos_vcr_vat default.
+  if (!(await columnExists(prisma, 'products', 'vat_rate'))) {
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN vat_rate INTEGER`;
+  }
 }
 
 /** True if `column` exists on `table` — silent (no thrown query, no prisma:error log). */

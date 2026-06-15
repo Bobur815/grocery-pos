@@ -184,6 +184,7 @@ export class ProductsService {
         active: createProductDto.active ?? true,
         mxik: createProductDto.mxik,
         packageCode: createProductDto.packageCode,
+        vatRate: createProductDto.vatRate,
         productType: createProductDto.productType ?? 'REGULAR',
         internalCode: createProductDto.internalCode,
         bulkQuantity: createProductDto.bulkQuantity ?? 0,

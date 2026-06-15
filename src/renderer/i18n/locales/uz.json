@@ -157,6 +157,8 @@
     "barcode": "Shtrix-kod",
     "mxik": "MXIK kodi",
     "packageCode": "Qadoq kodi (MXIK)",
+    "vatRate": "QQS stavkasi, %",
+    "vatRateHint": "Bo'sh — standart stavkani ishlatish",
     "missingMxik": "MXIK yo'q",
     "missingMxikHint": "MXIK kodi yo'q tovarlar fiskallashtirilmaydi (REGOS:VCR)",
     "noMxik": "yo'q",

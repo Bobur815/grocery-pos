@@ -31,6 +31,7 @@ export interface Product {
   pendingPriceThreshold?: number | null;
   mxik?: string;
   packageCode?: string;
+  vatRate?: number | null; // VAT % for this product's MXIK (0/12). Null → use global default
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -108,6 +109,7 @@ export interface ProductCreateInput {
   isOnPromotion?: boolean;
   mxik?: string;
   packageCode?: string;
+  vatRate?: number | null;
   productType?: ProductType;
   internalCode?: string;
   bulkQuantity?: number;
@@ -135,6 +137,7 @@ export interface ProductUpdateInput {
   isOnPromotion?: boolean;
   mxik?: string;
   packageCode?: string;
+  vatRate?: number | null;
   productType?: ProductType;
   internalCode?: string;
   bulkQuantity?: number;

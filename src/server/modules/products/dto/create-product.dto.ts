@@ -110,6 +110,13 @@ export class CreateProductDto {
   @IsString()
   packageCode?: string;
 
+  @ApiPropertyOptional({ example: 12, description: 'VAT % for this product (0 or 12). Null → use store global default' })
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Type(() => Number)
+  vatRate?: number;
+
   @ApiPropertyOptional({ example: 'REGULAR', description: 'Product type (REGULAR, BULK_WEIGHTED, PREPACKAGED)' })
   @IsOptional()
   @IsIn(PRODUCT_TYPES)

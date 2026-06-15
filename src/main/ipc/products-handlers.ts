@@ -60,6 +60,7 @@ function serializeProduct(product: any): Product | null {
         : null,
     mxik: product.mxik || undefined,
     packageCode: product.packageCode || undefined,
+    vatRate: product.vatRate != null ? Number(product.vatRate) : null,
     isActive: Boolean(product.active ?? true),
     createdAt: toISOString(product.createdAt),
     updatedAt: toISOString(product.updatedAt),
@@ -378,6 +379,7 @@ export function setupProductsHandlers(): void {
         isOnPromotion: data.isOnPromotion ?? false,
         mxik: data.mxik || null,
         packageCode: data.packageCode || null,
+        vatRate: data.vatRate ?? null,
         productType: data.productType || "REGULAR",
         internalCode: data.internalCode || null,
         storeProductCode,
@@ -466,6 +468,9 @@ export function setupProductsHandlers(): void {
       }
       if (data.packageCode !== undefined) {
         updateData.packageCode = data.packageCode || null;
+      }
+      if (data.vatRate !== undefined) {
+        updateData.vatRate = data.vatRate ?? null;
       }
       if (data.productType !== undefined) {
         updateData.productType = data.productType;
