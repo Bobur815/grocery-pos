@@ -43,7 +43,10 @@ function pickSingleUnit(
 }
 
 async function fetchPackageCode(mxik: string): Promise<{ code: string; via: string }> {
-  const res = await fetch(`${TASNIF}/integration-mxik/get/history/${mxik}`);
+  // 10s timeout — without it a single stalled request hangs the whole run.
+  const res = await fetch(`${TASNIF}/integration-mxik/get/history/${mxik}`, {
+    signal: AbortSignal.timeout(10_000),
+  });
   const json = (await res.json()) as {
     success?: boolean;
     data?: { packageNames?: Array<{ code: number; nameUz?: string; nameRu?: string }> };

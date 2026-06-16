@@ -7,6 +7,20 @@ import * as path from 'path';
 
 const prisma = new PrismaClient();
 
+// A `PrismaClientRustPanicError` ("timer has gone away" etc.) is non-recoverable:
+// once the query engine panics, the client instance is dead and every subsequent
+// query fails the same way. The only safe recovery is to exit and let PM2 restart
+// the process with a fresh engine.
+function isPrismaEnginePanic(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { name?: string }).name === 'PrismaClientRustPanicError';
+}
+function exitOnEnginePanic(err: unknown): void {
+  if (isPrismaEnginePanic(err)) {
+    console.error('[telegram-bot] Prisma engine panic — restarting process so PM2 spawns a fresh engine');
+    process.exit(1);
+  }
+}
+
 type Lang = 'uz' | 'ru';
 type UserRole = 'ADMIN' | 'USER' | 'SUPER_ADMIN' | 'SUPPLIER';
 
@@ -111,9 +125,10 @@ async function savePaynetReceipt(storeId: string, ofdUrl: string) {
 
   if (!r || !s) throw new Error('Invalid OFD URL: missing r or s params');
 
-  const issuedAt = c.length >= 14
+  const parsedIssuedAt = c.length >= 14
     ? new Date(`${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}T${c.slice(8,10)}:${c.slice(10,12)}:${c.slice(12,14)}`)
     : new Date();
+  const issuedAt = isNaN(parsedIssuedAt.getTime()) ? new Date() : parsedIssuedAt;
 
   const amount = await fetchOfdAmount(ofdUrl);
 
@@ -359,6 +374,7 @@ bot.hears(/ofd\.soliq\.uz\/epi\?/i, async (ctx) => {
     console.error('Paynet OFD save error', err);
     await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id).catch(() => {});
     await ctx.reply(session.lang === 'uz' ? '❌ Xatolik yuz berdi.' : '❌ Ошибка при сохранении чека.');
+    exitOnEnginePanic(err);
   }
 });
 
@@ -380,6 +396,15 @@ bot.on('message', async (ctx) => {
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
 
-bot.launch()
+// Safety net: an engine panic surfacing outside an awaited try/catch still bricks
+// the client, so exit and let PM2 restart with a fresh engine.
+process.on('unhandledRejection', exitOnEnginePanic);
+process.on('uncaughtException', exitOnEnginePanic);
+
+// Connect the query engine up front. Lazy connect-on-first-query lets several
+// forwarded receipts race the engine's startup, which is what triggered the
+// "timer has gone away" panic. Starting it before we poll for updates avoids that.
+prisma.$connect()
+  .then(() => bot.launch())
   .then(() => console.log('[telegram-bot] Started'))
   .catch((err) => { console.error('[telegram-bot] Launch error', err); process.exit(1); });

@@ -62,7 +62,13 @@ const mini = {
 fs.writeFileSync('dist/telegram-bot/package.json', JSON.stringify(mini, null, 2));
 JS
 
-# Copy PostgreSQL Prisma schema so the VPS can generate the client
+# Copy PostgreSQL Prisma schema so the VPS can generate the client.
+# NOTE: we keep the default `library` query engine here. The binary engine was
+# evaluated as a workaround for the "PANIC: timer has gone away" Rust panic, but
+# this VPS (~2 GB RAM, heavy swap) OOMs during `prisma generate`/`npm install`,
+# and the binary engine adds a separate runtime process. The panic is instead
+# handled in index.ts (eager $connect to avoid the startup race + exit-on-panic
+# so PM2 restarts with a fresh engine).
 log "Copying Prisma schema..."
 cp prisma/schema.prisma dist/telegram-bot/schema.prisma
 

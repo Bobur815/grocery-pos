@@ -27,6 +27,10 @@ const MAX_ATTEMPTS = 5; // cap retries for hard (business) failures
 const WORKER_INTERVAL_MS = 30_000;
 const FISCAL_DEBUG = process.env.FISCAL_DEBUG === 'true'; // verbose position/payment logs
 const ERR_ZREPORT_EMPTY = 704020; // VCR: can't close an empty Z-report — benign no-op for us
+// UZ statutory VAT rate. Used when neither the product's own vatRate nor the store-wide
+// regos_vcr_vat setting is configured. A 0% fallback would send vat_value=0 for goods that
+// are registered as VAT-able at soliq → REGOS rejects with 701003 "Ставка НДС не найдена".
+const DEFAULT_VAT_PERCENT = 12;
 
 interface ResolvedConfig {
   enabled: boolean;
@@ -82,7 +86,7 @@ class RegosVcrService {
       url: map[SETTING_KEYS.url] || process.env.VCR_URL || 'http://localhost:8080',
       login: map[SETTING_KEYS.login] || process.env.VCR_LOGIN || 'cassir',
       password,
-      vatPercent: Number(map[SETTING_KEYS.vat] ?? '0') || 0,
+      vatPercent: parseVatPercent(map[SETTING_KEYS.vat]),
       posId: map[SETTING_KEYS.posId] || appConfig.terminalId || 'posgro',
       vcrPrintsReceipt: map[SETTING_KEYS.printsReceipt] === 'true',
       // Default ON — only disabled when explicitly set to 'false'.
@@ -548,6 +552,18 @@ class RegosVcrService {
 }
 
 export const regosVcrService = new RegosVcrService();
+
+/**
+ * Resolve the store-wide VAT percent from its stored setting. An unset/blank/invalid value
+ * falls back to the UZ statutory rate (12%) — never silently to 0%, which would fiscalize
+ * VAT-able goods with vat_value=0 and trip REGOS 701003. An explicit "0" is honoured (a store
+ * that genuinely sells only exempt goods can still set 0%).
+ */
+function parseVatPercent(raw: string | undefined): number {
+  if (raw == null || raw.trim() === '') return DEFAULT_VAT_PERCENT;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : DEFAULT_VAT_PERCENT;
+}
 
 function safeParseLabels(json: string): FiscalLabel[] {
   try {

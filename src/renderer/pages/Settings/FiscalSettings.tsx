@@ -102,7 +102,7 @@ export function FiscalSettings() {
   const [login, setLogin] = useState('cassir');
   const [password, setPassword] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
-  const [vatPercent, setVatPercent] = useState('0');
+  const [vatPercent, setVatPercent] = useState('12');
   const [posId, setPosId] = useState('');
   const [vcrPrintsReceipt, setVcrPrintsReceipt] = useState(false);
   const [markingCodeCheck, setMarkingCodeCheck] = useState(true);
