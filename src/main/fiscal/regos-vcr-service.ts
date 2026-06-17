@@ -301,7 +301,12 @@ class RegosVcrService {
       // (0% staples vs 12% goods) can't use one global rate. Prefer the product's own
       // vatRate; fall back to the store-wide default only when it's unset.
       const rate = product?.vatRate ?? cfg.vatPercent;
-      const vat = rate > 0 ? Math.round((amount * rate) / (100 + rate)) : 0;
+      // Round VAT *up*, not to nearest. REGOS re-derives the rate from the position as
+      // vat_value*100/(amount-vat_value) and TRUNCATES it. Math.round here yields a VAT whose
+      // implied rate lands just under the target (e.g. 12% → 11.9946%), which truncates to 11%
+      // — an unregistered rate → 701003 "Ставка НДС не найдена". Ceil keeps the implied rate in
+      // [rate, rate+ε) so it truncates back to exactly `rate`; cost is ≤1 tiyin extra VAT.
+      const vat = rate > 0 ? Math.ceil((amount * rate) / (100 + rate)) : 0;
       const discount =
         orderDiscount > 0 ? Math.round(((orderDiscount * subtotal) / totalSubtotal) * 100) : 0;
 
@@ -386,6 +391,9 @@ class RegosVcrService {
       });
     } catch (e) {
       console.error(`[fiscal] ✗ fiscalize ${saleId} failed: ${this.errText(e)}`);
+      // Log the raw REGOS code + description too — describeVcrError() collapses several distinct
+      // VAT/MXIK faults into one staff message, which hides which one actually fired when debugging.
+      if (e instanceof VcrError) console.error(`[fiscal]   raw VCR error [${e.code}] ${e.method}: ${e.description}`);
       const unreachable = e instanceof VcrError && e.code === 0;
 
       // Recovery: a business-level failure may mean Receipt.Sale actually registered on

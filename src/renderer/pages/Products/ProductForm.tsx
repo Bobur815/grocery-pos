@@ -539,6 +539,9 @@ export function ProductForm({
       packageCode: formData.packageCode || undefined,
       productType: formData.productType,
       internalCode: formData.internalCode || undefined,
+      // New products default to 0% VAT (exempt) — safe default for grocery staples; this form has
+      // no VAT field. Omit on edit so an existing rate (set in web admin / backfill) is preserved.
+      ...(isEdit ? {} : { vatRate: 0 }),
     };
 
     let success = false;

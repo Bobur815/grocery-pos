@@ -7,15 +7,18 @@
 // The rate is derived from the public tasnif elasticsearch card:
 //   GET cls-api/elasticsearch/search?lang=uz_cyrl&search={mxik}&size=20&page=0 → data[].lgotaId
 //   lgotaId === null  → no VAT exemption (льгота) attached → standard 12%
-//   lgotaId !== null  → an exemption is attached → 0%
-// Caveat: lgotaId means an exemption is *attached* in the registry, not that it is currently
-// in force — some listed льготы were legally abolished (e.g. medicines from 01.04.2024,
-// passenger transport from 01.07.2025). For pure grocery retail every item is null → 12%, so
-// this edge does not bite; review any 0% result against the Tax Code (arts. 243–246) before trusting it.
+//   lgotaId !== null  → an exemption is *attached in the registry* → flagged for REVIEW, still 12%
+//
+// IMPORTANT: lgotaId means an exemption is attached, NOT that it is currently in force. tasnif
+// keeps abolished/expired/mis-attached льготы. Verified 2026-06-16 on store 1234: all 60 lgota
+// hits were false — Art.243 п.13 "medicines" (abolished 01.04.2024) on sodas/salt/detergent, or
+// an expired Art.483 food benefit. So lgota does NOT auto-zero by default. After manually
+// confirming a льгота is in force (Tax Code arts. 243–246), pass --trust-lgota to write those 0%.
 //
 // Run (reads DATABASE_URL from .env — point it at the right DB):
-//   npx tsx scripts/backfill-vat-rate.ts            # DRY RUN — prints plan, writes nothing
-//   npx tsx scripts/backfill-vat-rate.ts --apply    # writes vat_rate
+//   npx tsx scripts/backfill-vat-rate.ts                 # DRY RUN — prints plan, writes nothing
+//   npx tsx scripts/backfill-vat-rate.ts --apply         # writes 12% for valid-MXIK rows
+//   npx tsx scripts/backfill-vat-rate.ts --apply --trust-lgota  # also writes 0% for lgota rows
 //
 // Filters via env: STORE_ID (default 1234), CATEGORY_ID (default 1; set ALL to ignore category).
 //   STORE_ID=1234 CATEGORY_ID=1   npx tsx scripts/backfill-vat-rate.ts --apply
@@ -30,16 +33,28 @@ import { PrismaClient } from '@prisma/client';
 const prisma = new PrismaClient();
 const TASNIF = 'https://tasnif.soliq.uz/api/cls-api';
 const APPLY = process.argv.includes('--apply');
+// By default a registry lgota is treated as a REVIEW signal only — it is NOT auto-zero-rated,
+// because tasnif lists abolished/expired/mis-attached льготы (verified 2026-06-16: every lgota
+// hit in store 1234 was Art.243 п.13 "medicines" — abolished 01.04.2024 — or an expired Art.483
+// food benefit, none on goods that are actually exempt). Pass --trust-lgota only after manually
+// confirming the listed льготы are currently in force; then lgota products are written as 0%.
+const TRUST_LGOTA = process.argv.includes('--trust-lgota');
 const STORE_ID = process.env.STORE_ID ?? '1234';
 const CATEGORY_ID = process.env.CATEGORY_ID === 'ALL' ? undefined : Number(process.env.CATEGORY_ID ?? 1);
-const STANDARD_VAT = 12; // UZ statutory rate when no exemption is attached
+const STANDARD_VAT = 12; // UZ statutory rate when no (in-force) exemption is attached
 const EXEMPT_VAT = 0; // exemption (льгота) attached → 0%
 const DELAY_MS = 150; // pause between tasnif calls; raise if throttled
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Resolve a product's VAT percent from its MXIK via the public tasnif elasticsearch card. */
-async function fetchVatRate(mxik: string): Promise<{ rate: number; via: string }> {
+interface VatCard {
+  rate: number; // resolved rate to write (honours TRUST_LGOTA)
+  hasLgota: boolean; // a льгота is attached in the registry (in force or not)
+  via: string;
+}
+
+/** Resolve a product's VAT info from its MXIK via the public tasnif elasticsearch card. */
+async function fetchVatRate(mxik: string): Promise<VatCard> {
   // 10s timeout — without it a single stalled request hangs the whole run.
   const res = await fetch(
     `${TASNIF}/elasticsearch/search?lang=uz_cyrl&search=${mxik}&size=20&page=0`,
@@ -51,11 +66,15 @@ async function fetchVatRate(mxik: string): Promise<{ rate: number; via: string }
   const rows = json?.data ?? [];
   // Prefer the exact MXIK match; the search can return siblings.
   const card = rows.find((r) => r.mxikCode === mxik) ?? rows[0];
-  if (!card) return { rate: STANDARD_VAT, via: 'no card → default 12%' };
+  if (!card) return { rate: STANDARD_VAT, hasLgota: false, via: 'no card → 12%' };
   if (card.lgotaId != null) {
-    return { rate: EXEMPT_VAT, via: `lgota ${card.lgotaId}: ${(card.lgotaName ?? '').slice(0, 60)}` };
+    const note = `lgota ${card.lgotaId}: ${(card.lgotaName ?? '').slice(0, 60)}`;
+    // Default: keep 12% (registry lgota is unreliable for current status); --trust-lgota → 0%.
+    return TRUST_LGOTA
+      ? { rate: EXEMPT_VAT, hasLgota: true, via: `0% (trusted) ${note}` }
+      : { rate: STANDARD_VAT, hasLgota: true, via: `12% — REVIEW ${note}` };
   }
-  return { rate: STANDARD_VAT, via: 'no lgota → 12%' };
+  return { rate: STANDARD_VAT, hasLgota: false, via: 'no lgota → 12%' };
 }
 
 async function main() {
@@ -75,7 +94,7 @@ async function main() {
   console.log(APPLY ? '>>> APPLY mode — writing changes\n' : '>>> DRY RUN — pass --apply to write\n');
 
   const skipped: Array<{ id: number; nameUz: string; reason: string }> = [];
-  const exempt: Array<{ id: number; nameUz: string; via: string }> = [];
+  const review: Array<{ id: number; nameUz: string; via: string }> = [];
   let updated = 0;
 
   for (const p of products) {
@@ -84,9 +103,9 @@ async function main() {
       continue;
     }
     try {
-      const { rate, via } = await fetchVatRate(p.mxik);
+      const { rate, hasLgota, via } = await fetchVatRate(p.mxik);
       console.log(`#${p.id} ${p.nameUz.slice(0, 32).padEnd(32)} mxik=${p.mxik} → ${rate}%  (${via})`);
-      if (rate === EXEMPT_VAT) exempt.push({ id: p.id, nameUz: p.nameUz, via });
+      if (hasLgota) review.push({ id: p.id, nameUz: p.nameUz, via });
       if (APPLY) {
         await prisma.product.update({ where: { id: p.id }, data: { vatRate: rate } });
         updated++;
@@ -102,14 +121,18 @@ async function main() {
   }
 
   console.log(
-    `\nDone. ${APPLY ? `Updated ${updated}.` : 'Dry run — nothing written.'}  Exempt(0%) ${exempt.length}.  Skipped ${skipped.length}.`,
+    `\nDone. ${APPLY ? `Updated ${updated}.` : 'Dry run — nothing written.'}  ` +
+      `lgota-flagged ${review.length} (written ${TRUST_LGOTA ? '0%' : '12% — manual review'}).  Skipped ${skipped.length}.`,
   );
-  if (exempt.length) {
-    console.log('\nMarked 0% (VERIFY against Tax Code arts. 243–246 — some registry льготы are abolished):');
-    for (const e of exempt) console.log(`  #${e.id} ${e.nameUz} — ${e.via}`);
+  if (review.length) {
+    console.log(
+      `\nlgota attached — ${TRUST_LGOTA ? 'WROTE 0%' : 'kept 12%'}. VERIFY each is currently in force` +
+        ' (Tax Code arts. 243–246); registry lists abolished/expired льготы:',
+    );
+    for (const r of review) console.log(`  #${r.id} ${r.nameUz} — ${r.via}`);
   }
   if (skipped.length) {
-    console.log('\nSkipped (fix MXIK or investigate, then re-run):');
+    console.log('\nSkipped — no valid 17-digit MXIK (cannot fiscalize until fixed):');
     for (const s of skipped) console.log(`  #${s.id} ${s.nameUz} — ${s.reason}`);
   }
   await prisma.$disconnect();

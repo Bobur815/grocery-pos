@@ -305,7 +305,9 @@ export function ProductForm({
     active: true,
     mxik: initialData?.mxik || "",
     packageCode: initialData?.packageCode || "",
-    vatRate: "",
+    // New products default to 0% VAT (exempt) — the safe default for grocery staples. Set 12%
+    // explicitly for VAT-able goods, or run backfill-vat-rate-regos.ts to resolve per-MXIK.
+    vatRate: "0",
     productType: isBulkWeighted
       ? ("BULK_WEIGHTED" as ProductType)
       : ("REGULAR" as ProductType),
