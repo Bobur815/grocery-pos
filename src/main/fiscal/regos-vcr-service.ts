@@ -32,6 +32,13 @@ const ERR_ZREPORT_EMPTY = 704020; // VCR: can't close an empty Z-report — beni
 // are registered as VAT-able at soliq → REGOS rejects with 701003 "Ставка НДС не найдена".
 const DEFAULT_VAT_PERCENT = 12;
 
+// Per-position bookkeeping kept alongside the VCR positions so a VAT-rate heal can map a
+// position back to its product (to persist the corrected rate) and know its current rate.
+interface PositionMeta {
+  productId: number;
+  rate: number;
+}
+
 interface ResolvedConfig {
   enabled: boolean;
   url: string;
@@ -281,7 +288,7 @@ class RegosVcrService {
   private async buildPositions(
     sale: { discountAmount: unknown; regosLabels: string | null; items: Array<Record<string, unknown>> },
     cfg: ResolvedConfig,
-  ): Promise<VcrPosition[]> {
+  ): Promise<{ positions: VcrPosition[]; meta: PositionMeta[] }> {
     const prisma = getPrismaClient();
     const labels: FiscalLabel[] = sale.regosLabels ? safeParseLabels(sale.regosLabels) : [];
     const labelByBarcode = new Map(labels.map((l) => [l.barcode, l.label]));
@@ -290,6 +297,7 @@ class RegosVcrService {
     const totalSubtotal = sale.items.reduce((s, it) => s + Number(it.subtotal), 0) || 1;
 
     const positions: VcrPosition[] = [];
+    const meta: PositionMeta[] = [];
     for (const item of sale.items) {
       const product = await prisma.product.findUnique({
         where: { id: Number(item.productId) },
@@ -326,8 +334,59 @@ class RegosVcrService {
       const label = labelByBarcode.get(String(item.barcode));
       if (label) pos.label = label;
       positions.push(pos);
+      meta.push({ productId: Number(item.productId), rate });
     }
-    return positions;
+    return { positions, meta };
+  }
+
+  /**
+   * Self-heal a VAT-rate rejection. REGOS resolves each position's VAT rate from its MXIK in the
+   * soliq registry and rejects a wrong rate; our stored product.vatRate (or the global default)
+   * can disagree — e.g. a VAT-exempt staple left NULL falls back to 12%. Rather than orphan the
+   * sale as FAILED, re-probe the real device per position (Receipt.ValidateSale is side-effect
+   * free) to find the rate it actually accepts, correct vat_value in place, and persist the
+   * discovered rate back onto the product so it syncs to every terminal and never fails again.
+   *
+   * Reuses the real positions (so marking labels / package codes are present) and only varies
+   * vat_value. Returns true if any position's rate was corrected (caller should retry the sale).
+   */
+  private async healVatRates(
+    client: RegosVcrClient,
+    positions: VcrPosition[],
+    meta: PositionMeta[],
+  ): Promise<boolean> {
+    const prisma = getPrismaClient();
+    let changed = false;
+    for (let i = 0; i < positions.length; i++) {
+      const pos = positions[i];
+      const currentRate = meta[i].rate;
+      // Try the line's current rate first (it may be a different line that's wrong), then the
+      // statutory alternatives. dedup keeps the probe count minimal.
+      const candidates = [...new Set([currentRate, 0, 12])];
+      let accepted: number | null = null;
+      for (const rate of candidates) {
+        const vat = rate > 0 ? Math.ceil((pos.amount * rate) / (100 + rate)) : 0;
+        try {
+          await client.validateSale([{ ...pos, vat_value: vat }], [{ type: 1, value: pos.amount }], true);
+          accepted = rate;
+          pos.vat_value = vat; // mutate the real position used by the retried sale
+          break;
+        } catch (e) {
+          if (e instanceof VcrError && e.code === 0) throw e; // device unreachable — abort healing
+          if (e instanceof VcrError && isVatRateError(e)) continue; // wrong rate — try next candidate
+          break; // a non-VAT line fault (marking/MXIK) — can't heal this line, leave it
+        }
+      }
+      if (accepted !== null && accepted !== currentRate) {
+        changed = true;
+        meta[i].rate = accepted;
+        console.log(`[fiscal]   VAT heal: product ${meta[i].productId} ${currentRate}% → ${accepted}%`);
+        await prisma.product
+          .update({ where: { id: meta[i].productId }, data: { vatRate: accepted } })
+          .catch(() => {}); // bumps updatedAt → syncs the corrected rate up and back down
+      }
+    }
+    return changed;
   }
 
   private buildPayments(sale: { paymentMethod: string; finalAmount: unknown }): VcrPayment[] {
@@ -360,21 +419,37 @@ class RegosVcrService {
 
     try {
       await this.ensureZReportOpen(client, sale.smenaId);
-      const positions = await this.buildPositions(sale as never, cfg);
+      const { positions, meta } = await this.buildPositions(sale as never, cfg);
       const payments = this.buildPayments(sale as never);
       if (FISCAL_DEBUG) {
         console.log('[fiscal] positions:', JSON.stringify(positions));
         console.log('[fiscal] payments:', JSON.stringify(payments));
       }
-      await client.validateSale(positions, payments, false);
-      const result = await client.sale({
-        positions,
-        payments,
-        code: sale.id, // idempotency key
-        session_code: sale.smenaId ?? undefined,
-        cashier_name: sale.cashierName,
-        pos_id: cfg.posId,
-      });
+      let result: VcrReceiptResult | null = null;
+      // One heal-and-retry: if REGOS rejects the VAT rate, re-probe the device per position to
+      // learn the rate it accepts, correct it (and persist back to the product), then retry once.
+      for (let healed = false; result === null; ) {
+        try {
+          await client.validateSale(positions, payments, false);
+          result = await client.sale({
+            positions,
+            payments,
+            code: sale.id, // idempotency key
+            session_code: sale.smenaId ?? undefined,
+            cashier_name: sale.cashierName,
+            pos_id: cfg.posId,
+          });
+        } catch (e) {
+          if (!healed && e instanceof VcrError && isVatRateError(e)) {
+            healed = true;
+            if (await this.healVatRates(client, positions, meta)) {
+              console.log(`[fiscal] VAT rates healed for ${sale.receiptNumber} — retrying`);
+              continue;
+            }
+          }
+          throw e;
+        }
+      }
       console.log(`[fiscal] FISCALIZED ${sale.receiptNumber} → ReceiptNo=${result.ReceiptNo}`);
       await prisma.sale.update({
         where: { id: saleId },
@@ -567,6 +642,15 @@ export const regosVcrService = new RegosVcrService();
  * VAT-able goods with vat_value=0 and trip REGOS 701003. An explicit "0" is honoured (a store
  * that genuinely sells only exempt goods can still set 0%).
  */
+/**
+ * True when a VCR rejection is about the VAT rate not matching the product's MXIK registration.
+ * REGOS surfaces these as 701003 with a "Ставка НДС…" description; gate on the text so a generic
+ * 701003 (e.g. an MXIK fault) doesn't trigger a pointless heal pass.
+ */
+function isVatRateError(e: VcrError): boolean {
+  return /ставка\s*ндс/i.test(e.description || '');
+}
+
 function parseVatPercent(raw: string | undefined): number {
   if (raw == null || raw.trim() === '') return DEFAULT_VAT_PERCENT;
   const n = Number(raw);

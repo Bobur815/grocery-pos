@@ -1,6 +1,6 @@
 {
   "name": "posgro",
-  "version": "1.16.2",
+  "version": "1.17.0",
   "description": "Grocery Store POS System - Offline-first Point of Sale",
   "main": "dist-electron/main/index.js",
   "scripts": {
@@ -39,6 +39,7 @@
     "@nestjs/jwt": "^10.0.0",
     "@nestjs/passport": "^10.0.0",
     "@nestjs/platform-express": "^10.0.0",
+    "@nestjs/schedule": "^4.1.2",
     "@nestjs/swagger": "^8.1.1",
     "@prisma/client": "^5.0.0",
     "bcryptjs": "^3.0.3",

@@ -1,7 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UploadLogsDto } from './dto/upload-logs.dto';
 import { UploadAuditLogsDto } from './dto/upload-audit-logs.dto';
+
+// Logs are diagnostic/audit trails, not source-of-truth — keep ~1 month and purge the rest
+// nightly so terminal_logs and audit_logs don't grow unbounded.
+const LOG_RETENTION_DAYS = 30;
 
 export interface LogsQuery {
   storeId?: string;
@@ -26,7 +31,26 @@ export interface AuditLogsQuery {
 
 @Injectable()
 export class LogsService {
+  private readonly logger = new Logger(LogsService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  /**
+   * Nightly retention sweep — drops terminal_logs and audit_logs older than the retention window
+   * across all stores. Replaces the previous opportunistic per-store purge in uploadLogs (which
+   * ran on every upload and never touched audit_logs, letting that table grow unbounded).
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_3AM, { name: 'log-retention' })
+  async purgeOldLogs(): Promise<void> {
+    const cutoff = new Date(Date.now() - LOG_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const [terminal, audit] = await Promise.all([
+      this.prisma.terminalLog.deleteMany({ where: { createdAt: { lt: cutoff } } }),
+      this.prisma.auditLog.deleteMany({ where: { createdAt: { lt: cutoff } } }),
+    ]);
+    this.logger.log(
+      `Log retention: purged ${terminal.count} terminal_logs + ${audit.count} audit_logs older than ${LOG_RETENTION_DAYS}d`,
+    );
+  }
 
   async uploadLogs(storeId: string, dto: UploadLogsDto): Promise<{ saved: number }> {
     if (!dto.entries.length) return { saved: 0 };
@@ -39,14 +63,6 @@ export class LogsService {
         message: e.msg,
         timestamp: new Date(e.ts),
       })),
-    });
-
-    // Purge logs older than 30 days to keep the table lean
-    await this.prisma.terminalLog.deleteMany({
-      where: {
-        storeId,
-        createdAt: { lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) },
-      },
     });
 
     return { saved: dto.entries.length };
