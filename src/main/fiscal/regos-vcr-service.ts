@@ -6,6 +6,7 @@
 import { getPrismaClient } from '../database/sqlite-client';
 import { getAppConfig } from '../config/app-config';
 import { getVcrPassword, hasVcrPassword, setVcrPassword } from './secret-store';
+import { log } from '../logger';
 import {
   RegosVcrClient,
   VcrError,
@@ -465,10 +466,12 @@ class RegosVcrService {
         },
       });
     } catch (e) {
-      console.error(`[fiscal] ✗ fiscalize ${saleId} failed: ${this.errText(e)}`);
+      // Use the electron-log instance (not raw console) so these lines land in the upload buffer
+      // → terminal_logs → super-admin Logs dashboard. Main-process console is NOT captured.
+      log.error(`[fiscal] ✗ fiscalize ${saleId} failed: ${this.errText(e)}`);
       // Log the raw REGOS code + description too — describeVcrError() collapses several distinct
       // VAT/MXIK faults into one staff message, which hides which one actually fired when debugging.
-      if (e instanceof VcrError) console.error(`[fiscal]   raw VCR error [${e.code}] ${e.method}: ${e.description}`);
+      if (e instanceof VcrError) log.error(`[fiscal] raw VCR error [${e.code}] ${e.method}: ${e.description}`);
       const unreachable = e instanceof VcrError && e.code === 0;
 
       // Recovery: a business-level failure may mean Receipt.Sale actually registered on
