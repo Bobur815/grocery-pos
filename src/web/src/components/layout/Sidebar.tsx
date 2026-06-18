@@ -338,7 +338,7 @@ export function Sidebar() {
   );
 
   const mobileNavItems = isSuperAdmin
-    ? [{ to: "/admin/stores", icon: Store }, { to: "/admin/logs", icon: ScrollText }, { to: "/admin/audit-logs", icon: ShieldCheck }, { to: "/admin/login-banner", icon: Image }, { to: "/admin/subscription-plans", icon: CreditCard }]
+    ? [{ to: "/admin/stores", icon: Store }, { to: "/admin/logs", icon: ScrollText }, { to: "/admin/audit-logs", icon: ShieldCheck }, { to: "/admin/login-banner", icon: Image }, { to: "/admin/subscription-plans", icon: CreditCard }, { to: "/settings/user", icon: Settings }]
     : [
         { to: "/products", icon: Package },
         { to: "/products/stock", icon: ClipboardList },
@@ -439,6 +439,7 @@ export function Sidebar() {
               {renderNavItem("/admin/audit-logs", ShieldCheck, "Audit Logs")}
               {renderNavItem("/admin/login-banner", Image, "Login Banner")}
               {renderNavItem("/admin/subscription-plans", CreditCard, "Subscriptions")}
+              {renderNavItem("/settings/user", Settings, t("nav.settings"))}
             </NavSection>
           )}
         </Nav>
