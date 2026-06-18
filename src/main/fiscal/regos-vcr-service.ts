@@ -381,7 +381,7 @@ class RegosVcrService {
       if (accepted !== null && accepted !== currentRate) {
         changed = true;
         meta[i].rate = accepted;
-        console.log(`[fiscal]   VAT heal: product ${meta[i].productId} ${currentRate}% → ${accepted}%`);
+        log.info(`[fiscal] VAT heal: product ${meta[i].productId} ${currentRate}% → ${accepted}%`);
         await prisma.product
           .update({ where: { id: meta[i].productId }, data: { vatRate: accepted } })
           .catch(() => {}); // bumps updatedAt → syncs the corrected rate up and back down
@@ -444,7 +444,7 @@ class RegosVcrService {
           if (!healed && e instanceof VcrError && isVatRateError(e)) {
             healed = true;
             if (await this.healVatRates(client, positions, meta)) {
-              console.log(`[fiscal] VAT rates healed for ${sale.receiptNumber} — retrying`);
+              log.info(`[fiscal] VAT rates healed for ${sale.receiptNumber} — retrying`);
               continue;
             }
           }
