@@ -91,7 +91,10 @@ class RegosVcrService {
     const password = (await getVcrPassword()) || process.env.VCR_PASSWORD || '';
     return {
       enabled: map[SETTING_KEYS.enabled] === 'true',
-      url: map[SETTING_KEYS.url] || process.env.VCR_URL || 'http://localhost:8080',
+      // Default to literal IPv4 loopback, NOT 'localhost'. REGOS:VCR binds 127.0.0.1 only, and
+      // Node's fetch (undici, verbatim DNS) tries IPv6 ::1 first for 'localhost' → ECONNREFUSED
+      // surfaced as VcrError [0] "fetch failed". 22298 is REGOS's documented port.
+      url: map[SETTING_KEYS.url] || process.env.VCR_URL || 'http://127.0.0.1:22298/',
       login: map[SETTING_KEYS.login] || process.env.VCR_LOGIN || 'cassir',
       password,
       vatPercent: parseVatPercent(map[SETTING_KEYS.vat]),
