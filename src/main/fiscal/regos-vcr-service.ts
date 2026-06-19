@@ -421,9 +421,12 @@ class RegosVcrService {
     const sale = await prisma.sale.findUnique({ where: { id: saleId }, include: { items: true } });
     if (!sale || sale.fiscalStatus === 'FISCALIZED') return;
 
+    // Hoisted so the catch block can log the VAT rates / amounts actually sent to the VCR.
+    let positions: VcrPosition[] = [];
+    let meta: PositionMeta[] = [];
     try {
       await this.ensureZReportOpen(client, sale.smenaId);
-      const { positions, meta } = await this.buildPositions(sale as never, cfg);
+      ({ positions, meta } = await this.buildPositions(sale as never, cfg));
       const payments = this.buildPayments(sale as never);
       if (FISCAL_DEBUG) {
         console.log('[fiscal] positions:', JSON.stringify(positions));
@@ -475,6 +478,18 @@ class RegosVcrService {
       // Log the raw REGOS code + description too — describeVcrError() collapses several distinct
       // VAT/MXIK faults into one staff message, which hides which one actually fired when debugging.
       if (e instanceof VcrError) log.error(`[fiscal] raw VCR error [${e.code}] ${e.method}: ${e.description}`);
+      // Illustrate the VAT rate / amount actually sent per position — the key detail when REGOS
+      // rejects with "Неверная ставка НДС". rate% is the resolved per-product rate, vat is the
+      // tiyin value sent, amount is the gross line total. Reflects the last (possibly healed) attempt.
+      if (positions.length) {
+        const lines = positions
+          .map(
+            (p, i) =>
+              `${p.name} [mxik=${p.icps || '—'}] rate=${meta[i]?.rate ?? '?'}% vat=${p.vat_value}t amount=${p.amount}t`,
+          )
+          .join(' | ');
+        log.error(`[fiscal] positions sent: ${lines}`);
+      }
       const unreachable = e instanceof VcrError && e.code === 0;
 
       // Recovery: a business-level failure may mean Receipt.Sale actually registered on
