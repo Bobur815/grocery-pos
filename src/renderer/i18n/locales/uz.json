@@ -99,6 +99,7 @@
     "scanBarcode": "Shtrix-kodni skanerlang yoki nomini kiriting",
     "barcode": "Shtrix-kod",
     "qrCode": "QR-kod",
+    "catalog": "Katalog",
     "quantity": "Miqdor",
     "enterBarcode": "Shtrix-kodni kiriting",
     "cart": "Savat",

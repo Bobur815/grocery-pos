@@ -137,9 +137,11 @@ const NoResults = styled.div`
 
 interface ProductSearchProps {
   onSelect: (product: Product) => void;
+  // Raise the on-screen keyboard above a host modal (e.g. the Catalog modal, overlay z-index 1000).
+  keyboardZIndex?: number;
 }
 
-export function ProductSearch({ onSelect }: ProductSearchProps) {
+export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) {
   const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
   const [filters, setFilters] = useState<ProductFilterParams>({});
@@ -319,6 +321,7 @@ export function ProductSearch({ onSelect }: ProductSearchProps) {
       {keyboardOpen && (
         <VirtualKeyboard
           fixed
+          zIndex={keyboardZIndex}
           onKeyPress={handleVirtualKeyPress}
           onClose={() => setKeyboardOpen(false)}
         />

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { Cart } from "./Cart";
-import { ProductSearch } from "./ProductSearch";
+import { Catalog } from "./Catalog";
 import { Checkout } from "./Checkout";
 import { PosTabBar } from "./PosTabBar";
 import { useCartStore } from "../../store/cart-store";
@@ -15,6 +15,7 @@ import {
   Barcode,
   CreditCard,
   Delete,
+  LayoutGrid,
   QrCode,
   SendHorizontal,
   Trash,
@@ -68,19 +69,12 @@ const PageWrapper = styled.div`
 
 const Container = styled.div`
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  /* Product browsing moved to the Catalog modal — the input/numpad column keeps a compact
+     share and the freed space goes to the Cart. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
   grid-template-rows: 1fr;
   gap: ${({ theme }) => theme.spacing.sm};
   flex: 1;
-  min-height: 0;
-  overflow: hidden;
-`;
-
-const LeftSection = styled.div`
-  display: grid;
-  grid-template-columns: 1fr minmax(0, 1fr);
-  grid-template-rows: 1fr;
-  gap: ${({ theme }) => theme.spacing.sm};
   min-height: 0;
   overflow: hidden;
 `;
@@ -203,11 +197,31 @@ const NumButton = styled.button<{ $variant?: "action" | "clear" | "enter" }>`
   `}
 `;
 
-const ProductsSection = styled.div`
-  min-height: 0;
-  overflow: hidden;
+const CatalogButton = styled.button`
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.md};
+  background-color: ${({ theme }) => theme.colors.surface};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.borderRadius};
+  box-shadow: ${({ theme }) => theme.shadows.md};
+  color: ${({ theme }) => theme.colors.primary};
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+
+  &:hover {
+    background-color: ${({ theme }) => theme.colors.primary}10;
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+
+  &:active {
+    transform: scale(0.98);
+  }
 `;
 
 const CartSection = styled.div`
@@ -317,6 +331,8 @@ export function POSScreen() {
   const { openSmenaModal } = useSidebar();
 
   const [showSmenaModal, setShowSmenaModal] = useState(false);
+  const [showCatalog, setShowCatalog] = useState(false);
+  const closeCatalog = useCallback(() => setShowCatalog(false), []);
 
   // ── Scan input buffering ────────────────────────────────────────────────────
   // A barcode/QR scanner is an HID keyboard: a long DataMatrix marking code (~30–90
@@ -1049,30 +1065,35 @@ export function POSScreen() {
     setError("");
   };
 
-  const handleProductSelect = (product: Product) => {
-    const qty = parseFloat(quantity) || 1;
-    if (qty > product.stock) {
-      setError(
-        t("errors.insufficientStock", {
-          name: i18n.language === "uz" ? product.nameUz : product.nameRu,
-          available: product.stock,
-          requested: qty,
-        }),
-      );
-      return;
-    }
-    const selectGroupCodes = (product.category?.mxikGroupCode ?? "")
-      .split(",")
-      .map((c) => c.trim())
-      .filter(Boolean);
-    if (selectGroupCodes.includes("022")) {
-      setError(t("pos.qrOnlyProduct"));
-      return;
-    }
-    addProductToCart(product, qty);
-    setQuantity("1");
-    setError("");
-  };
+  // useCallback so the memoized Catalog modal keeps stable props and doesn't re-render when
+  // POSScreen re-renders (e.g. during a scan burst).
+  const handleProductSelect = useCallback(
+    (product: Product) => {
+      const qty = parseFloat(quantity) || 1;
+      if (qty > product.stock) {
+        setError(
+          t("errors.insufficientStock", {
+            name: i18n.language === "uz" ? product.nameUz : product.nameRu,
+            available: product.stock,
+            requested: qty,
+          }),
+        );
+        return;
+      }
+      const selectGroupCodes = (product.category?.mxikGroupCode ?? "")
+        .split(",")
+        .map((c) => c.trim())
+        .filter(Boolean);
+      if (selectGroupCodes.includes("022")) {
+        setError(t("pos.qrOnlyProduct"));
+        return;
+      }
+      addProductToCart(product, qty);
+      setQuantity("1");
+      setError("");
+    },
+    [quantity, t, i18n.language, addProductToCart],
+  );
 
   const handleCheckoutComplete = () => {
     setShowCheckout(false);
@@ -1097,13 +1118,12 @@ export function POSScreen() {
     <PageWrapper>
       <PosTabBar />
       <Container>
-        <LeftSection>
-          <ProductsSection>
-            <ProductSearch onSelect={handleProductSelect} />
-          </ProductsSection>
-
-          <InputColumn>
-            <InputSection>
+        <InputColumn>
+          <CatalogButton type="button" onClick={() => setShowCatalog(true)}>
+            <LayoutGrid size={18} />
+            {t("pos.catalog", "Каталог")}
+          </CatalogButton>
+          <InputSection>
               <InputPanel>
                 <InputLabel
                   style={{ display: "flex", alignItems: "center", gap: 4 }}
@@ -1223,8 +1243,7 @@ export function POSScreen() {
                 <ShortcutHint>(F12)</ShortcutHint>
               </QuickPayButton>
             </QuickPayRow>
-          </InputColumn>
-        </LeftSection>
+        </InputColumn>
 
         <CartSection>
           <Cart />
@@ -1255,6 +1274,10 @@ export function POSScreen() {
               </Button>
             </SmenaBlock>
           </Modal>
+        )}
+
+        {showCatalog && (
+          <Catalog onSelect={handleProductSelect} onClose={closeCatalog} />
         )}
       </Container>
     </PageWrapper>
