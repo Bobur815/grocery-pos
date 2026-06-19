@@ -72,6 +72,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Categories
   categories: {
     getAll: () => ipcRenderer.invoke("categories:getAll"),
+    getTopSelling: (limit?: number) =>
+      ipcRenderer.invoke("categories:getTopSelling", limit),
     create: (data: unknown) => ipcRenderer.invoke("categories:create", data),
     update: (id: string, data: unknown) =>
       ipcRenderer.invoke("categories:update", id, data),
@@ -444,6 +446,9 @@ declare global {
       };
       categories: {
         getAll: () => Promise<unknown[]>;
+        getTopSelling: (
+          limit?: number,
+        ) => Promise<{ id: number; nameRu: string; nameUz: string }[]>;
         create: (data: unknown) => Promise<unknown>;
         update: (id: string, data: unknown) => Promise<unknown>;
         delete: (id: string) => Promise<boolean>;

@@ -10,6 +10,56 @@ import { ChevronDown, ChevronRight, Pencil, Printer, Trash2, Link, ShieldCheck, 
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
 
+// Date-range options for the history filter. Lets the cashier reach older receipts so they can
+// be (re-)fiscalized from here — e.g. after enabling the non-VAT-payer mode or fixing an MXIK.
+type DateRange = 'today' | 'week' | 'month' | 'year';
+
+/** Local midnight at the start of the selected range (week starts Monday, per ru/uz locale). */
+function startOfRange(range: DateRange): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  switch (range) {
+    case 'week': {
+      const day = d.getDay(); // 0=Sun … 6=Sat
+      d.setDate(d.getDate() - (day === 0 ? 6 : day - 1)); // back to Monday
+      return d;
+    }
+    case 'month':
+      d.setDate(1);
+      return d;
+    case 'year':
+      d.setMonth(0, 1);
+      return d;
+    case 'today':
+    default:
+      return d;
+  }
+}
+
+const Toolbar = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  margin-bottom: ${({ theme }) => theme.spacing.md};
+`;
+
+const ToolbarLabel = styled.span`
+  font-size: 13px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const RangeSelect = styled.select`
+  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.borderRadius};
+  background: ${({ theme }) => theme.colors.background};
+  color: ${({ theme }) => theme.colors.text};
+  font-size: 13px;
+  cursor: pointer;
+  &:focus { outline: none; border-color: ${({ theme }) => theme.colors.primary}; }
+`;
+
 const List = styled.div`
   display: flex;
   flex-direction: column;
@@ -393,6 +443,7 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
   const { t, i18n } = useTranslation();
   const { sales, isLoading, loadSales, deleteSale } = useSales();
   const toast = useToast();
+  const [range, setRange] = useState<DateRange>('today');
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [paynetSale, setPaynetSale] = useState<Sale | null>(null);
@@ -442,11 +493,9 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
     }
   }, [t, toast]);
 
-  const reloadToday = useCallback(async () => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    await loadSales({ startDate: today.toISOString() });
-  }, [loadSales]);
+  const reload = useCallback(async () => {
+    await loadSales({ startDate: startOfRange(range).toISOString() });
+  }, [loadSales, range]);
 
   // Re-fiscalize a receipt that failed or is pending (e.g. after fixing the product's MXIK).
   const handleFiscalize = useCallback(async (sale: Sale, e: React.MouseEvent) => {
@@ -454,13 +503,13 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
     setFiscalizingId(sale.id);
     try {
       const res = await window.electronAPI.fiscal.retrySale(sale.id);
-      await reloadToday();
+      await reload();
       if (res.ok) toast.success(t('fiscalSettings.fiscalized', 'Фискализировано'));
       else toast.error(res.error || t('common.error'));
     } finally {
       setFiscalizingId(null);
     }
-  }, [reloadToday, t, toast]);
+  }, [reload, t, toast]);
 
   // Full fiscal refund (Receipt.FullRefund) — reverses the receipt on the OFD.
   const handleRefund = useCallback(async () => {
@@ -476,11 +525,11 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
       } else {
         toast.error(res.error || t('common.error'));
       }
-      await reloadToday();
+      await reload();
     } finally {
       setRefundingId(null);
     }
-  }, [refundConfirmId, reloadToday, t, toast]);
+  }, [refundConfirmId, reload, t, toast]);
 
   // Reprint a fiscal duplicate (Receipt.Duplicate).
   const handleDuplicate = useCallback(async (sale: Sale, e: React.MouseEvent) => {
@@ -499,22 +548,19 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
     if (!paynetSale) return;
     setPaynetSale(null);
     // Reload sales so the badge updates, then print
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    await loadSales({ startDate: today.toISOString() });
+    await reload();
     try {
       await window.electronAPI.printer.printReceipt(paynetSale.id);
       toast.success(t('pos.receiptPrinted'));
     } catch {
       toast.error(t('common.error'));
     }
-  }, [paynetSale, loadSales, t, toast]);
+  }, [paynetSale, reload, t, toast]);
 
+  // Load on mount and whenever the selected range changes (reload depends on `range`).
   useEffect(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    loadSales({ startDate: today.toISOString() });
-  }, [loadSales]);
+    reload();
+  }, [reload]);
 
   const formatTime = (dateStr: string) => {
     const d = new Date(dateStr);
@@ -527,10 +573,19 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
   return (
     <>
       <Modal
-        title={`${t('pos.salesHistory')} — ${t('pos.today')}`}
+        title={t('pos.salesHistory')}
         onClose={onClose}
         width="900px"
       >
+        <Toolbar>
+          <ToolbarLabel>{t('pos.period', 'Период')}</ToolbarLabel>
+          <RangeSelect value={range} onChange={(e) => setRange(e.target.value as DateRange)}>
+            <option value="today">{t('pos.today', 'Сегодня')}</option>
+            <option value="week">{t('pos.rangeWeek', 'С начала недели')}</option>
+            <option value="month">{t('pos.rangeMonth', 'С начала месяца')}</option>
+            <option value="year">{t('pos.rangeYear', 'С начала года')}</option>
+          </RangeSelect>
+        </Toolbar>
         {isLoading ? (
           <LoadingText>{t('common.loading')}</LoadingText>
         ) : sales.length === 0 ? (

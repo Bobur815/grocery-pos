@@ -32,6 +32,11 @@ const ERR_ZREPORT_EMPTY = 704020; // VCR: can't close an empty Z-report — beni
 // regos_vcr_vat setting is configured. A 0% fallback would send vat_value=0 for goods that
 // are registered as VAT-able at soliq → REGOS rejects with 701003 "Ставка НДС не найдена".
 const DEFAULT_VAT_PERCENT = 12;
+// REGOS sentinel for "Без НДС" sent in a position's vat_value when the store is NOT a VAT payer.
+// Confirmed by REGOS support (2026-06-19): non-payers must send -1, NOT 0 (0% is reserved for
+// льготники and a non-payer sending vat_value=0 is rejected with 701003 "Ставка НДС запрещена").
+// Doubles as the PositionMeta.rate marker for "без НДС" (no numeric rate applies).
+const NON_VAT_PAYER_VAT_VALUE = -1;
 
 // Per-position bookkeeping kept alongside the VCR positions so a VAT-rate heal can map a
 // position back to its product (to persist the corrected rate) and know its current rate.
@@ -46,6 +51,7 @@ interface ResolvedConfig {
   login: string;
   password: string;
   vatPercent: number;
+  nonVatPayer: boolean;
   posId: string;
   vcrPrintsReceipt: boolean;
   markingCodeCheck: boolean;
@@ -56,6 +62,7 @@ const SETTING_KEYS = {
   url: 'regos_vcr_url',
   login: 'regos_vcr_login',
   vat: 'regos_vcr_vat',
+  nonVatPayer: 'regos_vcr_non_vat_payer',
   posId: 'regos_vcr_pos_id',
   printsReceipt: 'regos_vcr_prints_receipt',
   markingCheck: 'regos_vcr_marking_check',
@@ -98,6 +105,7 @@ class RegosVcrService {
       login: map[SETTING_KEYS.login] || process.env.VCR_LOGIN || 'cassir',
       password,
       vatPercent: parseVatPercent(map[SETTING_KEYS.vat]),
+      nonVatPayer: map[SETTING_KEYS.nonVatPayer] === 'true',
       posId: map[SETTING_KEYS.posId] || appConfig.terminalId || 'posgro',
       vcrPrintsReceipt: map[SETTING_KEYS.printsReceipt] === 'true',
       // Default ON — only disabled when explicitly set to 'false'.
@@ -113,6 +121,7 @@ class RegosVcrService {
       login: cfg.login,
       hasPassword: (await hasVcrPassword()) || Boolean(process.env.VCR_PASSWORD),
       vatPercent: cfg.vatPercent,
+      nonVatPayer: cfg.nonVatPayer,
       posId: cfg.posId,
       vcrPrintsReceipt: cfg.vcrPrintsReceipt,
       markingCodeCheck: cfg.markingCodeCheck,
@@ -126,6 +135,7 @@ class RegosVcrService {
     if (input.url !== undefined) writes.push([SETTING_KEYS.url, input.url]);
     if (input.login !== undefined) writes.push([SETTING_KEYS.login, input.login]);
     if (input.vatPercent !== undefined) writes.push([SETTING_KEYS.vat, String(input.vatPercent)]);
+    if (input.nonVatPayer !== undefined) writes.push([SETTING_KEYS.nonVatPayer, String(input.nonVatPayer)]);
     if (input.posId !== undefined) writes.push([SETTING_KEYS.posId, input.posId]);
     if (input.vcrPrintsReceipt !== undefined) writes.push([SETTING_KEYS.printsReceipt, String(input.vcrPrintsReceipt)]);
     if (input.markingCodeCheck !== undefined) writes.push([SETTING_KEYS.markingCheck, String(input.markingCodeCheck)]);
@@ -309,16 +319,24 @@ class RegosVcrService {
       });
       const subtotal = Number(item.subtotal);
       const amount = Math.round(subtotal * 100);
-      // VAT must match the rate registered for the product's MXIK — a mixed catalog
-      // (0% staples vs 12% goods) can't use one global rate. Prefer the product's own
-      // vatRate; fall back to the store-wide default only when it's unset.
-      const rate = product?.vatRate ?? cfg.vatPercent;
+      // Non-VAT-payer store: send "Без НДС" (vat_value=-1) for every line and ignore any
+      // per-product/global rate. -1 is the REGOS sentinel for "не плательщик НДС" — DISTINCT
+      // from a 0% rate (vat_value=0, льготники only, rejected for non-payers). `rate` is set to
+      // the same sentinel purely so the heal short-circuits and the failure log reads "без НДС".
+      // Otherwise: VAT must match the rate registered for the product's MXIK — a mixed catalog
+      // (0% staples vs 12% goods) can't use one global rate. Prefer the product's own vatRate;
+      // fall back to the store-wide default only when it's unset.
+      const rate = cfg.nonVatPayer ? NON_VAT_PAYER_VAT_VALUE : (product?.vatRate ?? cfg.vatPercent);
       // Round VAT *up*, not to nearest. REGOS re-derives the rate from the position as
       // vat_value*100/(amount-vat_value) and TRUNCATES it. Math.round here yields a VAT whose
       // implied rate lands just under the target (e.g. 12% → 11.9946%), which truncates to 11%
       // — an unregistered rate → 701003 "Ставка НДС не найдена". Ceil keeps the implied rate in
       // [rate, rate+ε) so it truncates back to exactly `rate`; cost is ≤1 tiyin extra VAT.
-      const vat = rate > 0 ? Math.ceil((amount * rate) / (100 + rate)) : 0;
+      const vat = cfg.nonVatPayer
+        ? NON_VAT_PAYER_VAT_VALUE
+        : rate > 0
+          ? Math.ceil((amount * rate) / (100 + rate))
+          : 0;
       const discount =
         orderDiscount > 0 ? Math.round(((orderDiscount * subtotal) / totalSubtotal) * 100) : 0;
 
@@ -447,7 +465,9 @@ class RegosVcrService {
             pos_id: cfg.posId,
           });
         } catch (e) {
-          if (!healed && e instanceof VcrError && isVatRateError(e)) {
+          // The VAT-rate heal probes numeric rates [0,12,6]; it's meaningless (and wrong) for a
+          // non-VAT-payer store, whose only valid value is the "Без НДС" sentinel — skip it.
+          if (!healed && !cfg.nonVatPayer && e instanceof VcrError && isVatRateError(e)) {
             healed = true;
             if (await this.healVatRates(client, positions, meta)) {
               log.info(`[fiscal] VAT rates healed for ${sale.receiptNumber} — retrying`);
@@ -483,10 +503,11 @@ class RegosVcrService {
       // tiyin value sent, amount is the gross line total. Reflects the last (possibly healed) attempt.
       if (positions.length) {
         const lines = positions
-          .map(
-            (p, i) =>
-              `${p.name} [mxik=${p.icps || '—'}] rate=${meta[i]?.rate ?? '?'}% vat=${p.vat_value}t amount=${p.amount}t`,
-          )
+          .map((p, i) => {
+            const r = meta[i]?.rate;
+            const rateStr = r === NON_VAT_PAYER_VAT_VALUE ? 'без НДС' : `${r ?? '?'}%`;
+            return `${p.name} [mxik=${p.icps || '—'}] rate=${rateStr} vat=${p.vat_value}t amount=${p.amount}t`;
+          })
           .join(' | ');
         log.error(`[fiscal] positions sent: ${lines}`);
       }

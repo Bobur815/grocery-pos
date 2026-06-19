@@ -9,6 +9,11 @@ export interface RegosVcrConfig {
   login: string; // always "cassir" / "kassa"
   hasPassword: boolean;
   vatPercent: number; // store-level VAT rate, 0 or 12
+  // When true, the store is NOT a VAT payer: every position is sent as "Без НДС"
+  // (vat_value=-1, the REGOS sentinel) instead of any rate. This is DISTINCT from a 0%
+  // rate (0% is reserved for льготники; sending vat_value=0 as a non-payer is rejected
+  // with 701003 "Ставка НДС запрещена"). When on, vatPercent / per-product vatRate are ignored.
+  nonVatPayer: boolean;
   posId: string;
   // When true, REGOS:VCR prints the fiscal receipt itself — posgro suppresses its own
   // receipt auto-print to avoid a duplicate (Option B in REGOS_VCR_INTEGRATION.md).
@@ -25,6 +30,7 @@ export interface RegosVcrConfigInput {
   login?: string;
   password?: string;
   vatPercent?: number;
+  nonVatPayer?: boolean;
   posId?: string;
   vcrPrintsReceipt?: boolean;
   markingCodeCheck?: boolean;

@@ -3,12 +3,10 @@ import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { useProducts } from "../../hooks/useProducts";
 import { Input } from "../../components/common/Input";
-import { Button } from "../../components/common/Button";
-import { ProductFilters } from "../../components/products/ProductFilters";
 import { Product, ProductFilterParams } from "@shared/types";
 import { formatQuantity } from "../../utils/formatters";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
-import { ChevronDown, ChevronUp, Keyboard, ListFilterPlus, X } from "lucide-react";
+import { ChevronDown, ChevronUp, Keyboard, X } from "lucide-react";
 import { VirtualKeyboard } from "../../components/common/VirtualKeyboard";
 import {
   SearchInputWrapper,
@@ -38,31 +36,68 @@ const SearchHeader = styled.div`
   position: relative;
 `;
 
-const FilterDropdown = styled.div`
-  position: absolute;
-  top: 100%;
-  left: 0;
-  right: 0;
-  z-index: 20;
-  background-color: ${({ theme }) => theme.colors.surface};
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-top: none;
-  border-radius: 0 0 ${({ theme }) => theme.borderRadius}
-    ${({ theme }) => theme.borderRadius};
-  padding: ${({ theme }) => theme.spacing.md};
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
-`;
-
 const SearchRow = styled.div`
   display: flex;
   gap: ${({ theme }) => theme.spacing.sm};
   align-items: center;
 `;
 
+const CategoryBar = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.xs};
+  align-items: stretch;
+`;
+
+const CategoryButton = styled.button<{ $active?: boolean }>`
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  border-radius: ${({ theme }) => theme.borderRadius};
+  cursor: pointer;
+  transition: all 0.15s;
+  border: 1px solid
+    ${({ theme, $active }) => ($active ? theme.colors.primary : theme.colors.border)};
+  background-color: ${({ theme, $active }) =>
+    $active ? theme.colors.primary + "12" : theme.colors.background};
+  color: ${({ theme, $active }) => ($active ? theme.colors.primary : theme.colors.text)};
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
+const CategorySelect = styled.select<{ $active?: boolean }>`
+  flex: 1;
+  min-width: 0;
+  padding: 6px 10px;
+  font-size: 13px;
+  border-radius: ${({ theme }) => theme.borderRadius};
+  cursor: pointer;
+  border: 1px solid
+    ${({ theme, $active }) => ($active ? theme.colors.primary : theme.colors.border)};
+  background-color: ${({ theme, $active }) =>
+    $active ? theme.colors.primary + "12" : theme.colors.background};
+  color: ${({ theme, $active }) => ($active ? theme.colors.primary : theme.colors.text)};
+
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
 const ProductsGrid = styled.div`
   flex: 1;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  /* Keep rows at their natural height and packed at the top — otherwise the grid's
+     default align-content: stretch balloons a sparse row to fill the flex height. */
+  grid-auto-rows: min-content;
+  align-content: start;
   gap: 4px;
   overflow-y: auto;
   padding: ${({ theme }) => theme.spacing.sm};
@@ -144,43 +179,36 @@ interface ProductSearchProps {
 export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) {
   const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
-  const [filters, setFilters] = useState<ProductFilterParams>({});
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
+  const [topCategories, setTopCategories] = useState<
+    { id: number; nameRu: string; nameUz: string }[]
+  >([]);
   const [topSelling, setTopSelling] = useState<Product[]>([]);
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const {
     products,
     categories,
-    suppliers,
-    search,
     loadProducts,
     loadCategories,
-    loadSuppliers,
     getTopSelling,
+    getTopCategories,
     isLoading,
   } = useProducts();
 
-  useEffect(() => {
-    loadCategories();
-    loadSuppliers();
-  }, [loadCategories, loadSuppliers]);
-
-  // Load top-selling products on mount
+  // Load top-selling products + the 5 top-selling categories + the full list (for the dropdown).
   useEffect(() => {
     getTopSelling().then((data) => setTopSelling(data as unknown as Product[]));
-  }, [getTopSelling]);
+    getTopCategories(5).then(setTopCategories);
+    loadCategories();
+  }, [getTopSelling, getTopCategories, loadCategories]);
 
-  const hasActiveFilters =
-    filters.categoryId;
-
-  const debouncedSearch = useMemo(
+  const debouncedLoad = useMemo(
     () =>
-      debounce((query: string, f: ProductFilterParams, active: boolean) => {
-        if (query.trim() || active) {
-          const params: ProductFilterParams = { ...f };
-          if (query.trim()) {
-            params.query = query;
-          }
+      debounce((query: string, categoryId: number | null) => {
+        if (query.trim() || categoryId != null) {
+          const params: ProductFilterParams = {};
+          if (query.trim()) params.query = query;
+          if (categoryId != null) params.categoryId = categoryId;
           loadProducts(params);
         }
       }, 300),
@@ -188,9 +216,8 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
   );
 
   useEffect(() => {
-    debouncedSearch(searchQuery, filters, !!hasActiveFilters);
-  }, [searchQuery, filters, hasActiveFilters, debouncedSearch]);
-
+    debouncedLoad(searchQuery, selectedCategoryId);
+  }, [searchQuery, selectedCategoryId, debouncedLoad]);
 
   // Refresh products when stock changes (after sale/edit/delete)
   useEffect(() => {
@@ -198,15 +225,27 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
       getTopSelling().then((data) =>
         setTopSelling(data as unknown as Product[]),
       );
-      if (searchQuery.trim() || hasActiveFilters) {
-        const params: ProductFilterParams = { ...filters };
+      if (searchQuery.trim() || selectedCategoryId != null) {
+        const params: ProductFilterParams = {};
         if (searchQuery.trim()) params.query = searchQuery;
+        if (selectedCategoryId != null) params.categoryId = selectedCategoryId;
         loadProducts(params);
       }
     };
     window.addEventListener("stock-updated", refresh);
     return () => window.removeEventListener("stock-updated", refresh);
-  }, [getTopSelling, searchQuery, hasActiveFilters, filters, loadProducts]);
+  }, [getTopSelling, searchQuery, selectedCategoryId, loadProducts]);
+
+  const categoryName = (c: { nameRu: string; nameUz: string }) =>
+    i18n.language === "uz" ? c.nameUz || c.nameRu : c.nameRu;
+
+  // Categories not already shown as a top-5 button — offered in the dropdown.
+  const topCategoryIds = new Set(topCategories.map((c) => c.id));
+  const otherCategories = categories.filter(
+    (c) => !topCategoryIds.has(Number(c.id)),
+  );
+  const selectedIsOther =
+    selectedCategoryId != null && !topCategoryIds.has(selectedCategoryId);
 
 
   const formatCurrency = (amount: number) =>
@@ -226,7 +265,7 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
   };
 
   const displayProducts: Product[] = (
-    searchQuery.trim() || hasActiveFilters
+    searchQuery.trim() || selectedCategoryId != null
       ? (products as unknown as Product[])
       : topSelling
   ).filter((p) => p.isActive);
@@ -267,6 +306,36 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
             </InputControls>
           </SearchInputWrapper>
         </SearchRow>
+
+        <CategoryBar>
+          {topCategories.map((c) => (
+            <CategoryButton
+              key={c.id}
+              type="button"
+              $active={selectedCategoryId === c.id}
+              onClick={() =>
+                setSelectedCategoryId(selectedCategoryId === c.id ? null : c.id)
+              }
+              title={categoryName(c)}
+            >
+              {categoryName(c)}
+            </CategoryButton>
+          ))}
+          <CategorySelect
+            $active={selectedIsOther}
+            value={selectedIsOther ? String(selectedCategoryId) : ""}
+            onChange={(e) =>
+              setSelectedCategoryId(e.target.value ? Number(e.target.value) : null)
+            }
+          >
+            <option value="">{t("products.otherCategories", "Другие категории")}</option>
+            {otherCategories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {categoryName(c)}
+              </option>
+            ))}
+          </CategorySelect>
+        </CategoryBar>
       </SearchHeader>
 
       <ProductsGrid>

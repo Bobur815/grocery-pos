@@ -169,6 +169,28 @@ function setupCategoriesHandlers(): void {
     });
   });
 
+  // Top categories by total quantity sold — used by the POS catalog quick-filter buttons.
+  ipcMain.handle("categories:getTopSelling", async (_event, limit: number = 5) => {
+    const prisma = getPrismaClient();
+    const rows = (await prisma.$queryRawUnsafe(
+      `SELECT c.id as id, c.name_ru as nameRu, c.name_uz as nameUz,
+              CAST(SUM(si.quantity) AS REAL) as quantity
+       FROM sale_items si
+       JOIN products p ON si.product_id = p.id
+       JOIN categories c ON p.category_id = c.id
+       WHERE c.active = 1
+       GROUP BY c.id
+       ORDER BY quantity DESC
+       LIMIT ?`,
+      limit,
+    )) as { id: number | bigint; nameRu: string; nameUz: string }[];
+    return rows.map((r) => ({
+      id: Number(r.id),
+      nameRu: String(r.nameRu || ""),
+      nameUz: String(r.nameUz || ""),
+    }));
+  });
+
   ipcMain.handle("categories:create", async (_event, data) => {
     const prisma = getPrismaClient();
     return prisma.category.create({ data });

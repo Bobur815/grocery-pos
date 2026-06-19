@@ -103,6 +103,7 @@ export function FiscalSettings() {
   const [password, setPassword] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
   const [vatPercent, setVatPercent] = useState('12');
+  const [nonVatPayer, setNonVatPayer] = useState(false);
   const [posId, setPosId] = useState('');
   const [vcrPrintsReceipt, setVcrPrintsReceipt] = useState(false);
   const [markingCodeCheck, setMarkingCodeCheck] = useState(true);
@@ -119,6 +120,7 @@ export function FiscalSettings() {
       setLogin(cfg.login);
       setHasPassword(cfg.hasPassword);
       setVatPercent(String(cfg.vatPercent));
+      setNonVatPayer(cfg.nonVatPayer);
       setPosId(cfg.posId);
       setVcrPrintsReceipt(cfg.vcrPrintsReceipt);
       setMarkingCodeCheck(cfg.markingCodeCheck);
@@ -134,6 +136,7 @@ export function FiscalSettings() {
         url,
         login,
         vatPercent: Number(vatPercent),
+        nonVatPayer,
         posId,
         vcrPrintsReceipt,
         markingCodeCheck,
@@ -197,12 +200,33 @@ export function FiscalSettings() {
           />
         </Field>
 
+        <Row>
+          <input
+            type="checkbox"
+            checked={nonVatPayer}
+            onChange={(e) => setNonVatPayer(e.target.checked)}
+          />
+          {t('fiscalSettings.nonVatPayer', 'Организация не является плательщиком НДС (отправлять «Без НДС»)')}
+        </Row>
+
         <Field>
           <Label>{t('fiscalSettings.vat', 'Ставка НДС, %')}</Label>
-          <Select value={vatPercent} onChange={(e) => setVatPercent(e.target.value)}>
+          <Select
+            value={vatPercent}
+            onChange={(e) => setVatPercent(e.target.value)}
+            disabled={nonVatPayer}
+          >
             <option value="0">0%</option>
             <option value="12">12%</option>
           </Select>
+          {nonVatPayer && (
+            <Muted>
+              {t(
+                'fiscalSettings.nonVatPayerHint',
+                'Для неплательщика НДС ставка игнорируется — во все позиции отправляется «Без НДС».',
+              )}
+            </Muted>
+          )}
         </Field>
 
         <Field>
