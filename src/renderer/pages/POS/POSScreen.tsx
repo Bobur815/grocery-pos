@@ -509,14 +509,6 @@ export function POSScreen() {
           .split(",")
           .map((c) => c.trim())
           .filter(Boolean);
-        console.log(
-          "[DBG id]",
-          JSON.stringify({
-            id: product.id,
-            cat: product.category,
-            codes: idGroupCodes,
-          }),
-        );
         if (idGroupCodes.includes("022")) {
           setId("");
           setError(t("pos.qrOnlyProduct"));
@@ -1073,14 +1065,6 @@ export function POSScreen() {
       .split(",")
       .map((c) => c.trim())
       .filter(Boolean);
-    console.log(
-      "[DBG select]",
-      JSON.stringify({
-        id: product.id,
-        cat: product.category,
-        codes: selectGroupCodes,
-      }),
-    );
     if (selectGroupCodes.includes("022")) {
       setError(t("pos.qrOnlyProduct"));
       return;
