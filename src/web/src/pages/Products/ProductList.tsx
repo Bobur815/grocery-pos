@@ -437,6 +437,12 @@ export function ProductList() {
       render: (product: Product) => formatCurrency(product.price),
     },
     {
+      key: "vatRate",
+      header: t("products.vatRate", "НДС, %"),
+      render: (product: Product) =>
+        product.vatRate != null ? `${product.vatRate.toFixed(2)}%` : "—",
+    },
+    {
       key: "stock",
       header: t("products.stock"),
       render: (product: Product) => (

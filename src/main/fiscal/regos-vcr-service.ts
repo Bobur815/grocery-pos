@@ -366,7 +366,7 @@ class RegosVcrService {
       const currentRate = meta[i].rate;
       // Try the line's current rate first (it may be a different line that's wrong), then the
       // statutory alternatives. dedup keeps the probe count minimal.
-      const candidates = [...new Set([currentRate, 0, 12])];
+      const candidates = [...new Set([currentRate, 0, 12, 6])];
       let accepted: number | null = null;
       for (const rate of candidates) {
         const vat = rate > 0 ? Math.ceil((pos.amount * rate) / (100 + rate)) : 0;

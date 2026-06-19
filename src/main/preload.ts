@@ -83,6 +83,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getGroups: () => ipcRenderer.invoke("mxik:getGroups"),
     getPackages: (mxikCode: string) => ipcRenderer.invoke("mxik:getPackages", mxikCode),
     lookupByBarcode: (barcode: string) => ipcRenderer.invoke("mxik:lookupByBarcode", barcode),
+    catalogSearch: (q: string, page = 0, size = 10) =>
+      ipcRenderer.invoke("mxik:catalogSearch", q, page, size),
   },
 
   // REGOS:VCR fiscalization
@@ -452,6 +454,23 @@ declare global {
         lookupByBarcode: (
           barcode: string,
         ) => Promise<{ code: string; name: string; nameRu: string } | null>;
+        catalogSearch: (
+          q: string,
+          page?: number,
+          size?: number,
+        ) => Promise<{
+          results: {
+            mxikCode: string;
+            mxikName: string;
+            groupCode: string;
+            groupName: string;
+            classCode: string;
+            className: string;
+            internationalCode: string | null;
+            unitName: string | null;
+          }[];
+          total: number;
+        }>;
       };
       fiscal: {
         getConfig: () => Promise<import("../shared/types/fiscal.types").RegosVcrConfig>;

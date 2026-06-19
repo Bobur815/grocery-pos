@@ -305,9 +305,9 @@ export function ProductForm({
     active: true,
     mxik: initialData?.mxik || "",
     packageCode: initialData?.packageCode || "",
-    // New products default to 0% VAT (exempt) — the safe default for grocery staples. Set 12%
-    // explicitly for VAT-able goods, or run backfill-vat-rate-regos.ts to resolve per-MXIK.
-    vatRate: "0",
+    // New products default to "" = use the store-wide default rate (not a hardcoded 0%, which
+    // mis-fiscalized VAT-able goods). Pick 0/6/12 explicitly per product, or let fiscal self-heal.
+    vatRate: "",
     productType: isBulkWeighted
       ? ("BULK_WEIGHTED" as ProductType)
       : ("REGULAR" as ProductType),
@@ -837,7 +837,7 @@ export function ProductForm({
       active: formData.active,
       mxik: formData.mxik || undefined,
       packageCode: formData.packageCode || undefined,
-      vatRate: formData.vatRate === "" ? null : parseInt(formData.vatRate, 10),
+      vatRate: formData.vatRate === "" ? null : parseFloat(formData.vatRate),
       productType: formData.productType,
       internalCode: formData.internalCode || undefined,
     };
@@ -951,8 +951,9 @@ export function ProductForm({
                   title={t("products.vatRateHint", "Пусто — использовать ставку по умолчанию")}
                 >
                   <option value="">{t("products.vatRateHint", "По умолчанию")}</option>
-                  <option value="0">0%</option>
-                  <option value="12">12%</option>
+                  <option value="0">0.00%</option>
+                  <option value="6">6.00%</option>
+                  <option value="12">12.00%</option>
                 </Select>
               </FormGroup>
               <FormGroup>

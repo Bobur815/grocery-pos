@@ -124,6 +124,40 @@ function setupMxikHandlers(): void {
       return [];
     }
   });
+
+  // Search the MXIK catalog by product name for the picker — queries tasnif.soliq.uz directly
+  // (main process: no browser CORS, terminal is in UZ). Mirrors the web client's mxik.catalogSearch
+  // so the renderer ProductForm can offer the same searchable MXIK picker. Paginated.
+  ipcMain.handle(
+    "mxik:catalogSearch",
+    async (_event, q: string, page = 0, size = 10): Promise<{ results: unknown[]; total: number }> => {
+      const query = (q || "").trim();
+      if (query.length < 2) return { results: [], total: 0 };
+      try {
+        const url = `https://tasnif.soliq.uz/api/cls-api/elasticsearch/search?lang=uz_cyrl&search=${encodeURIComponent(query)}&size=${size}&page=${page}`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (!res.ok) return { results: [], total: 0 };
+        const json = (await res.json()) as {
+          data?: Array<Record<string, unknown>>;
+          recordTotal?: number;
+        };
+        const results = (json.data ?? []).map((item) => ({
+          mxikCode: item.mxikCode,
+          mxikName: item.name,
+          groupCode: item.groupCode,
+          groupName: item.groupName,
+          classCode: item.classCode,
+          className: item.className,
+          internationalCode: item.internationalCode ?? null,
+          unitName: item.unitsName ?? item.packageName ?? null,
+        }));
+        return ipcSafe({ results, total: json.recordTotal ?? 0 });
+      } catch (error) {
+        console.error("mxik:catalogSearch failed:", error instanceof Error ? error.message : error);
+        return { results: [], total: 0 };
+      }
+    },
+  );
 }
 
 function setupCategoriesHandlers(): void {

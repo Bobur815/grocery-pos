@@ -609,9 +609,11 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
     )
   `;
 
-  // Migration 24: per-product VAT rate (% — e.g. 0 or 12). Null → use global regos_vcr_vat default.
+  // Migration 24: per-product VAT rate (% — e.g. 0, 6 or 12). Null → use global regos_vcr_vat default.
+  // REAL so fractional rates round-trip; SQLite type affinity stores whole rates (0/6/12) losslessly
+  // and existing terminals (column already INTEGER affinity) handle these whole values fine.
   if (!(await columnExists(prisma, 'products', 'vat_rate'))) {
-    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN vat_rate INTEGER`;
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN vat_rate REAL`;
   }
 }
 

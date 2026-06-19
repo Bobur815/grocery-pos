@@ -99,8 +99,8 @@ model Product {
   // REGOS:VCR package (unit) code from MXIK — required for fiscalizing marked goods
   packageCode      String? @map("package_code")
 
-  // VAT % registered for this product's MXIK (e.g. 0 or 12). Null → use global regos_vcr_vat default
-  vatRate          Int?    @map("vat_rate")
+  // VAT % registered for this product's MXIK (e.g. 0, 6 or 12). Null → use global regos_vcr_vat default
+  vatRate          Float?  @map("vat_rate")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

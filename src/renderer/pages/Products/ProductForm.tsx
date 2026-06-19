@@ -22,11 +22,12 @@ import {
 } from "@shared/constants/payment-methods";
 import { convertUzbekText } from "@shared/utils/transliterator";
 import { pickSingleUnitPackage, type MxikPackage } from "@shared/utils/mxik-packages";
-import { isMxikExcluded } from "@shared/types/mxik.types";
-import { RefreshCw, Settings } from "lucide-react";
+import { isMxikExcluded, type CatalogEntry } from "@shared/types/mxik.types";
+import { RefreshCw, Settings, Search } from "lucide-react";
 import { SupplierManagementModal } from "../Suppliers/SupplierManagementModal";
 import { CategoryManagementModal } from "./CategoryManagementModal";
 import { DateInput } from "../../components/common/DateInput";
+import { Spinner } from "../../components/common/Spinner";
 
 const Form = styled.form`
   display: flex;
@@ -61,6 +62,35 @@ const Label = styled.label`
   margin-bottom: ${({ theme }) => theme.spacing.xs};
   font-weight: 500;
   color: ${({ theme }) => theme.colors.text};
+`;
+
+const PickerList = styled.div`
+  display: flex;
+  flex-direction: column;
+  max-height: 360px;
+  overflow-y: auto;
+  margin-top: ${({ theme }) => theme.spacing.sm};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.borderRadius};
+`;
+
+const PickerItem = styled.div`
+  padding: 10px 12px;
+  cursor: pointer;
+  &:not(:last-child) { border-bottom: 1px solid ${({ theme }) => theme.colors.border}; }
+  &:hover { background: ${({ theme }) => theme.colors.background}; }
+`;
+
+const PickerItemName = styled.div`
+  font-size: 13px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const PickerItemMeta = styled.div`
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin-top: 2px;
 `;
 
 const FormGroup = styled.div`
@@ -237,6 +267,7 @@ export function ProductForm({
     active: true,
     mxik: initialData?.mxik || "",
     packageCode: initialData?.packageCode || "",
+    vatRate: "",
     productType: "REGULAR" as ProductType,
     internalCode: "",
   });
@@ -258,6 +289,15 @@ export function ProductForm({
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [mxikPackages, setMxikPackages] = useState<MxikPackage[]>([]);
+
+  // MXIK picker (search the catalog by name) — mirrors the web ProductForm.
+  const [showMxikPicker, setShowMxikPicker] = useState(false);
+  const [mxikPickerQuery, setMxikPickerQuery] = useState("");
+  const [mxikPickerResults, setMxikPickerResults] = useState<CatalogEntry[]>([]);
+  const [mxikPickerLoading, setMxikPickerLoading] = useState(false);
+  const [mxikPickerPage, setMxikPickerPage] = useState(0);
+  const [mxikPickerTotal, setMxikPickerTotal] = useState(0);
+  const [mxikLoadingMore, setMxikLoadingMore] = useState(false);
 
   // When the MXIK is a full 17-digit code, fetch its package (unit) codes from tasnif.
   // Marked goods need a `package_code`; we default to the single-unit package.
@@ -295,6 +335,56 @@ export function ProductForm({
     },
     [categories, t, toast],
   );
+
+  const handlePickerSelect = (entry: CatalogEntry) => {
+    if (isMxikExcluded(entry.mxikCode)) {
+      toast.error(t("products.categoryNotAllowed", { category: entry.className }));
+      return;
+    }
+    setFormData((prev) => ({ ...prev, mxik: entry.mxikCode }));
+    autoSelectCategory(entry.mxikCode.slice(0, 3));
+    setShowMxikPicker(false);
+    setMxikPickerQuery("");
+    setMxikPickerResults([]);
+    setMxikPickerTotal(0);
+    setMxikPickerPage(0);
+  };
+
+  const doMxikSearch = useCallback(async (q: string) => {
+    if (q.trim().length < 2) {
+      setMxikPickerResults([]);
+      setMxikPickerTotal(0);
+      setMxikPickerPage(0);
+      return;
+    }
+    setMxikPickerLoading(true);
+    const { results, total } = await window.electronAPI.mxik.catalogSearch(q.trim(), 0, 10);
+    setMxikPickerResults(results);
+    setMxikPickerTotal(total);
+    setMxikPickerPage(0);
+    setMxikPickerLoading(false);
+  }, []);
+
+  // Debounce the search as the query changes while the picker is open.
+  useEffect(() => {
+    if (!showMxikPicker) return;
+    const id = setTimeout(() => doMxikSearch(mxikPickerQuery), 300);
+    return () => clearTimeout(id);
+  }, [mxikPickerQuery, showMxikPicker, doMxikSearch]);
+
+  const handleMxikLoadMore = async () => {
+    const nextPage = mxikPickerPage + 1;
+    setMxikLoadingMore(true);
+    const { results, total } = await window.electronAPI.mxik.catalogSearch(
+      mxikPickerQuery.trim(),
+      nextPage,
+      10,
+    );
+    setMxikPickerResults((prev) => [...prev, ...results]);
+    setMxikPickerTotal(total);
+    setMxikPickerPage(nextPage);
+    setMxikLoadingMore(false);
+  };
 
   useEffect(() => {
     loadCategories();
@@ -506,6 +596,7 @@ export function ProductForm({
         active: product.isActive,
         mxik: product.mxik || "",
         packageCode: product.packageCode || "",
+        vatRate: product.vatRate != null ? String(product.vatRate) : "",
         productType: product.productType || "REGULAR",
         internalCode: product.internalCode || "",
       });
@@ -539,9 +630,8 @@ export function ProductForm({
       packageCode: formData.packageCode || undefined,
       productType: formData.productType,
       internalCode: formData.internalCode || undefined,
-      // New products default to 0% VAT (exempt) — safe default for grocery staples; this form has
-      // no VAT field. Omit on edit so an existing rate (set in web admin / backfill) is preserved.
-      ...(isEdit ? {} : { vatRate: 0 }),
+      // Empty = "use store default" (null); otherwise the chosen per-product rate (0/6/12).
+      vatRate: formData.vatRate === "" ? null : parseFloat(formData.vatRate),
     };
 
     let success = false;
@@ -603,12 +693,25 @@ export function ProductForm({
               <Label>
                 {t("products.mxik")} <Req>*</Req>
               </Label>
-              <Input
-                value={formData.mxik}
-                placeholder="00000000000000000"
-                onChange={(e) => handleChange("mxik", e.target.value)}
-                required
-              />
+              <div style={{ display: "flex", gap: "8px" }}>
+                <Input
+                  value={formData.mxik}
+                  placeholder="00000000000000000"
+                  onChange={(e) => handleChange("mxik", e.target.value)}
+                  required
+                  style={{ flex: 1 }}
+                />
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="small"
+                  onClick={() => setShowMxikPicker(true)}
+                  title={t("products.searchMxik")}
+                  style={{ flexShrink: 0 }}
+                >
+                  <Search size={16} />
+                </Button>
+              </div>
             </FormGroup>
             {mxikPackages.length > 0 && (
               <FormGroup>
@@ -625,6 +728,19 @@ export function ProductForm({
                 </Select>
               </FormGroup>
             )}
+            <FormGroup>
+              <Label>{t("products.vatRate", "Ставка НДС, %")}</Label>
+              <Select
+                value={formData.vatRate}
+                onChange={(e) => handleChange("vatRate", e.target.value)}
+                title={t("products.vatRateHint", "Пусто — использовать ставку по умолчанию")}
+              >
+                <option value="">{t("products.vatRateHint", "По умолчанию")}</option>
+                <option value="0">0.00%</option>
+                <option value="6">6.00%</option>
+                <option value="12">12.00%</option>
+              </Select>
+            </FormGroup>
             <FormGroup>
               <Label>
                 {t("products.barcode")} <Req>*</Req>
@@ -1222,6 +1338,68 @@ export function ProductForm({
           onClose={() => setShowCategoryModal(false)}
           onCategoryChanged={loadCategories}
         />
+      )}
+
+      {showMxikPicker && (
+        <Modal
+          title={t("products.searchMxik")}
+          onClose={() => {
+            setShowMxikPicker(false);
+            setMxikPickerQuery("");
+            setMxikPickerResults([]);
+            setMxikPickerTotal(0);
+            setMxikPickerPage(0);
+          }}
+          width="560px"
+        >
+          <Input
+            autoFocus
+            value={mxikPickerQuery}
+            placeholder={t("products.mxikPickerPlaceholder")}
+            onChange={(e) => setMxikPickerQuery(e.target.value)}
+          />
+          {mxikPickerLoading && <Spinner centered size={24} />}
+          {!mxikPickerLoading &&
+            mxikPickerQuery.trim().length >= 2 &&
+            mxikPickerResults.length === 0 && (
+              <div style={{ padding: "12px", textAlign: "center", opacity: 0.6, fontSize: 13 }}>
+                {t("products.noMxikResults")}
+              </div>
+            )}
+          {mxikPickerResults.length > 0 && (
+            <>
+              <PickerList>
+                {mxikPickerResults.map((entry, i) => (
+                  <PickerItem
+                    key={`${entry.mxikCode}-${i}`}
+                    onClick={() => handlePickerSelect(entry)}
+                  >
+                    <PickerItemName>{entry.mxikName}</PickerItemName>
+                    <PickerItemMeta>
+                      {entry.className} · {entry.mxikCode}
+                      {entry.internationalCode ? ` · ${entry.internationalCode}` : ""}
+                    </PickerItemMeta>
+                  </PickerItem>
+                ))}
+              </PickerList>
+              {mxikPickerResults.length < mxikPickerTotal && (
+                <div style={{ display: "flex", justifyContent: "center", paddingTop: 8 }}>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="small"
+                    onClick={handleMxikLoadMore}
+                    disabled={mxikLoadingMore}
+                  >
+                    {mxikLoadingMore
+                      ? <Spinner size={14} />
+                      : `${t("common.load")} ${Math.min(10, mxikPickerTotal - mxikPickerResults.length)}`}
+                  </Button>
+                </div>
+              )}
+            </>
+          )}
+        </Modal>
       )}
     </>
   );
