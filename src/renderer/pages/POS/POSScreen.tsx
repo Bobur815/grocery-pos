@@ -318,6 +318,44 @@ export function POSScreen() {
 
   const [showSmenaModal, setShowSmenaModal] = useState(false);
 
+  // ── Scan input buffering ────────────────────────────────────────────────────
+  // A barcode/QR scanner is an HID keyboard: a long DataMatrix marking code (~30–90
+  // chars) arrives as a rapid keystroke burst. Accumulating each char into React state
+  // re-rendered this whole screen per character. Instead, `barcodeRef` is the source of
+  // truth (always current, no stale closure), and visible `barcode` state is synced once
+  // per animation frame during a burst — collapsing dozens of re-renders into a few.
+  const barcodeRef = useRef("");
+  const flushRafRef = useRef<number | null>(null);
+
+  const flushBarcode = useCallback(() => {
+    flushRafRef.current = null;
+    setBarcode(barcodeRef.current);
+  }, []);
+
+  // Update the barcode buffer. Coalesced by default (scanner bursts); pass immediate=true
+  // for human-speed edits (backspace, on-screen keypad, resets) so they show instantly.
+  const writeBarcode = useCallback(
+    (value: string, immediate = false) => {
+      barcodeRef.current = value;
+      if (immediate) {
+        if (flushRafRef.current != null) {
+          cancelAnimationFrame(flushRafRef.current);
+          flushRafRef.current = null;
+        }
+        setBarcode(value);
+      } else if (flushRafRef.current == null) {
+        flushRafRef.current = requestAnimationFrame(flushBarcode);
+      }
+    },
+    [flushBarcode],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (flushRafRef.current != null) cancelAnimationFrame(flushRafRef.current);
+    };
+  }, []);
+
   const checkSmena = useCallback(async (): Promise<boolean> => {
     try {
       const s = await window.electronAPI.smena.getCurrent();
@@ -441,12 +479,12 @@ export function POSScreen() {
 
   // Reset local input state when switching tabs
   useEffect(() => {
-    setBarcode("");
+    writeBarcode("", true);
     setQuantity("1");
     setId("");
     setInputMode("barcode");
     setError("");
-  }, [activeTabId]);
+  }, [activeTabId, writeBarcode]);
 
   const handleIdSubmit = useCallback(async () => {
     if (!id.trim()) return;
@@ -486,32 +524,38 @@ export function POSScreen() {
         }
 
         setId("");
-        setBarcode("");
+        writeBarcode("", true);
         setQuantity("1");
         setInputMode("barcode");
         setError("");
         addProductToCart(product, qty);
       } else {
-        setBarcode("");
+        writeBarcode("", true);
         setId("");
         setQuantity("1");
         setError(t("products.noResults"));
       }
     } catch (err) {
       console.error("Error looking up product by ID:", err);
-      setBarcode("");
+      writeBarcode("", true);
       setId("");
       setQuantity("1");
       setError(t("products.noResults"));
     }
-  }, [id, quantity, getById, addProductToCart, t, i18n.language]);
+  }, [id, quantity, getById, addProductToCart, t, i18n.language, writeBarcode]);
 
   const handleBarcodeSubmit = useCallback(async () => {
     if (inputMode === "id") {
       return handleIdSubmit();
     }
 
-    const rawValue = barcode.trim();
+    // Read from the buffer (source of truth) — the visible `barcode` state may still be a
+    // frame behind at the end of a scan burst. Cancel any pending coalesced flush.
+    if (flushRafRef.current != null) {
+      cancelAnimationFrame(flushRafRef.current);
+      flushRafRef.current = null;
+    }
+    const rawValue = barcodeRef.current.trim();
 
     if (!rawValue) {
       setError(t("pos.enterBarcode"));
@@ -538,7 +582,7 @@ export function POSScreen() {
       : rawValue;
 
     const resetInputs = () => {
-      setBarcode("");
+      writeBarcode("", true);
       setQuantity("1");
       setInputMode("barcode");
       setError("");
@@ -590,7 +634,7 @@ export function POSScreen() {
           // D2–D7 = SQLite product ID, D8–D11 = weight (kg × 1000)
           const rongtaParsed = parseWeightBarcode(barcodeValue);
           if (!rongtaParsed) {
-            setBarcode("");
+            writeBarcode("", true);
             setId("");
             setQuantity("1");
             setError(t("products.noResults"));
@@ -598,7 +642,7 @@ export function POSScreen() {
           }
 
           if (rongtaParsed.weight <= 0) {
-            setBarcode("");
+            writeBarcode("", true);
             setId("");
             setQuantity("1");
             setError(t("pos.zeroWeight"));
@@ -611,7 +655,7 @@ export function POSScreen() {
 
           if (product) {
             if (!product.isActive) {
-              setBarcode("");
+              writeBarcode("", true);
               setId("");
               setQuantity("1");
               setError(
@@ -623,7 +667,7 @@ export function POSScreen() {
               return;
             }
             if (rongtaParsed.weight > product.stock) {
-              setBarcode("");
+              writeBarcode("", true);
               setId("");
               setQuantity("1");
               setError(
@@ -652,7 +696,7 @@ export function POSScreen() {
               `${productNameForCart} — ${rongtaParsed.weightDisplay} — ${Math.round(Number(product.price) * rongtaParsed.weight).toLocaleString("ru-RU")} сум`,
             );
           } else {
-            setBarcode("");
+            writeBarcode("", true);
             setId("");
             setQuantity("1");
             setError(t("pos.pluNotFound", { plu: rongtaParsed.productId }));
@@ -688,7 +732,7 @@ export function POSScreen() {
               (i) => i.markingCode === normalizedNoGS,
             );
             if (alreadyInCart) {
-              setBarcode("");
+              writeBarcode("", true);
               setError(t("pos.markingCodeInCart"));
               return;
             }
@@ -706,7 +750,7 @@ export function POSScreen() {
                   const when = checkResult.soldAt
                     ? new Date(checkResult.soldAt).toLocaleString("ru-RU")
                     : "";
-                  setBarcode("");
+                  writeBarcode("", true);
                   setError(
                     t("pos.markingCodeAlreadySold", {
                       when,
@@ -741,7 +785,7 @@ export function POSScreen() {
           // DataMatrix QR inputs are longer and non-numeric — those pass through.
           const isPlainBarcode = /^\d{8}$|^\d{12}$|^\d{13}$/.test(rawValue);
           if (isPlainBarcode && groupCodes.includes("022")) {
-            setBarcode("");
+            writeBarcode("", true);
             setError(t("pos.qrOnlyProduct"));
             return;
           }
@@ -750,7 +794,7 @@ export function POSScreen() {
           resetInputs();
         }
       } else {
-        setBarcode("");
+        writeBarcode("", true);
         setId("");
         setQuantity("1");
         setError(t("products.noResults"));
@@ -764,7 +808,6 @@ export function POSScreen() {
     }
   }, [
     inputMode,
-    barcode,
     quantity,
     searchByBarcode,
     addProductToCart,
@@ -774,6 +817,7 @@ export function POSScreen() {
     handleIdSubmit,
     i18n.language,
     toast,
+    writeBarcode,
   ]);
 
   const handleQuickPay = useCallback(
@@ -872,7 +916,7 @@ export function POSScreen() {
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
         if (inputMode === "barcode") {
-          setBarcode((prev) => prev + e.key);
+          writeBarcode(barcodeRef.current + e.key);
         } else if (inputMode === "id") {
           setId((prev) => prev + e.key);
         } else {
@@ -891,14 +935,14 @@ export function POSScreen() {
         !e.metaKey
       ) {
         e.preventDefault();
-        setBarcode((prev) => prev + e.key);
+        writeBarcode(barcodeRef.current + e.key);
         setError("");
       }
       // Backspace
       else if (e.key === "Backspace") {
         e.preventDefault();
         if (inputMode === "barcode") {
-          setBarcode((prev) => prev.slice(0, -1));
+          writeBarcode(barcodeRef.current.slice(0, -1), true);
         } else if (inputMode === "id") {
           setId((prev) => prev.slice(0, -1));
         } else {
@@ -953,14 +997,17 @@ export function POSScreen() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
+    // `barcode` is intentionally NOT a dependency — the handler appends via the barcodeRef
+    // buffer (writeBarcode), so it never needs the latest `barcode` value. This keeps the
+    // listener mounted across a scan burst instead of re-subscribing on every keystroke.
   }, [
     inputMode,
-    barcode,
     quantity,
     showCheckout,
     showSmenaModal,
     handleBarcodeSubmit,
     handleQuickPay,
+    writeBarcode,
   ]);
 
   // When the VCR prints the fiscal receipt itself, skip posgro's own auto-print.
@@ -980,7 +1027,7 @@ export function POSScreen() {
 
   const handleNumberClick = (num: string) => {
     if (inputMode === "barcode") {
-      setBarcode((prev) => prev + num);
+      writeBarcode(barcodeRef.current + num, true);
     } else if (inputMode === "id") {
       setId((prev) => prev + num);
     } else {
@@ -991,7 +1038,7 @@ export function POSScreen() {
 
   const handleBackspace = () => {
     if (inputMode === "barcode") {
-      setBarcode((prev) => prev.slice(0, -1));
+      writeBarcode(barcodeRef.current.slice(0, -1), true);
     } else if (inputMode === "id") {
       setId((prev) => prev.slice(0, -1));
     } else {
@@ -1001,7 +1048,7 @@ export function POSScreen() {
 
   const handleClear = () => {
     if (inputMode === "barcode") {
-      setBarcode("");
+      writeBarcode("", true);
     } else if (inputMode === "id") {
       setId("");
     } else {
