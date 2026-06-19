@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { Modal } from "../../components/common/Modal";
@@ -24,11 +24,19 @@ interface CatalogProps {
 // onSelect/onClose props it won't re-render when POSScreen re-renders (e.g. during a scan burst).
 function CatalogComponent({ onSelect, onClose }: CatalogProps) {
   const { t } = useTranslation();
+  // Close the modal as soon as a product is picked (single-select flow).
+  const handleSelect = useCallback(
+    (product: Product) => {
+      onSelect(product);
+      onClose();
+    },
+    [onSelect, onClose],
+  );
   return (
     <Modal title={t("pos.catalog", "Каталог")} onClose={onClose} width="900px">
       <CatalogBody>
         {/* Keyboard z-index above the Modal overlay (1000) so it isn't hidden behind it. */}
-        <ProductSearch onSelect={onSelect} keyboardZIndex={1100} />
+        <ProductSearch onSelect={handleSelect} keyboardZIndex={1100} />
       </CatalogBody>
     </Modal>
   );
