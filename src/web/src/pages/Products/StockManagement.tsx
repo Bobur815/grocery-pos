@@ -21,6 +21,7 @@ import {
   Camera,
   ChevronDown,
   ChevronUp,
+  ListFilter,
   ScanLine,
   SendHorizontal,
   X,
@@ -445,7 +446,7 @@ export function StockManagement() {
             style={{ padding: "9px 12px" }}
             onClick={() => setIsFilterOpen(!isFilterOpen)}
           >
-            {t("filters.filters")}{" "}
+            <ListFilter />{" "}
             {isFilterOpen ? <ChevronUp /> : <ChevronDown />}
           </Button>
         </SearchWrapper>

@@ -61,8 +61,8 @@ const SearchRow = styled.div`
 
 const ProductsGrid = styled.div`
   flex: 1;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
   gap: 4px;
   overflow-y: auto;
   padding: ${({ theme }) => theme.spacing.sm};
@@ -171,12 +171,7 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
   }, [getTopSelling]);
 
   const hasActiveFilters =
-    filters.categoryId ||
-    filters.priceMin !== undefined ||
-    filters.priceMax !== undefined ||
-    (filters.availability && filters.availability !== "all") ||
-    (filters.unit && filters.unit !== "all") ||
-    (filters.promotionStatus && filters.promotionStatus !== "all");
+    filters.categoryId;
 
   const debouncedSearch = useMemo(
     () =>
@@ -247,6 +242,7 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder={t("common.search")}
               style={{ padding: "10px 16px", paddingRight: "60px" }}
+              autoFocus
             />
             <InputControls>
               {searchQuery.length > 0 && (
@@ -270,23 +266,7 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
               </KbToggle>
             </InputControls>
           </SearchInputWrapper>
-          <Button size="medium" onClick={() => setIsFilterOpen(!isFilterOpen)}>
-            <ListFilterPlus />
-            {isFilterOpen ? <ChevronUp /> : <ChevronDown />}
-          </Button>
         </SearchRow>
-        {isFilterOpen && (
-          <FilterDropdown>
-            <ProductFilters
-              filters={filters}
-              onChange={setFilters}
-              categories={categories as any}
-              suppliers={suppliers}
-              compact
-              isOpen={true}
-            />
-          </FilterDropdown>
-        )}
       </SearchHeader>
 
       <ProductsGrid>

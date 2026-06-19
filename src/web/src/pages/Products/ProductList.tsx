@@ -1,5 +1,11 @@
 // src/web/src/pages/Products/ProductList.tsx
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ProductForm } from "./ProductForm";
@@ -36,9 +42,14 @@ import {
   MobileCardList,
   DesktopOnly,
 } from "../../components/common/MobileCard";
-import { mxik as mxikApi, products as productsApi, aslBelgisi } from "../../api/client";
+import {
+  mxik as mxikApi,
+  products as productsApi,
+  aslBelgisi,
+} from "../../api/client";
 import { BarcodeScannerModal } from "../../components/common/BarcodeScannerModal";
 import { useToast } from "@context/ToastContext";
+import { ListFilter } from "lucide-react";
 
 const pulse = keyframes`
   0% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb, 59, 130, 246), 0.5); }
@@ -156,6 +167,32 @@ const Filters = styled.div`
   margin-bottom: ${({ theme }) => theme.spacing.md};
 `;
 
+const ClearButton = styled.button`
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: ${({ theme }) => theme.colors.textSecondary || "#666"};
+  transition: color 0.2s ease;
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.primary || "#000"};
+  }
+
+  &:focus {
+    outline: 2px solid ${({ theme }) => theme.colors.primary};
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+`;
+
 export function ProductList() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -211,7 +248,9 @@ export function ProductList() {
     expiryDate?: string;
     packageCode?: string;
   } | null>(null);
-  const [fabArrivalProductId, setFabArrivalProductId] = useState<string | null>(null);
+  const [fabArrivalProductId, setFabArrivalProductId] = useState<string | null>(
+    null,
+  );
 
   const reloadWithFilters = useCallback(() => {
     const params: ProductFilterParams = { ...filters };
@@ -250,7 +289,15 @@ export function ProductList() {
     }
 
     // 2. Not in DB — build initial data for new product form
-    const initial: { barcode?: string; mxik?: string; nameRu?: string; nameUz?: string; productionDate?: string; expiryDate?: string; packageCode?: string } = {};
+    const initial: {
+      barcode?: string;
+      mxik?: string;
+      nameRu?: string;
+      nameUz?: string;
+      productionDate?: string;
+      expiryDate?: string;
+      packageCode?: string;
+    } = {};
 
     if (type === "datamatrix") {
       if (barcode) initial.barcode = barcode;
@@ -261,7 +308,9 @@ export function ProductList() {
           if (info.expirationDate) initial.expiryDate = info.expirationDate;
           const MULTI_PACK_TYPES = ["GROUP", "BOX_LV_1", "BOX_LV_2"];
           if (info.packageType && MULTI_PACK_TYPES.includes(info.packageType)) {
-            toast.error(`Multi-pack: ${info.packageType}. Check quantity before saving.`);
+            toast.error(
+              `Multi-pack: ${info.packageType}. Check quantity before saving.`,
+            );
           }
         }
       } catch {
@@ -303,15 +352,25 @@ export function ProductList() {
     setShowMxikConfirm(false);
     const missing = products.filter((p) => !p.mxik);
     mxikAbortRef.current = false;
-    setMxikProgress({ running: true, total: missing.length, done: 0, found: 0, notFound: 0, errors: 0, currentName: "" });
+    setMxikProgress({
+      running: true,
+      total: missing.length,
+      done: 0,
+      found: 0,
+      notFound: 0,
+      errors: 0,
+      currentName: "",
+    });
 
-    let found = 0, notFound = 0, errors = 0;
+    let found = 0,
+      notFound = 0,
+      errors = 0;
 
     for (let i = 0; i < missing.length; i++) {
       if (mxikAbortRef.current) break;
       const product = missing[i];
       const name = i18n.language === "uz" ? product.nameUz : product.nameRu;
-      setMxikProgress((p) => p ? { ...p, done: i, currentName: name } : p);
+      setMxikProgress((p) => (p ? { ...p, done: i, currentName: name } : p));
 
       try {
         const result = await mxikApi.searchByBarcode(product.barcode);
@@ -321,13 +380,26 @@ export function ProductList() {
         notFound++;
       }
 
-      setMxikProgress((p) => p ? { ...p, done: i + 1, found, notFound, errors } : p);
+      setMxikProgress((p) =>
+        p ? { ...p, done: i + 1, found, notFound, errors } : p,
+      );
 
       // Small delay to avoid rate-limiting tasnif.soliq.uz
       await new Promise((r) => setTimeout(r, 300));
     }
 
-    setMxikProgress((p) => p ? { ...p, running: false, done: missing.length, found, notFound, errors } : p);
+    setMxikProgress((p) =>
+      p
+        ? {
+            ...p,
+            running: false,
+            done: missing.length,
+            found,
+            notFound,
+            errors,
+          }
+        : p,
+    );
     reloadWithFilters();
   }
 
@@ -406,7 +478,11 @@ export function ProductList() {
       header: "#",
       render: (_: Product, index: number) => pageOffset + index + 1,
     },
-    { key: "id", header: t("pos.id"), render: (p: Product) => p.storeProductCode ?? p.id },
+    {
+      key: "id",
+      header: t("pos.id"),
+      render: (p: Product) => p.storeProductCode ?? p.id,
+    },
     {
       key: "mxik",
       header: "MXIK",
@@ -414,7 +490,14 @@ export function ProductList() {
         product.mxik ? (
           product.mxik
         ) : (
-          <span style={{ color: "#f44336", display: "inline-flex", alignItems: "center", gap: 4 }}>
+          <span
+            style={{
+              color: "#f44336",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 4,
+            }}
+          >
             <AlertTriangle size={14} /> {t("products.noMxik", "нет")}
           </span>
         ),
@@ -522,7 +605,7 @@ export function ProductList() {
     <Container>
       <Header>
         <Title>{t("products.title")}</Title>
-        {isAdmin && (
+        {/* {isAdmin && (
           <Button
             variant="secondary"
             size="small"
@@ -532,7 +615,26 @@ export function ProductList() {
             <Zap size={16} />
             {t("products.autoFillMxik")} ({t("products.autoFillMxikMissing", { count: products.filter((p) => !p.mxik).length })})
           </Button>
-        )}
+        )} */}
+        <Button
+          style={{
+            padding: "5px 12px",
+            flexShrink: 0,
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+          }}
+          size="small"
+          variant={missingMxikOnly ? "primary" : "secondary"}
+          tooltip={t(
+            "products.missingMxikHint",
+            "Товары без MXIK не фискализируются",
+          )}
+          onClick={() => setMissingMxikOnly((prev) => !prev)}
+        >
+          <AlertTriangle size={16} /> {t("products.missingMxik", "Без MXIK")}
+          {missingMxikCount > 0 ? ` (${missingMxikCount})` : ""}
+        </Button>
       </Header>
       {isAdmin && (
         <FAB
@@ -563,21 +665,9 @@ export function ProductList() {
             onChange={(e) => setSearchQuery(e.target.value)}
           />
           {searchQuery.length > 0 && (
-            <button
-              onClick={() => setSearchQuery("")}
-              style={{
-                position: "absolute",
-                right: "8px",
-                top: "50%",
-                transform: "translateY(-50%)",
-                background: "none",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px",
-              }}
-            >
+            <ClearButton onClick={() => setSearchQuery("")}>
               <X size={16} />
-            </button>
+            </ClearButton>
           )}
         </div>
 
@@ -586,19 +676,7 @@ export function ProductList() {
           size="small"
           onClick={() => setIsFilterOpen(!isFilterOpen)}
         >
-          {t("filters.filters")}{" "}
-          {isFilterOpen ? <ChevronUp /> : <ChevronDown />}
-        </Button>
-
-        <Button
-          style={{ padding: "0px 12px", flexShrink: 0, display: "flex", alignItems: "center", gap: 6 }}
-          size="small"
-          variant={missingMxikOnly ? "primary" : "secondary"}
-          tooltip={t("products.missingMxikHint", "Товары без MXIK не фискализируются")}
-          onClick={() => setMissingMxikOnly((prev) => !prev)}
-        >
-          <AlertTriangle size={16} /> {t("products.missingMxik", "Без MXIK")}
-          {missingMxikCount > 0 ? ` (${missingMxikCount})` : ""}
+          <ListFilter /> {isFilterOpen ? <ChevronUp /> : <ChevronDown />}
         </Button>
       </Filters>
 
@@ -740,7 +818,10 @@ export function ProductList() {
       {showProductForm && (
         <ProductForm
           initialData={fabInitialData ?? undefined}
-          onClose={() => { setShowProductForm(false); setFabInitialData(null); }}
+          onClose={() => {
+            setShowProductForm(false);
+            setFabInitialData(null);
+          }}
           onSuccess={() => {
             setShowProductForm(false);
             setFabInitialData(null);
@@ -775,7 +856,9 @@ export function ProductList() {
       {showMxikConfirm && (
         <ConfirmDialog
           title={t("products.autoFillMxik")}
-          message={t("products.autoFillMxikConfirm", { count: products.filter((p) => !p.mxik).length })}
+          message={t("products.autoFillMxikConfirm", {
+            count: products.filter((p) => !p.mxik).length,
+          })}
           confirmLabel={t("products.autoFillMxik")}
           cancelLabel={t("common.cancel")}
           variant="primary"
@@ -788,34 +871,49 @@ export function ProductList() {
         <ProgressOverlay>
           <ProgressCard>
             <h3 style={{ margin: 0 }}>{t("products.autoFillMxikProgress")}</h3>
-            <ProgressBar $pct={Math.round((mxikProgress.done / mxikProgress.total) * 100)} />
+            <ProgressBar
+              $pct={Math.round((mxikProgress.done / mxikProgress.total) * 100)}
+            />
             <div style={{ fontSize: 14, color: "var(--text-secondary, #666)" }}>
               {mxikProgress.running
-                ? t("products.autoFillMxikProcessing", { name: mxikProgress.currentName })
+                ? t("products.autoFillMxikProcessing", {
+                    name: mxikProgress.currentName,
+                  })
                 : t("products.autoFillMxikDone")}
             </div>
             <div style={{ display: "flex", gap: 24, fontSize: 14 }}>
-              <span>{mxikProgress.done} / {mxikProgress.total}</span>
-              <span style={{ color: "#4caf50" }}>✓ {mxikProgress.found} {t("products.autoFillMxikFound")}</span>
-              <span style={{ color: "#f44336" }}>✗ {mxikProgress.notFound} {t("products.autoFillMxikNotFound")}</span>
+              <span>
+                {mxikProgress.done} / {mxikProgress.total}
+              </span>
+              <span style={{ color: "#4caf50" }}>
+                ✓ {mxikProgress.found} {t("products.autoFillMxikFound")}
+              </span>
+              <span style={{ color: "#f44336" }}>
+                ✗ {mxikProgress.notFound} {t("products.autoFillMxikNotFound")}
+              </span>
             </div>
             {mxikProgress.running ? (
               <Button
                 variant="danger"
                 size="small"
-                onClick={() => { mxikAbortRef.current = true; }}
+                onClick={() => {
+                  mxikAbortRef.current = true;
+                }}
               >
                 {t("products.autoFillMxikStop")}
               </Button>
             ) : (
-              <Button variant="primary" size="small" onClick={() => setMxikProgress(null)}>
+              <Button
+                variant="primary"
+                size="small"
+                onClick={() => setMxikProgress(null)}
+              >
                 {t("common.close")}
               </Button>
             )}
           </ProgressCard>
         </ProgressOverlay>
       )}
-
     </Container>
   );
 }
