@@ -32,6 +32,9 @@ function applyClientFilters(products: Product[], filters: ProductFilterParams): 
         p.barcode.includes(q),
     );
   }
+  if (filters.active !== undefined) {
+    result = result.filter((p) => p.isActive === filters.active);
+  }
   if (filters.categoryId) {
     result = result.filter((p) => p.categoryId === filters.categoryId);
   }
@@ -93,8 +96,8 @@ export function useProducts() {
     setError(null);
 
     try {
-      // Fetch all active products from server (server handles active filter only)
-      const raw = await productsApi.getAll({ active: true } as Record<string, unknown>);
+      // Fetch all products (active + inactive); status is filtered client-side.
+      const raw = await productsApi.getAll();
       const allProducts = (raw as any[]).map(transformProduct);
       // Apply remaining filters client-side
       const filtered = filters ? applyClientFilters(allProducts, filters) : allProducts;
@@ -129,7 +132,7 @@ export function useProducts() {
     setLoading(true);
 
     try {
-      const raw = await productsApi.getAll({ active: true } as Record<string, unknown>);
+      const raw = await productsApi.getAll();
       const allProducts = (raw as any[]).map(transformProduct);
       const filtered = applyClientFilters(allProducts, { ...extraFilters, query });
       setProducts(filtered);

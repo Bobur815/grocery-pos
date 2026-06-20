@@ -17,7 +17,7 @@ import { Pagination } from "@components/common/Pagination";
 import { usePagination } from "../../hooks/usePagination";
 import { Button } from "@components/common/Button";
 import { Input } from "@components/common/Input";
-import { ConfirmDialog } from "@components/common/ConfirmDialog";
+import { Select } from "@components/common/Select";
 import { ProductFilters } from "@components/products/ProductFilters";
 import { Product, ProductFilterParams } from "@shared/types";
 import {
@@ -30,7 +30,6 @@ import {
   X,
   Eye,
   Plus,
-  Zap,
   ScanBarcode,
 } from "lucide-react";
 import { keyframes } from "styled-components";
@@ -95,42 +94,6 @@ const MobileSentinel = styled.div`
 `;
 
 const MOBILE_PAGE_SIZE = 20;
-
-const ProgressOverlay = styled.div`
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-`;
-
-const ProgressCard = styled.div`
-  background: ${({ theme }) => theme.colors.surface};
-  border-radius: ${({ theme }) => theme.borderRadius};
-  padding: 32px 40px;
-  min-width: 360px;
-  max-width: 480px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-`;
-
-const ProgressBar = styled.div<{ $pct: number }>`
-  height: 8px;
-  border-radius: 4px;
-  background: ${({ theme }) => theme.colors.border};
-  overflow: hidden;
-  &::after {
-    content: "";
-    display: block;
-    height: 100%;
-    width: ${({ $pct }) => $pct}%;
-    background: ${({ theme }) => theme.colors.primary};
-    transition: width 0.3s ease;
-  }
-`;
 
 const Container = styled.div`
   display: flex;
@@ -209,7 +172,8 @@ export function ProductList() {
     isLoading,
   } = useProducts();
   const [searchQuery, setSearchQuery] = useState("");
-  const [filters, setFilters] = useState<ProductFilterParams>({});
+  // Default to active products; the status select below can reveal inactive / all.
+  const [filters, setFilters] = useState<ProductFilterParams>({ active: true });
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [missingMxikOnly, setMissingMxikOnly] = useState(false);
   const [showProductForm, setShowProductForm] = useState(false);
@@ -227,17 +191,6 @@ export function ProductList() {
     [products, missingMxikOnly],
   );
 
-  const [mxikProgress, setMxikProgress] = useState<{
-    running: boolean;
-    total: number;
-    done: number;
-    found: number;
-    notFound: number;
-    errors: number;
-    currentName: string;
-  } | null>(null);
-  const mxikAbortRef = useRef(false);
-  const [showMxikConfirm, setShowMxikConfirm] = useState(false);
   const [showFabScanner, setShowFabScanner] = useState(false);
   const [fabInitialData, setFabInitialData] = useState<{
     barcode?: string;
@@ -337,70 +290,6 @@ export function ProductList() {
 
     setFabInitialData(initial);
     setShowProductForm(true);
-  }
-
-  function handleAutoFillMxik() {
-    const missing = products.filter((p) => !p.mxik);
-    if (missing.length === 0) {
-      alert(t("products.autoFillMxikAllHave"));
-      return;
-    }
-    setShowMxikConfirm(true);
-  }
-
-  async function startAutoFillMxik() {
-    setShowMxikConfirm(false);
-    const missing = products.filter((p) => !p.mxik);
-    mxikAbortRef.current = false;
-    setMxikProgress({
-      running: true,
-      total: missing.length,
-      done: 0,
-      found: 0,
-      notFound: 0,
-      errors: 0,
-      currentName: "",
-    });
-
-    let found = 0,
-      notFound = 0,
-      errors = 0;
-
-    for (let i = 0; i < missing.length; i++) {
-      if (mxikAbortRef.current) break;
-      const product = missing[i];
-      const name = i18n.language === "uz" ? product.nameUz : product.nameRu;
-      setMxikProgress((p) => (p ? { ...p, done: i, currentName: name } : p));
-
-      try {
-        const result = await mxikApi.searchByBarcode(product.barcode);
-        await productsApi.update(String(product.id), { mxik: result.code });
-        found++;
-      } catch {
-        notFound++;
-      }
-
-      setMxikProgress((p) =>
-        p ? { ...p, done: i + 1, found, notFound, errors } : p,
-      );
-
-      // Small delay to avoid rate-limiting tasnif.soliq.uz
-      await new Promise((r) => setTimeout(r, 300));
-    }
-
-    setMxikProgress((p) =>
-      p
-        ? {
-            ...p,
-            running: false,
-            done: missing.length,
-            found,
-            notFound,
-            errors,
-          }
-        : p,
-    );
-    reloadWithFilters();
   }
 
   const [mobileCount, setMobileCount] = useState(MOBILE_PAGE_SIZE);
@@ -520,10 +409,23 @@ export function ProductList() {
       render: (product: Product) => formatCurrency(product.price),
     },
     {
-      key: "vatRate",
-      header: t("products.vatRate", "НДС, %"),
-      render: (product: Product) =>
-        product.vatRate != null ? `${product.vatRate.toFixed(2)}%` : "—",
+      key: "active",
+      header: t("products.status"),
+      render: (product: Product) => (
+        <span
+          style={{
+            display: "inline-block",
+            padding: "2px 8px",
+            borderRadius: 4,
+            fontSize: 12,
+            fontWeight: 500,
+            background: product.isActive ? "#4caf5020" : "#9e9e9e20",
+            color: product.isActive ? "#2e7d32" : "#757575",
+          }}
+        >
+          {product.isActive ? t("products.active") : t("products.inactive")}
+        </span>
+      ),
     },
     {
       key: "stock",
@@ -580,14 +482,16 @@ export function ProductList() {
           >
             <Edit size={18} />
           </Button>
-          <Button
-            variant="danger"
-            size="small"
-            tooltip={t("common.delete")}
-            onClick={() => handleDelete(product)}
-          >
-            <Trash size={18} />
-          </Button>
+          {product.isActive && (
+            <Button
+              variant="danger"
+              size="small"
+              tooltip={t("common.delete")}
+              onClick={() => handleDelete(product)}
+            >
+              <Trash size={18} />
+            </Button>
+          )}
           <Button
             variant="primary"
             size="small"
@@ -605,17 +509,6 @@ export function ProductList() {
     <Container>
       <Header>
         <Title>{t("products.title")}</Title>
-        {/* {isAdmin && (
-          <Button
-            variant="secondary"
-            size="small"
-            onClick={handleAutoFillMxik}
-            style={{ display: "flex", alignItems: "center", gap: 6 }}
-          >
-            <Zap size={16} />
-            {t("products.autoFillMxik")} ({t("products.autoFillMxikMissing", { count: products.filter((p) => !p.mxik).length })})
-          </Button>
-        )} */}
         <Button
           style={{
             padding: "5px 12px",
@@ -670,6 +563,30 @@ export function ProductList() {
             </ClearButton>
           )}
         </div>
+
+        <Select
+          selectSize="small"
+          style={{ padding: "8px", flexShrink: 0, minWidth: 130 }}
+          options={[
+            { value: "active", label: t("products.active") },
+            { value: "inactive", label: t("products.inactive") },
+            { value: "all", label: t("filters.all") },
+          ]}
+          value={
+            filters.active === true
+              ? "active"
+              : filters.active === false
+                ? "inactive"
+                : "all"
+          }
+          onChange={(e) => {
+            const v = e.target.value;
+            setFilters((prev) => ({
+              ...prev,
+              active: v === "active" ? true : v === "inactive" ? false : undefined,
+            }));
+          }}
+        />
 
         <Button
           style={{ padding: "0px 12px", flexShrink: 0 }}
@@ -748,6 +665,12 @@ export function ProductList() {
                   ? formatDate(product.expiryDate)
                   : "-",
               },
+              {
+                label: t("products.status"),
+                value: product.isActive
+                  ? t("products.active")
+                  : t("products.inactive"),
+              },
             ]}
             actions={
               isAdmin ? (
@@ -760,14 +683,16 @@ export function ProductList() {
                   >
                     <Edit size={16} />
                   </Button>
-                  <Button
-                    variant="danger"
-                    size="small"
-                    tooltip={t("common.delete")}
-                    onClick={() => handleDelete(product)}
-                  >
-                    <Trash size={16} />
-                  </Button>
+                  {product.isActive && (
+                    <Button
+                      variant="danger"
+                      size="small"
+                      tooltip={t("common.delete")}
+                      onClick={() => handleDelete(product)}
+                    >
+                      <Trash size={16} />
+                    </Button>
+                  )}
                   <Button
                     variant="primary"
                     size="small"
@@ -853,67 +778,6 @@ export function ProductList() {
         />
       )}
 
-      {showMxikConfirm && (
-        <ConfirmDialog
-          title={t("products.autoFillMxik")}
-          message={t("products.autoFillMxikConfirm", {
-            count: products.filter((p) => !p.mxik).length,
-          })}
-          confirmLabel={t("products.autoFillMxik")}
-          cancelLabel={t("common.cancel")}
-          variant="primary"
-          onConfirm={startAutoFillMxik}
-          onCancel={() => setShowMxikConfirm(false)}
-        />
-      )}
-
-      {mxikProgress && (
-        <ProgressOverlay>
-          <ProgressCard>
-            <h3 style={{ margin: 0 }}>{t("products.autoFillMxikProgress")}</h3>
-            <ProgressBar
-              $pct={Math.round((mxikProgress.done / mxikProgress.total) * 100)}
-            />
-            <div style={{ fontSize: 14, color: "var(--text-secondary, #666)" }}>
-              {mxikProgress.running
-                ? t("products.autoFillMxikProcessing", {
-                    name: mxikProgress.currentName,
-                  })
-                : t("products.autoFillMxikDone")}
-            </div>
-            <div style={{ display: "flex", gap: 24, fontSize: 14 }}>
-              <span>
-                {mxikProgress.done} / {mxikProgress.total}
-              </span>
-              <span style={{ color: "#4caf50" }}>
-                ✓ {mxikProgress.found} {t("products.autoFillMxikFound")}
-              </span>
-              <span style={{ color: "#f44336" }}>
-                ✗ {mxikProgress.notFound} {t("products.autoFillMxikNotFound")}
-              </span>
-            </div>
-            {mxikProgress.running ? (
-              <Button
-                variant="danger"
-                size="small"
-                onClick={() => {
-                  mxikAbortRef.current = true;
-                }}
-              >
-                {t("products.autoFillMxikStop")}
-              </Button>
-            ) : (
-              <Button
-                variant="primary"
-                size="small"
-                onClick={() => setMxikProgress(null)}
-              >
-                {t("common.close")}
-              </Button>
-            )}
-          </ProgressCard>
-        </ProgressOverlay>
-      )}
     </Container>
   );
 }
