@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CheckCircle, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle, XCircle, Keyboard, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../../components/common/Button';
+import { KbToggle } from '../../components/common/SearchControls';
+import { VirtualKeyboard } from '../../components/common/VirtualKeyboard';
 import { useToast } from '../../context/ToastContext';
 import type { FiscalConnectionResult, FiscalQueueStatus } from '@shared/types';
 
@@ -98,7 +100,7 @@ export function FiscalSettings() {
   const toast = useToast();
 
   const [enabled, setEnabled] = useState(false);
-  const [url, setUrl] = useState('http://localhost:8080');
+  const [url, setUrl] = useState('http://127.0.0.1:22298');
   const [login, setLogin] = useState('cassir');
   const [password, setPassword] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
@@ -113,8 +115,39 @@ export function FiscalSettings() {
   const [testResult, setTestResult] = useState<FiscalConnectionResult | null>(null);
   const [queue, setQueue] = useState<FiscalQueueStatus | null>(null);
 
-  useEffect(() => {
-    window.electronAPI.fiscal.getConfig().then((cfg) => {
+  // Config load state. The form must NOT show its editable defaults until the real config has
+  // loaded — otherwise a transient load failure would display defaults that, if saved, would
+  // clobber the stored url/login/password. Render a loading/error gate instead.
+  const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+
+  // VirtualKeyboard — writes to whichever text field is focused.
+  type TextField = 'url' | 'login' | 'password' | 'posId';
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [activeField, setActiveField] = useState<TextField | null>(null);
+
+  const fieldSetters: Record<TextField, React.Dispatch<React.SetStateAction<string>>> = {
+    url: setUrl,
+    login: setLogin,
+    password: setPassword,
+    posId: setPosId,
+  };
+
+  const handleVirtualKey = (key: string) => {
+    if (!activeField) return;
+    if (key === 'ENTER') return;
+    const setter = fieldSetters[activeField];
+    if (key === 'BACKSPACE') {
+      setter((prev) => prev.slice(0, -1));
+      return;
+    }
+    setter((prev) => prev + key);
+  };
+
+  const loadConfig = useCallback(async () => {
+    setLoadError(false);
+    try {
+      const cfg = await window.electronAPI.fiscal.getConfig();
       setEnabled(cfg.enabled);
       setUrl(cfg.url);
       setLogin(cfg.login);
@@ -124,9 +157,18 @@ export function FiscalSettings() {
       setPosId(cfg.posId);
       setVcrPrintsReceipt(cfg.vcrPrintsReceipt);
       setMarkingCodeCheck(cfg.markingCodeCheck);
-    }).catch(() => {});
-    window.electronAPI.fiscal.getStatus().then(setQueue).catch(() => {});
+      setLoaded(true);
+    } catch {
+      // Don't fall back to editable defaults — surface the error and let the user retry, so a
+      // transient failure can't be silently re-saved over the stored config.
+      setLoadError(true);
+    }
   }, []);
+
+  useEffect(() => {
+    loadConfig();
+    window.electronAPI.fiscal.getStatus().then(setQueue).catch(() => {});
+  }, [loadConfig]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -172,8 +214,40 @@ export function FiscalSettings() {
           <ArrowLeft size={20} />
         </Button>
         <Title>{t('fiscalSettings.title', 'Фискализация (REGOS:VCR)')}</Title>
+        {loaded && (
+          <KbToggle
+            type="button"
+            tabIndex={-1}
+            $active={keyboardOpen}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setKeyboardOpen((prev) => !prev)}
+            style={{ marginLeft: 'auto' }}
+          >
+            <Keyboard size={18} />
+            {keyboardOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </KbToggle>
+        )}
       </Header>
 
+      {!loaded ? (
+        <Card>
+          {loadError ? (
+            <>
+              <StatusLine>
+                <XCircle size={16} />
+                {t('fiscalSettings.loadError', 'Не удалось загрузить настройки фискализации')}
+              </StatusLine>
+              <ButtonRow>
+                <Button variant="secondary" onClick={loadConfig}>
+                  {t('common.retry', 'Повторить')}
+                </Button>
+              </ButtonRow>
+            </>
+          ) : (
+            <Muted>{t('common.loading', 'Загрузка...')}</Muted>
+          )}
+        </Card>
+      ) : (
       <Card>
         <Row>
           <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
@@ -182,12 +256,12 @@ export function FiscalSettings() {
 
         <Field>
           <Label>{t('fiscalSettings.url', 'Адрес виртуальной кассы')}</Label>
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://localhost:8080" />
+          <Input value={url} onChange={(e) => setUrl(e.target.value)} onFocus={() => setActiveField('url')} placeholder="http://127.0.0.1:22298" />
         </Field>
 
         <Field>
           <Label>{t('fiscalSettings.login', 'Логин кассира')}</Label>
-          <Input value={login} onChange={(e) => setLogin(e.target.value)} placeholder="cassir" />
+          <Input value={login} onChange={(e) => setLogin(e.target.value)} onFocus={() => setActiveField('login')} placeholder="cassir" />
         </Field>
 
         <Field>
@@ -196,6 +270,7 @@ export function FiscalSettings() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            onFocus={() => setActiveField('password')}
             placeholder={hasPassword ? '•••••••• (сохранён)' : ''}
           />
         </Field>
@@ -231,7 +306,7 @@ export function FiscalSettings() {
 
         <Field>
           <Label>{t('fiscalSettings.posId', 'ID кассы (pos_id)')}</Label>
-          <Input value={posId} onChange={(e) => setPosId(e.target.value)} />
+          <Input value={posId} onChange={(e) => setPosId(e.target.value)} onFocus={() => setActiveField('posId')} />
         </Field>
 
         <Row>
@@ -275,6 +350,7 @@ export function FiscalSettings() {
           )
         )}
       </Card>
+      )}
 
       {queue && (
         <Card>
@@ -285,6 +361,14 @@ export function FiscalSettings() {
             {t('fiscalSettings.failed', 'Ошибки')}: {queue.failed}
           </Muted>
         </Card>
+      )}
+
+      {keyboardOpen && (
+        <VirtualKeyboard
+          fixed
+          onKeyPress={handleVirtualKey}
+          onClose={() => setKeyboardOpen(false)}
+        />
       )}
     </Container>
   );

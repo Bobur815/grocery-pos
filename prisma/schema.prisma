@@ -44,7 +44,6 @@ model Store {
   auditLogs            AuditLog[]
   terminalHeartbeats   TerminalHeartbeat[]
   terminalLogs         TerminalLog[]
-  paynetReceipts       PaynetReceipt[]
   soldMarkingCodes     SoldMarkingCode[]
   pendingMarkingCodes  PendingMarkingCode[]
 
@@ -374,32 +373,6 @@ model SiteConfig {
   updatedAt DateTime @updatedAt @map("updated_at")
 
   @@map("site_config")
-}
-
-// ==================== PAYNET FISCAL RECEIPTS ====================
-
-model PaynetReceipt {
-  id            String   @id @default(cuid())
-  storeId       String   @map("store_id")
-  store         Store    @relation(fields: [storeId], references: [id])
-
-  ofdUrl        String   @map("ofd_url") @db.Text
-  receiptNumber String   @map("receipt_number") // `r` param from OFD URL
-  terminalCode  String   @map("terminal_code")  // `t` param
-  fiscalMark    String   @map("fiscal_mark")    // `s` param
-  issuedAt      DateTime @map("issued_at")       // parsed from `c` param (YYYYMMDDHHmmss)
-
-  amount        Decimal? @db.Decimal(12, 2)      // fetched from OFD page (null if parse failed)
-
-  integrated        Boolean   @default(false)
-  saleReceiptNumber String?   @map("sale_receipt_number")
-  integratedAt      DateTime? @map("integrated_at")
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@unique([storeId, receiptNumber])
-  @@index([storeId, integrated])
-  @@map("paynet_receipts")
 }
 
 // ==================== MARKING CODES (Group 022 unique QR tracking) ====================

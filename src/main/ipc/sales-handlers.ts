@@ -98,8 +98,6 @@ export function setupSalesHandlers(): void {
         terminalId: config.terminalId,
         smenaId: currentSmena.id,
         synced: false,
-        paynetOfdUrl: (data.paynetOfdUrl as string | undefined) || null,
-        paynetReceiptNumber: (data.paynetReceiptNumber as string | undefined) || null,
         items: {
           create: items,
         },
@@ -170,11 +168,11 @@ export function setupSalesHandlers(): void {
       },
     });
 
-    // REGOS:VCR fiscalization — "allow + fiscalize later". The sale is already saved;
-    // mark it PENDING (snapshotting any scanned marking labels), then attempt fiscalization
-    // and AWAIT it so the fiscal QR is persisted before the receipt prints. The sale is not
-    // blocked by fiscal failure: on error it stays PENDING/FAILED for the retry worker.
-    let finalSale = sale;
+    // REGOS:VCR fiscalization — "allow + fiscalize later". The sale is already saved; mark it
+    // PENDING (snapshotting any scanned marking labels) and fiscalize in the BACKGROUND so the
+    // cashier is NOT blocked on the OFD round-trip. The POS receipt is printed immediately
+    // (non-fiscal); the fiscal QR is persisted when the background fiscalization completes and
+    // is then available on reprint. On failure the sale stays PENDING/FAILED for the retry worker.
     try {
       if (await regosVcrService.isEnabled()) {
         const labels = (data.markingCodes as Array<{ barcode: string; label: string }> | undefined)
@@ -183,11 +181,10 @@ export function setupSalesHandlers(): void {
           where: { id: sale.id },
           data: { fiscalStatus: 'PENDING', regosLabels: labels.length ? JSON.stringify(labels) : null },
         });
-        await regosVcrService.fiscalizeSale(sale.id).catch((e) =>
+        // Fire-and-forget: kick the device immediately but do not await the OFD round-trip.
+        regosVcrService.fiscalizeSale(sale.id).catch((e) =>
           console.error('[fiscal] immediate fiscalize failed (will retry):', e instanceof Error ? e.message : e),
         );
-        // Re-read so the returned sale (and the subsequent receipt print) carry fiscal data.
-        finalSale = (await prisma.sale.findUnique({ where: { id: sale.id }, include: { items: true } })) ?? sale;
       } else {
         await prisma.sale.update({ where: { id: sale.id }, data: { fiscalStatus: 'DISABLED' } });
       }
@@ -208,7 +205,7 @@ export function setupSalesHandlers(): void {
       );
     }
 
-    return ipcSafe(finalSale);
+    return ipcSafe(sale);
   });
 
   ipcMain.handle('sales:getAll', async (_event, filters) => {

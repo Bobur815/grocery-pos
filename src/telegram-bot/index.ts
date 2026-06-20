@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
 import { PrismaClient } from '@prisma/client';
-import { fetchOfdAmount } from './ofd-fetcher';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -114,32 +113,6 @@ async function resolveIdentity(rawPhone: string): Promise<Omit<BotSession, 'lang
     if (supplier) return { phone, role: 'SUPPLIER', supplierId: supplier.id, storeId: supplier.storeId ?? '', name: supplier.nameRu };
   }
   return null;
-}
-
-async function savePaynetReceipt(storeId: string, ofdUrl: string) {
-  const url = new URL(ofdUrl);
-  const t = url.searchParams.get('t') ?? '';
-  const r = url.searchParams.get('r') ?? '';
-  const c = url.searchParams.get('c') ?? '';
-  const s = url.searchParams.get('s') ?? '';
-
-  if (!r || !s) throw new Error('Invalid OFD URL: missing r or s params');
-
-  const parsedIssuedAt = c.length >= 14
-    ? new Date(`${c.slice(0,4)}-${c.slice(4,6)}-${c.slice(6,8)}T${c.slice(8,10)}:${c.slice(10,12)}:${c.slice(12,14)}`)
-    : new Date();
-  const issuedAt = isNaN(parsedIssuedAt.getTime()) ? new Date() : parsedIssuedAt;
-
-  const amount = await fetchOfdAmount(ofdUrl);
-
-  await prisma.paynetReceipt.upsert({
-    where: { storeId_receiptNumber: { storeId, receiptNumber: r } },
-    create: { storeId, ofdUrl, receiptNumber: r, terminalCode: t, fiscalMark: s, issuedAt, amount },
-    update: { ofdUrl, fiscalMark: s, issuedAt, amount },
-  });
-
-  console.log(`[paynet] Saved receipt #${r} (amount: ${amount}) for store ${storeId}`);
-  return { receiptNumber: r, amount };
 }
 
 // ─── Bot setup ────────────────────────────────────────────────────────────────
@@ -340,42 +313,6 @@ bot.hears(ALL_BTNS.WEB, async (ctx) => {
   const lang = getLang(ctx.chat.id);
   const label = lang === 'uz' ? 'Quyidagi tugmani bosing:' : 'Нажмите кнопку ниже:';
   await ctx.reply(label, inlineWebButton());
-});
-
-// ── Paynet OFD receipt URL ────────────────────────────────────────────────────
-bot.hears(/ofd\.soliq\.uz\/epi\?/i, async (ctx) => {
-  const session = sessions.get(ctx.chat.id);
-  if (!session || (session.role !== 'ADMIN' && session.role !== 'SUPER_ADMIN')) return;
-  if (!session.storeId) return;
-
-  const text = 'text' in ctx.message ? ctx.message.text : '';
-  const urlMatch = text.match(/https?:\/\/ofd\.soliq\.uz\/epi\S+/i);
-  if (!urlMatch) {
-    await ctx.reply(session.lang === 'uz' ? '❌ URL topilmadi.' : '❌ URL не найден.');
-    return;
-  }
-
-  const processingMsg = await ctx.reply(
-    session.lang === 'uz' ? '⏳ Chek yuklanmoqda...' : '⏳ Загрузка чека...',
-  );
-
-  try {
-    const { receiptNumber, amount } = await savePaynetReceipt(session.storeId, urlMatch[0]);
-    await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id).catch(() => {});
-    const amtStr = amount != null
-      ? `${amount.toLocaleString('ru-RU')} so'm`
-      : (session.lang === 'uz' ? 'noma\'lum' : 'неизвестна');
-    await ctx.reply(
-      session.lang === 'uz'
-        ? `✅ Paynet chek #${receiptNumber} saqlandi.\n💰 Summa: ${amtStr}`
-        : `✅ Paynet чек #${receiptNumber} сохранён.\n💰 Сумма: ${amtStr}`,
-    );
-  } catch (err) {
-    console.error('Paynet OFD save error', err);
-    await ctx.telegram.deleteMessage(ctx.chat.id, processingMsg.message_id).catch(() => {});
-    await ctx.reply(session.lang === 'uz' ? '❌ Xatolik yuz berdi.' : '❌ Ошибка при сохранении чека.');
-    exitOnEnginePanic(err);
-  }
 });
 
 // Fallback

@@ -18,8 +18,6 @@ export interface Sale {
   items: SaleItem[];
   totalCost?: number;
   margin?: number;
-  paynetReceiptNumber?: string | null;
-  paynetOfdUrl?: string | null;
   // REGOS:VCR fiscalization
   fiscalStatus?: string | null; // PENDING | FISCALIZED | FAILED | DISABLED
   fiscalError?: string | null;

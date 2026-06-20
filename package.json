@@ -1,6 +1,6 @@
 {
   "name": "posgro",
-  "version": "1.17.1",
+  "version": "1.19.0",
   "description": "Grocery Store POS System - Offline-first Point of Sale",
   "main": "dist-electron/main/index.js",
   "scripts": {
@@ -12,7 +12,6 @@
     "deploy:pos": "npm run build:pos && node scripts/upload-release.js",
     "build:telegram": "tsc --project src/telegram-bot/tsconfig.json",
     "deploy:telegram": "bash scripts/deploy-telegram.sh",
-    "seed:paynet-mock": "node scripts/seed-paynet-mock.js",
     "import:mxik-catalog": "npx tsx scripts/import-mxik-catalog.ts",
     "backfill:package-code": "npx tsx scripts/backfill-package-code.ts",
     "seed:mxik-categories": "npx tsx scripts/seed-mxik-categories.ts",

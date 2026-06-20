@@ -18,7 +18,6 @@ import { MxikModule } from './modules/mxik/mxik.module';
 import { TerminalsModule } from './modules/terminals/terminals.module';
 import { LogsModule } from './modules/logs/logs.module';
 import { SiteConfigModule } from './modules/site-config/site-config.module';
-import { PaynetModule } from './modules/paynet/paynet.module';
 import { AslBelgisiModule } from './modules/aslbelgisi/aslbelgisi.module';
 import { MarkingCodesModule } from './modules/marking-codes/marking-codes.module';
 
@@ -45,7 +44,6 @@ import { MarkingCodesModule } from './modules/marking-codes/marking-codes.module
     TerminalsModule,
     LogsModule,
     SiteConfigModule,
-    PaynetModule,
     AslBelgisiModule,
     MarkingCodesModule,
   ],

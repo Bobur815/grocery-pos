@@ -65,6 +65,26 @@ export class MarkingCodesService {
   }
 
   /**
+   * Release marking codes (delete from sold + pending) so the items can be sold again on any
+   * terminal. Called when a sale is deleted or refunded. Scoped to the store.
+   */
+  async release(storeId: string, codes: string[]): Promise<{ released: number }> {
+    const list = (codes ?? []).filter((c): c is string => !!c);
+    if (list.length === 0) return { released: 0 };
+
+    const [sold] = await Promise.all([
+      (this.prisma as any).soldMarkingCode.deleteMany({
+        where: { storeId, code: { in: list } },
+      }),
+      (this.prisma as any).pendingMarkingCode.deleteMany({
+        where: { storeId, code: { in: list } },
+      }),
+    ]);
+
+    return { released: sold.count };
+  }
+
+  /**
    * Record group-022 marking codes that were sold while still IN circulation, captured for
    * later REGOS:VCR out-of-circulation fiscalization. First capture per (store, code) wins.
    */

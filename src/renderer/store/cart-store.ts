@@ -44,6 +44,7 @@ interface CartState {
   // Cart operations (operate on active tab)
   addItem: (item: Omit<CartItem, 'quantity'> & { quantity?: number }) => void;
   removeItem: (productId: number, unitPrice?: number) => void;
+  removeByMarkingCode: (markingCode: string) => void;
   updateQuantity: (productId: number, quantity: number, unitPrice?: number) => void;
   setDiscount: (discount: number) => void;
   setTaxRate: (rate: number) => void;
@@ -174,6 +175,20 @@ export const useCartStore = create<CartState>((set, get) => ({
         ? !(i.productId === productId && i.unitPrice === unitPrice)
         : i.productId !== productId
     );
+    const totals = calculateTotals(newItems, cart.taxRate, cart.discount);
+    const updatedCart = { ...cart, items: newItems, ...totals };
+    const newTabs = { ...state.tabs, [state.activeTabId]: updatedCart };
+    set({ tabs: newTabs, items: newItems, ...totals });
+  },
+
+  // Remove the single cart line carrying this marking code (group-022 scans are never merged,
+  // so each maps to exactly one line). Used to revert an optimistic add when a background
+  // resale check reports the code already sold.
+  removeByMarkingCode: (markingCode) => {
+    const state = get();
+    const cart = activeCart(state);
+    const newItems = cart.items.filter((i) => i.markingCode !== markingCode);
+    if (newItems.length === cart.items.length) return; // nothing matched — no-op
     const totals = calculateTotals(newItems, cart.taxRate, cart.discount);
     const updatedCart = { ...cart, items: newItems, ...totals };
     const newTabs = { ...state.tabs, [state.activeTabId]: updatedCart };

@@ -63,7 +63,7 @@ function parseSaleError(
 const PageWrapper = styled.div`
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.spacing.xs};
   height: calc(100vh - ${APP_BAR_HEIGHT}px - 20px);
 `;
 
@@ -73,7 +73,7 @@ const Container = styled.div`
      share and the freed space goes to the Cart. */
   grid-template-columns: minmax(0, 1fr) minmax(0, 3fr);
   grid-template-rows: 1fr;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.spacing.xs};
   flex: 1;
   min-height: 0;
   overflow: hidden;
@@ -82,7 +82,7 @@ const Container = styled.div`
 const InputSection = styled.div`
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.spacing.xs};
 `;
 
 const InputPanel = styled.div`
@@ -90,7 +90,7 @@ const InputPanel = styled.div`
   background-color: ${({ theme }) => theme.colors.surface};
   border-radius: ${({ theme }) => theme.borderRadius};
   box-shadow: ${({ theme }) => theme.shadows.md};
-  padding: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.sm};
 `;
 
 const InputLabel = styled.div`
@@ -121,7 +121,7 @@ const NumberPadSection = styled.div`
   background-color: ${({ theme }) => theme.colors.surface};
   border-radius: ${({ theme }) => theme.borderRadius};
   box-shadow: ${({ theme }) => theme.shadows.md};
-  padding: ${({ theme }) => theme.spacing.md};
+  padding: ${({ theme }) => theme.spacing.sm};
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -132,7 +132,7 @@ const NumberPad = styled.div`
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   grid-template-rows: repeat(4, 1fr);
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.spacing.xs};
   flex: 1;
 `;
 
@@ -247,21 +247,21 @@ const ErrorMessage = styled.div`
 const InputColumn = styled.div`
   display: flex;
   flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.spacing.xs};
   min-height: 0;
   height: 100%;
 `;
 
 const InputRow = styled.div`
   display: flex;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.spacing.xs};
   flex: 1;
 `;
 
 const QuickPayRow = styled.div`
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: ${({ theme }) => theme.spacing.xs};
 `;
 
 const QuickPayButton = styled.button<{ $variant: "cash" | "card" }>`
@@ -383,6 +383,7 @@ export function POSScreen() {
 
   const {
     addItem,
+    removeByMarkingCode,
     items,
     discount,
     total,
@@ -744,35 +745,12 @@ export function POSScreen() {
               setError(t("pos.markingCodeInCart"));
               return;
             }
-            // Check local SQLite + server — skippable via Fiscal settings toggle
-            if (markingCheckRef.current) {
-              try {
-                const checkResult = (await window.electronAPI.markingCodes.check(
-                  normalizedNoGS,
-                )) as {
-                  alreadySold: boolean;
-                  soldAt?: string;
-                  terminalId?: string;
-                };
-                if (checkResult.alreadySold) {
-                  const when = checkResult.soldAt
-                    ? new Date(checkResult.soldAt).toLocaleString("ru-RU")
-                    : "";
-                  writeBarcode("", true);
-                  setError(
-                    t("pos.markingCodeAlreadySold", {
-                      when,
-                      terminal: checkResult.terminalId ?? "",
-                    }),
-                  );
-                  return;
-                }
-              } catch {
-                // IPC error — allow sale rather than block
-              }
-            }
 
-            // Add as individual item with markingCode (never merged)
+            // Add the item immediately (optimistic) so scanning stays instant. The resale
+            // check (local SQLite + server) used to block every scan on a network round-trip
+            // of up to several seconds; run it in the background instead and revert the line
+            // if the code turns out to be already sold. The authoritative block still happens
+            // at fiscalization (REGOS validates the label), so an async warning is enough here.
             const productName =
               i18n.language === "uz" ? product.nameUz : product.nameRu;
             addItem({
@@ -786,6 +764,34 @@ export function POSScreen() {
               markingCode: normalizedNoGS,
             });
             resetInputs();
+
+            // Background resale check — skippable via Fiscal settings toggle.
+            if (markingCheckRef.current) {
+              window.electronAPI.markingCodes
+                .check(normalizedNoGS)
+                .then((checkResult) => {
+                  const r = checkResult as {
+                    alreadySold: boolean;
+                    soldAt?: string;
+                    terminalId?: string;
+                  };
+                  if (!r.alreadySold) return;
+                  // Revert the optimistic add and warn the cashier.
+                  removeByMarkingCode(normalizedNoGS);
+                  const when = r.soldAt
+                    ? new Date(r.soldAt).toLocaleString("ru-RU")
+                    : "";
+                  const msg = t("pos.markingCodeAlreadySold", {
+                    when,
+                    terminal: r.terminalId ?? "",
+                  });
+                  setError(msg);
+                  toast.error(msg);
+                })
+                .catch(() => {
+                  // IPC/network error — allow the sale (offline-first); line stays in cart.
+                });
+            }
             return;
           }
 
@@ -820,6 +826,7 @@ export function POSScreen() {
     searchByBarcode,
     addProductToCart,
     addItem,
+    removeByMarkingCode,
     items,
     t,
     handleIdSubmit,

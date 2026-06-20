@@ -151,20 +151,18 @@ async function printReceipt(saleId: string): Promise<boolean> {
 
   const settings = await loadReceiptSettings();
 
-  // Generate the Soliq OFD QR for the customer (1% cashback). Source the fiscal data
-  // from REGOS:VCR when present, else fall back to Paynet. Both point at ofd.soliq.uz.
+  // Generate the Soliq OFD QR for the customer (1% cashback). Fiscal data comes
+  // from REGOS:VCR (ofd.soliq.uz).
   let fiscalQrBase64: string | undefined;
-  let paynetFiscalMark: string | undefined;
+  let fiscalMark: string | undefined;
   const regosQrCodeUrl = (sale as any).regosQrCodeUrl as string | null;
   const regosReceiptNo = (sale as any).regosReceiptNo as string | null;
-  const paynetOfdUrl = (sale as any).paynetOfdUrl as string | null;
-  const paynetReceiptNumber = (sale as any).paynetReceiptNumber as string | null;
-  const fiscalUrl = regosQrCodeUrl || paynetOfdUrl;
-  const fiscalReceiptNo = regosReceiptNo || paynetReceiptNumber;
+  const fiscalUrl = regosQrCodeUrl;
+  const fiscalReceiptNo = regosReceiptNo;
   if (fiscalUrl) {
     try {
       const ofdParams = new URL(fiscalUrl).searchParams;
-      paynetFiscalMark = ofdParams.get('s') || undefined;
+      fiscalMark = ofdParams.get('s') || undefined;
       const dataUrl = await QRCode.toDataURL(fiscalUrl, { margin: 1, width: 300 });
       fiscalQrBase64 = dataUrl.replace(/^data:image\/png;base64,/, '');
     } catch (err) {
@@ -197,8 +195,8 @@ async function printReceipt(saleId: string): Promise<boolean> {
     discountAmount: Number(sale.discountAmount),
     finalAmount: Number(sale.finalAmount),
     paymentMethod: sale.paymentMethod,
-    paynetReceiptNumber: fiscalReceiptNo || undefined,
-    paynetFiscalMark,
+    fiscalReceiptNumber: fiscalReceiptNo || undefined,
+    fiscalMark,
     fiscalQrBase64,
   };
 

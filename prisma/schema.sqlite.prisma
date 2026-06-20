@@ -185,10 +185,6 @@ model Sale {
   smenaId  String?  @map("smena_id")
   smena    Smena?   @relation(fields: [smenaId], references: [id])
 
-  // Paynet fiscal receipt
-  paynetOfdUrl        String? @map("paynet_ofd_url")
-  paynetReceiptNumber String? @map("paynet_receipt_number")
-
   // REGOS:VCR fiscalization
   fiscalStatus    String?   @map("fiscal_status") // PENDING | FISCALIZED | FAILED | DISABLED
   fiscalAttempts  Int       @default(0) @map("fiscal_attempts")

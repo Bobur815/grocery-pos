@@ -205,6 +205,7 @@
     "lowStock": "Мало",
     "outOfStock": "Нет в наличии",
     "otherCategories": "Другие категории",
+    "exactPrice": "Цена",
     "product": "Товар",
     "supplier": "Поставщик",
     "productionDate": "Дата производства",
@@ -311,6 +312,7 @@
   "fiscalSettings": {
     "title": "Фискализация (REGOS:VCR)",
     "description": "Фискальный модуль и виртуальная касса",
+    "loadError": "Не удалось загрузить настройки фискализации",
     "enabled": "Включить фискализацию через REGOS:VCR",
     "url": "Адрес виртуальной кассы",
     "login": "Логин кассира",
@@ -559,12 +561,6 @@
     "productInactive": "Товар \"{{name}}\" неактивен",
     "insufficientStock": "Недостаточно товара \"{{name}}\" на складе. Доступно: {{available}}, запрошено: {{requested}}",
     "noInternet": "Нет подключения к интернету"
-  },
-  "paynet": {
-    "noReceipts": "Нет доступных Paynet чеков для этой суммы",
-    "linkReceipt": "Привязать Paynet чек",
-    "link": "Привязать и распечатать",
-    "integrated": "Paynet чек привязан"
   },
   "sync": {
     "syncFailed":"Ошибка",

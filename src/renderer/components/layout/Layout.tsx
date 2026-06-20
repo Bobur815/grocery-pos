@@ -7,10 +7,10 @@ import { SidebarProvider, useSidebar } from '../../context/SidebarContext';
 import { SmenaPage } from '../../pages/Smena/SmenaPage';
 
 const Content = styled.main`
-  padding-top: ${APP_BAR_HEIGHT + 8}px;
-  padding-left: ${({ theme }) => theme.spacing.sm};
-  padding-right: ${({ theme }) => theme.spacing.sm};
-  padding-bottom: ${({ theme }) => theme.spacing.sm};
+  padding-top: ${APP_BAR_HEIGHT + 4}px;
+  padding-left: ${({ theme }) => theme.spacing.xs};
+  padding-right: ${({ theme }) => theme.spacing.xs};
+  padding-bottom: ${({ theme }) => theme.spacing.xs};
   background-color: ${({ theme }) => theme.colors.background};
   min-height: 100vh;
   overflow-y: auto;

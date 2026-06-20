@@ -514,14 +514,6 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
     await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS idx_users_store ON users(store_id)`;
   }
 
-  // Migration 14: Paynet fiscal receipt columns on sales
-  try {
-    await prisma.$queryRaw`SELECT paynet_ofd_url FROM sales LIMIT 1`;
-  } catch {
-    await prisma.$executeRaw`ALTER TABLE sales ADD COLUMN paynet_ofd_url TEXT`;
-    await prisma.$executeRaw`ALTER TABLE sales ADD COLUMN paynet_receipt_number TEXT`;
-  }
-
   // Migration 15: Per-store sequential product code
   // Reset the product sync cursor so the next sync re-pulls all products and
   // populates store_product_code from the VPS — avoids a mixed-state display

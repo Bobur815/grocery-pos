@@ -5,7 +5,6 @@ import { setupSalesHandlers } from "./sales-handlers";
 import { setupWeighedItemsHandlers } from "./weighed-items-handlers";
 import { setupScaleHandlers } from "./scale-handlers";
 import { setupSmenaHandlers } from "./smena-handlers";
-import { setupPaynetHandlers } from "./paynet-handlers";
 import { setupMarkingCodesHandlers } from "./marking-codes-handlers";
 import { setupFiscalHandlers } from "./fiscal-handlers";
 import { getAppConfig, updateConfig } from "../config/app-config";
@@ -33,7 +32,6 @@ export function setupIpcHandlers(): void {
   setupSmenaHandlers();
   setupAppHandlers();
   setupReceiptHandlers();
-  setupPaynetHandlers();
   setupMarkingCodesHandlers();
   setupMxikHandlers();
   setupFiscalHandlers();

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Query, UseGuards, HttpCode } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { MarkingCodesService } from './marking-codes.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -25,6 +25,15 @@ export class MarkingCodesController {
     @Body() body: { codes: { code: string; productBarcode?: string; soldAt?: string }[]; terminalId: string },
   ) {
     return this.service.record(storeId, body.codes ?? [], body.terminalId);
+  }
+
+  @Post('release')
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Release marking codes (delete sold + pending) when a sale is deleted or refunded',
+  })
+  release(@CurrentStore() storeId: string, @Body() body: { codes: string[] }) {
+    return this.service.release(storeId, body.codes ?? []);
   }
 
   @Post('pending')

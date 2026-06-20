@@ -51,7 +51,9 @@ export function setupMarkingCodesHandlers(): void {
         `${config.vpsApiUrl}/marking-codes/check?code=${encodeURIComponent(code)}`,
         {
           headers: { Authorization: `Bearer ${token}` },
-          signal: AbortSignal.timeout(4000),
+          // Short ceiling: this now runs in the background behind an optimistic cart add, and the
+          // error path is offline-first "allow sale", so a flaky link should fail fast, not hang.
+          signal: AbortSignal.timeout(1500),
         },
       );
       if (!response.ok) return { alreadySold: false };
@@ -69,6 +71,68 @@ export function setupMarkingCodesHandlers(): void {
     }
 
     return { alreadySold: false };
+  });
+
+  // Free the marking codes tied to a sale (called when a sale is deleted or refunded) so the
+  // group-022 items can be sold again. The codes are gathered from both the sale's regosLabels
+  // snapshot and the pending-codes table (which carries saleId), then removed from
+  // sold_marking_codes (and pending_marking_codes). Best-effort, local-only.
+  ipcMain.handle('markingCodes:removeForSale', async (_event, saleId: string): Promise<void> => {
+    if (!saleId) return;
+    const prisma = getPrismaClient();
+
+    const codes = new Set<string>();
+
+    // 1. From the sale's snapshot of scanned labels (set when fiscalization is enabled).
+    try {
+      const sale = await (prisma as any).sale.findUnique({
+        where: { id: saleId },
+        select: { regosLabels: true },
+      });
+      if (sale?.regosLabels) {
+        const labels = JSON.parse(sale.regosLabels) as Array<{ label?: string }>;
+        for (const l of labels) if (l?.label) codes.add(l.label);
+      }
+    } catch {
+      // ignore missing sale / malformed snapshot
+    }
+
+    // 2. From pending codes, which are keyed by saleId.
+    try {
+      const pending = await (prisma as any).pendingMarkingCode.findMany({ where: { saleId } });
+      for (const p of pending) if (p?.code) codes.add(p.code);
+    } catch {
+      // ignore
+    }
+
+    if (codes.size === 0) return;
+    const codeList = [...codes];
+
+    // 1. Free locally so this terminal can sell the items again immediately.
+    await (prisma as any).soldMarkingCode
+      .deleteMany({ where: { code: { in: codeList } } })
+      .catch(() => {});
+    await (prisma as any).pendingMarkingCode
+      .deleteMany({ where: { code: { in: codeList } } })
+      .catch(() => {});
+
+    // 2. Release on the server too, so other terminals stop seeing the codes as sold.
+    const config = getAppConfig();
+    const token = getServerToken();
+    if (!token) return;
+    try {
+      await fetch(`${config.vpsApiUrl}/marking-codes/release`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ codes: codeList }),
+        signal: AbortSignal.timeout(8000),
+      });
+    } catch {
+      // Best-effort: the local release already happened; server stays consistent on next sync.
+    }
   });
 
   // Record marking codes as sold (called after sale completes)

@@ -193,6 +193,7 @@
     "lowStock": "Kam",
     "outOfStock": "Tugagan",
     "otherCategories": "Boshqa kategoriyalar",
+    "exactPrice": "Narx",
     "product": "Mahsulot",
     "supplier": "Yetkazib beruvchi",
     "productionDate": "Ishlab chiqarilgan sana",
@@ -299,6 +300,7 @@
   "fiscalSettings": {
     "title": "Fiskallashtirish (REGOS:VCR)",
     "description": "Fiskal modul va virtual kassa",
+    "loadError": "Fiskallashtirish sozlamalarini yuklab bo'lmadi",
     "enabled": "REGOS:VCR orqali fiskallashtirishni yoqish",
     "url": "Virtual kassa manzili",
     "login": "Kassir logini",
@@ -547,12 +549,6 @@
     "productInactive": "\"{{name}}\" mahsuloti nofaol",
     "insufficientStock": "\"{{name}}\" mahsuloti yetarli emas. Mavjud: {{available}}, so'ralgan: {{requested}}",
     "noInternet": "Internet aloqasi yo'q"
-  },
-  "paynet": {
-    "noReceipts": "Bu summa uchun Paynet chek mavjud emas",
-    "linkReceipt": "Paynet chekni bog'lash",
-    "link": "Bog'lash va chop etish",
-    "integrated": "Paynet chek bog'landi"
   },
   "sync": {
     "syncSuccess": "Sinxronizatsiya muvaffaqiyatli",

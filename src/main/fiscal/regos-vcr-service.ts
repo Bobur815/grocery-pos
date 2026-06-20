@@ -115,11 +115,19 @@ class RegosVcrService {
 
   async getConfig(): Promise<RegosVcrConfig> {
     const cfg = await this.resolveConfig();
+    // Report hasPassword based on whether the stored secret actually DECRYPTS, not just that a
+    // row exists. resolveConfig() already decrypted into cfg.password (it falls back to '' when
+    // decryption fails), so a stored-but-undecryptable secret correctly surfaces as "not saved"
+    // and the UI prompts for re-entry instead of lying with a "сохранён" placeholder.
+    const storedButBroken = (await hasVcrPassword()) && !cfg.password;
+    if (storedButBroken) {
+      log.warn('[fiscal] VCR password is stored but failed to decrypt — prompting for re-entry');
+    }
     return {
       enabled: cfg.enabled,
       url: cfg.url,
       login: cfg.login,
-      hasPassword: (await hasVcrPassword()) || Boolean(process.env.VCR_PASSWORD),
+      hasPassword: Boolean(cfg.password),
       vatPercent: cfg.vatPercent,
       nonVatPayer: cfg.nonVatPayer,
       posId: cfg.posId,
@@ -498,19 +506,6 @@ class RegosVcrService {
       // Log the raw REGOS code + description too — describeVcrError() collapses several distinct
       // VAT/MXIK faults into one staff message, which hides which one actually fired when debugging.
       if (e instanceof VcrError) log.error(`[fiscal] raw VCR error [${e.code}] ${e.method}: ${e.description}`);
-      // Illustrate the VAT rate / amount actually sent per position — the key detail when REGOS
-      // rejects with "Неверная ставка НДС". rate% is the resolved per-product rate, vat is the
-      // tiyin value sent, amount is the gross line total. Reflects the last (possibly healed) attempt.
-      if (positions.length) {
-        const lines = positions
-          .map((p, i) => {
-            const r = meta[i]?.rate;
-            const rateStr = r === NON_VAT_PAYER_VAT_VALUE ? 'без НДС' : `${r ?? '?'}%`;
-            return `${p.name} [mxik=${p.icps || '—'}] rate=${rateStr} vat=${p.vat_value}t amount=${p.amount}t`;
-          })
-          .join(' | ');
-        log.error(`[fiscal] positions sent: ${lines}`);
-      }
       const unreachable = e instanceof VcrError && e.code === 0;
 
       // Recovery: a business-level failure may mean Receipt.Sale actually registered on
@@ -656,11 +651,36 @@ class RegosVcrService {
 
   start(): void {
     if (this.worker) return;
+    // One-time startup diagnostic: surface what config the service actually resolved after a
+    // reboot, so a "settings keep disappearing" report can be confirmed (or ruled out) from the
+    // log instead of guesswork — including whether the stored VCR password decrypted.
+    this.logStartupConfig().catch(() => {});
     this.worker = setInterval(() => {
       this.processPending().catch((e) =>
         console.error('[fiscal] worker error:', e instanceof Error ? e.message : e),
       );
     }, WORKER_INTERVAL_MS);
+  }
+
+  private async logStartupConfig(): Promise<void> {
+    try {
+      const cfg = await this.resolveConfig();
+      const passwordRowExists = await hasVcrPassword();
+      log.info('[fiscal] resolved config at startup', {
+        db: process.env.DATABASE_URL,
+        enabled: cfg.enabled,
+        url: cfg.url,
+        login: cfg.login,
+        posId: cfg.posId,
+        passwordRowExists,
+        passwordDecrypted: Boolean(cfg.password),
+      });
+      if (passwordRowExists && !cfg.password) {
+        log.error('[fiscal] VCR password row present but did NOT decrypt — re-entry required');
+      }
+    } catch (e) {
+      log.error('[fiscal] failed to resolve config at startup:', e instanceof Error ? e.message : e);
+    }
   }
 
   stop(): void {

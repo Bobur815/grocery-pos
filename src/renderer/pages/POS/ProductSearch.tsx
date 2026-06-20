@@ -42,6 +42,22 @@ const SearchRow = styled.div`
   align-items: center;
 `;
 
+const PriceField = styled.input`
+  width: 120px;
+  flex-shrink: 0;
+  padding: 10px 12px;
+  font-size: 14px;
+  border-radius: ${({ theme }) => theme.borderRadius};
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  background-color: ${({ theme }) => theme.colors.background};
+  color: ${({ theme }) => theme.colors.text};
+
+  &:focus {
+    outline: none;
+    border-color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
 const CategoryBar = styled.div`
   display: flex;
   gap: ${({ theme }) => theme.spacing.xs};
@@ -170,6 +186,9 @@ const NoResults = styled.div`
   grid-column: 1 / -1;
 `;
 
+// MXIK group code for "Salqin ichimliklar" — not sellable from the POS catalog.
+const EXCLUDED_MXIK_GROUP_CODE = "022";
+
 interface ProductSearchProps {
   onSelect: (product: Product) => void;
   // Raise the on-screen keyboard above a host modal (e.g. the Catalog modal, overlay z-index 1000).
@@ -179,12 +198,15 @@ interface ProductSearchProps {
 export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) {
   const { t, i18n } = useTranslation();
   const [searchQuery, setSearchQuery] = useState("");
+  const [priceQuery, setPriceQuery] = useState("");
+  // Which text field the on-screen keyboard types into.
+  const [activeField, setActiveField] = useState<"search" | "price">("search");
   const [selectedCategoryId, setSelectedCategoryId] = useState<number | null>(null);
   const [topCategories, setTopCategories] = useState<
     { id: number; nameRu: string; nameUz: string }[]
   >([]);
   const [topSelling, setTopSelling] = useState<Product[]>([]);
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(true);
   const {
     products,
     categories,
@@ -204,11 +226,17 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
 
   const debouncedLoad = useMemo(
     () =>
-      debounce((query: string, categoryId: number | null) => {
-        if (query.trim() || categoryId != null) {
+      debounce((query: string, categoryId: number | null, price: string) => {
+        const exactPrice = price.trim() ? Number(price) : null;
+        if (query.trim() || categoryId != null || exactPrice != null) {
           const params: ProductFilterParams = {};
           if (query.trim()) params.query = query;
           if (categoryId != null) params.categoryId = categoryId;
+          // Exact price match — set both bounds to the same value.
+          if (exactPrice != null && !Number.isNaN(exactPrice)) {
+            params.priceMin = exactPrice;
+            params.priceMax = exactPrice;
+          }
           loadProducts(params);
         }
       }, 300),
@@ -216,8 +244,8 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
   );
 
   useEffect(() => {
-    debouncedLoad(searchQuery, selectedCategoryId);
-  }, [searchQuery, selectedCategoryId, debouncedLoad]);
+    debouncedLoad(searchQuery, selectedCategoryId, priceQuery);
+  }, [searchQuery, selectedCategoryId, priceQuery, debouncedLoad]);
 
   // Refresh products when stock changes (after sale/edit/delete)
   useEffect(() => {
@@ -225,24 +253,44 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
       getTopSelling().then((data) =>
         setTopSelling(data as unknown as Product[]),
       );
-      if (searchQuery.trim() || selectedCategoryId != null) {
+      const exactPrice = priceQuery.trim() ? Number(priceQuery) : null;
+      if (searchQuery.trim() || selectedCategoryId != null || exactPrice != null) {
         const params: ProductFilterParams = {};
         if (searchQuery.trim()) params.query = searchQuery;
         if (selectedCategoryId != null) params.categoryId = selectedCategoryId;
+        if (exactPrice != null && !Number.isNaN(exactPrice)) {
+          params.priceMin = exactPrice;
+          params.priceMax = exactPrice;
+        }
         loadProducts(params);
       }
     };
     window.addEventListener("stock-updated", refresh);
     return () => window.removeEventListener("stock-updated", refresh);
-  }, [getTopSelling, searchQuery, selectedCategoryId, loadProducts]);
+  }, [getTopSelling, searchQuery, selectedCategoryId, priceQuery, loadProducts]);
 
   const categoryName = (c: { nameRu: string; nameUz: string }) =>
     i18n.language === "uz" ? c.nameUz || c.nameRu : c.nameRu;
 
+  // "Salqin ichimliklar" (MXIK group 022) can't be sold/selected from the POS
+  // catalog, so hide it from both the quick-filter buttons and the dropdown.
+  const excludedCategoryIds = new Set(
+    categories
+      .filter((c) => c.mxikGroupCode === EXCLUDED_MXIK_GROUP_CODE)
+      .map((c) => Number(c.id)),
+  );
+
+  // Top-selling quick-filter buttons, minus any excluded category.
+  const visibleTopCategories = topCategories.filter(
+    (c) => !excludedCategoryIds.has(Number(c.id)),
+  );
+
   // Categories not already shown as a top-5 button — offered in the dropdown.
-  const topCategoryIds = new Set(topCategories.map((c) => c.id));
+  const topCategoryIds = new Set(visibleTopCategories.map((c) => c.id));
   const otherCategories = categories.filter(
-    (c) => !topCategoryIds.has(Number(c.id)),
+    (c) =>
+      !topCategoryIds.has(Number(c.id)) &&
+      !excludedCategoryIds.has(Number(c.id)),
   );
   const selectedIsOther =
     selectedCategoryId != null && !topCategoryIds.has(selectedCategoryId);
@@ -256,19 +304,25 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
   };
 
   const handleVirtualKeyPress = (key: string) => {
+    if (key === "ENTER") return;
+    const setter = activeField === "price" ? setPriceQuery : setSearchQuery;
     if (key === "BACKSPACE") {
-      setSearchQuery((prev) => prev.slice(0, -1));
+      setter((prev) => prev.slice(0, -1));
       return;
     }
-    if (key === "ENTER") return;
-    setSearchQuery((prev) => prev + key);
+    // Price field accepts digits only — ignore any non-numeric key.
+    if (activeField === "price" && /\D/.test(key)) return;
+    setter((prev) => prev + key);
   };
 
   const displayProducts: Product[] = (
-    searchQuery.trim() || selectedCategoryId != null
+    searchQuery.trim() || selectedCategoryId != null || priceQuery.trim()
       ? (products as unknown as Product[])
       : topSelling
-  ).filter((p) => p.isActive);
+  ).filter(
+    (p) =>
+      p.isActive && p.category?.mxikGroupCode !== EXCLUDED_MXIK_GROUP_CODE,
+  );
 
   return (
     <Container>
@@ -279,8 +333,9 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              onFocus={() => setActiveField("search")}
               placeholder={t("common.search")}
-              style={{ padding: "10px 16px", paddingRight: "60px" }}
+              style={{ padding: "10px 16px", paddingRight: "40px" }}
               autoFocus
             />
             <InputControls>
@@ -289,26 +344,30 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
                   <X size={16} />
                 </ClearButton>
               )}
-              <KbToggle
-                type="button"
-                tabIndex={-1}
-                $active={keyboardOpen}
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => setKeyboardOpen((prev) => !prev)}
-              >
-                <Keyboard size={18} />
-                {keyboardOpen ? (
-                  <ChevronUp size={14} />
-                ) : (
-                  <ChevronDown size={14} />
-                )}
-              </KbToggle>
             </InputControls>
           </SearchInputWrapper>
+          <PriceField
+            type="text"
+            inputMode="numeric"
+            value={priceQuery}
+            onChange={(e) => setPriceQuery(e.target.value.replace(/\D/g, ""))}
+            onFocus={() => setActiveField("price")}
+            placeholder={t("products.exactPrice", "Цена")}
+          />
+          <KbToggle
+            type="button"
+            tabIndex={-1}
+            $active={keyboardOpen}
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setKeyboardOpen((prev) => !prev)}
+          >
+            <Keyboard size={18} />
+            {keyboardOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </KbToggle>
         </SearchRow>
 
         <CategoryBar>
-          {topCategories.map((c) => (
+          {visibleTopCategories.map((c) => (
             <CategoryButton
               key={c.id}
               type="button"

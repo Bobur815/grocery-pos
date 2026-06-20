@@ -368,20 +368,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
   },
 
-  // Paynet fiscal receipts
-  paynetReceipts: {
-    getByAmount: (amount: number) =>
-      ipcRenderer.invoke("paynetReceipts:getByAmount", amount),
-    integrate: (id: string, saleReceiptNumber: string, paynetReceiptNumber: string, ofdUrl: string) =>
-      ipcRenderer.invoke("paynetReceipts:integrate", id, saleReceiptNumber, paynetReceiptNumber, ofdUrl),
-  },
-
   // Marking codes — prevent re-sale of group 022 unique QR scans
   markingCodes: {
     check: (code: string) =>
       ipcRenderer.invoke("markingCodes:check", code),
     record: (entries: { code: string; productBarcode?: string }[]) =>
       ipcRenderer.invoke("markingCodes:record", entries),
+    removeForSale: (saleId: string) =>
+      ipcRenderer.invoke("markingCodes:removeForSale", saleId),
   },
 
   // Logger — forwards renderer errors to the main-process electron-log file
@@ -657,17 +651,6 @@ declare global {
         onError: (cb: (e: { message: string }) => void) => () => void;
         onCancelled: (cb: () => void) => () => void;
       };
-      paynetReceipts: {
-        getByAmount: (amount: number) => Promise<Array<{
-          id: string;
-          receiptNumber: string;
-          fiscalMark: string;
-          ofdUrl: string;
-          amount: number | null;
-          issuedAt: string;
-        }>>;
-        integrate: (id: string, saleReceiptNumber: string, paynetReceiptNumber: string, ofdUrl: string) => Promise<void>;
-      };
       markingCodes: {
         check: (code: string) => Promise<{
           alreadySold: boolean;
@@ -676,6 +659,7 @@ declare global {
           source?: 'local' | 'server';
         }>;
         record: (entries: { code: string; productBarcode?: string }[]) => Promise<void>;
+        removeForSale: (saleId: string) => Promise<void>;
       };
       logger: {
         error: (msg: string) => void;

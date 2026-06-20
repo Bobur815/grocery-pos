@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { useCartStore } from "../../store/cart-store";
@@ -9,7 +9,6 @@ import { Modal } from "../../components/common/Modal";
 import { Button } from "../../components/common/Button";
 import { NumberPad } from "../../components/common/NumberPad";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
-import { RefreshCw } from "lucide-react";
 
 function parseSaleError(
   err: unknown,
@@ -285,95 +284,11 @@ const CustomAmountInput = styled.input`
 
 
 
-const PaynetSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: ${({ theme }) => theme.spacing.sm};
-`;
-
-const PaynetHeader = styled.div`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-`;
-
-const PaynetLabel = styled.div`
-  font-size: 13px;
-  font-weight: 600;
-  color: ${({ theme }) => theme.colors.text};
-`;
-
-const PaynetRefreshBtn = styled.button`
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  border-radius: 4px;
-  background: none;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-  &:hover { color: ${({ theme }) => theme.colors.primary}; border-color: ${({ theme }) => theme.colors.primary}; }
-  &:disabled { opacity: 0.5; cursor: default; }
-`;
-
-const PaynetCard = styled.button<{ $selected: boolean }>`
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: ${({ theme }) => theme.spacing.sm} ${({ theme }) => theme.spacing.md};
-  border: 2px solid ${({ $selected, theme }) => $selected ? theme.colors.success : theme.colors.border};
-  border-radius: ${({ theme }) => theme.borderRadius};
-  background: ${({ $selected, theme }) => $selected ? theme.colors.success + '12' : theme.colors.surface};
-  cursor: pointer;
-  transition: all 0.15s;
-  text-align: left;
-  width: 100%;
-  &:hover { border-color: ${({ theme }) => theme.colors.success}; }
-`;
-
-const PaynetCardLeft = styled.div`
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-`;
-
-const PaynetCardReceipt = styled.span`
-  font-size: 13px;
-  font-weight: 600;
-  color: ${({ theme }) => theme.colors.text};
-`;
-
-const PaynetCardAmount = styled.span`
-  font-size: 12px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-`;
-
-const PaynetEmpty = styled.div`
-  padding: ${({ theme }) => theme.spacing.sm};
-  font-size: 13px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  text-align: center;
-  border: 1px dashed ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.borderRadius};
-`;
-
 const DENOMINATIONS = [20000, 50000, 100000, 200000];
 
 interface CheckoutProps {
   onComplete: () => void;
   onCancel: () => void;
-}
-
-interface PaynetReceipt {
-  id: string;
-  receiptNumber: string;
-  fiscalMark: string;
-  ofdUrl: string;
-  amount: number | null;
-  issuedAt: string;
 }
 
 export function Checkout({ onComplete, onCancel }: CheckoutProps) {
@@ -397,40 +312,6 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
   }, []);
   const [givenAmount, setGivenAmount] = useState(0);
   const [customInput, setCustomInput] = useState("");
-
-  const [paynetReceipts, setPaynetReceipts] = useState<PaynetReceipt[]>([]);
-  const [selectedPaynet, setSelectedPaynet] = useState<PaynetReceipt | null>(null);
-  const [paynetLoading, setPaynetLoading] = useState(false);
-
-  const fetchPaynetReceipts = useCallback(async () => {
-    setPaynetLoading(true);
-    try {
-      let list: PaynetReceipt[] = [];
-      if (window.electronAPI?.paynetReceipts) {
-        list = await window.electronAPI.paynetReceipts.getByAmount(total);
-      }
-      setPaynetReceipts(list);
-      // Auto-select only if exactly one receipt and nothing selected yet
-      setSelectedPaynet(prev => {
-        if (prev) return list.find(r => r.id === prev.id) ?? null;
-        return list.length === 1 ? list[0] : null;
-      });
-    } finally {
-      setPaynetLoading(false);
-    }
-  }, [total]);
-
-  // Fetch on mount and when switching to cash; auto-poll every 4s while cash is active
-  useEffect(() => {
-    if (paymentMethod !== "cash") {
-      setPaynetReceipts([]);
-      setSelectedPaynet(null);
-      return;
-    }
-    fetchPaynetReceipts();
-    const interval = setInterval(fetchPaynetReceipts, 4000);
-    return () => clearInterval(interval);
-  }, [paymentMethod, fetchPaynetReceipts]);
 
   const change = givenAmount - total;
   const isDiscount = givenAmount > 0 && change < 0;
@@ -474,8 +355,6 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
         })),
         paymentMethod,
         discountAmount: discount + discountFromUnderpayment,
-        paynetOfdUrl: selectedPaynet?.ofdUrl,
-        paynetReceiptNumber: selectedPaynet?.receiptNumber,
         markingCodes: items
           .filter((i) => i.markingCode)
           .map((i) => ({ barcode: i.barcode, label: i.markingCode! })),
@@ -492,13 +371,6 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
           .map((i) => ({ code: i.markingCode!, productBarcode: i.barcode }));
         if (markingEntries.length > 0) {
           window.electronAPI.markingCodes.record(markingEntries).catch(() => {});
-        }
-
-        // Mark Paynet receipt as integrated on the VPS
-        if (selectedPaynet && sale.receiptNumber) {
-          window.electronAPI.paynetReceipts
-            .integrate(selectedPaynet.id, sale.receiptNumber, selectedPaynet.receiptNumber, selectedPaynet.ofdUrl)
-            .catch((err: unknown) => console.error("Paynet integrate failed:", err));
         }
 
         // Print receipt if checkbox is checked
@@ -665,42 +537,6 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
                 </ChangeDisplay>
               )}
             </CashHelper>
-          )}
-
-          {paymentMethod === "cash" && (
-            <PaynetSection>
-              <PaynetHeader>
-                <PaynetLabel>Paynet {t("pos.receipt")}</PaynetLabel>
-                <PaynetRefreshBtn onClick={fetchPaynetReceipts} disabled={paynetLoading}>
-                  <RefreshCw size={12} style={{ animation: paynetLoading ? "spin 1s linear infinite" : "none" }} />
-                  {t("common.refresh")}
-                </PaynetRefreshBtn>
-              </PaynetHeader>
-              {paynetReceipts.length === 0 ? (
-                <PaynetEmpty>
-                  {paynetLoading ? t("common.loading") : t("paynet.noReceipts")}
-                </PaynetEmpty>
-              ) : (
-                paynetReceipts.map((pr) => (
-                  <PaynetCard
-                    key={pr.id}
-                    $selected={selectedPaynet?.id === pr.id}
-                    onClick={() => setSelectedPaynet(pr)}
-                  >
-                    <PaynetCardLeft>
-                      <PaynetCardReceipt>#{pr.receiptNumber}</PaynetCardReceipt>
-                      <PaynetCardAmount>
-                        {pr.amount != null ? formatCurrency(pr.amount) : "—"} ·{" "}
-                        {new Date(pr.issuedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      </PaynetCardAmount>
-                    </PaynetCardLeft>
-                    {selectedPaynet?.id === pr.id && (
-                      <span style={{ color: "inherit", fontSize: 18 }}>✓</span>
-                    )}
-                  </PaynetCard>
-                ))
-              )}
-            </PaynetSection>
           )}
 
           <PrintCheckRow>

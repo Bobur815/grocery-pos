@@ -22,10 +22,10 @@ export interface ReceiptData {
   discountAmount: number;
   finalAmount: number;
   paymentMethod: string;
-  /** Paynet fiscal receipt number — replaces internal receipt number when set */
-  paynetReceiptNumber?: string;
-  /** Paynet fiscal mark (OFD URL `s` param) shown above QR code */
-  paynetFiscalMark?: string;
+  /** Fiscal receipt number (REGOS:VCR) — replaces internal receipt number when set */
+  fiscalReceiptNumber?: string;
+  /** Fiscal mark (OFD URL `s` param) shown above QR code */
+  fiscalMark?: string;
   /** Base64-encoded QR code PNG for the Soliq OFD URL (1% cashback for customer) */
   fiscalQrBase64?: string;
 }
@@ -257,7 +257,7 @@ export function buildReceiptHTML(
   const fiscalHTML = sale.fiscalQrBase64
     ? `<hr>
        <div class="fiscal-block">
-         ${sale.paynetFiscalMark ? `<div class="fiscal-label">${(l as any).fiscalMark}: ${escapeHtml(sale.paynetFiscalMark)}</div>` : ''}
+         ${sale.fiscalMark ? `<div class="fiscal-label">${(l as any).fiscalMark}: ${escapeHtml(sale.fiscalMark)}</div>` : ''}
          <img src="data:image/png;base64,${sale.fiscalQrBase64}" alt="QR" />
          <div class="fiscal-sub">${(l as any).cashback}</div>
        </div>`
@@ -277,7 +277,7 @@ export function buildReceiptHTML(
   <hr>
 
   <div class="meta-grid">
-    <span class="label">${l.receipt}</span><span class="value">${escapeHtml(sale.paynetReceiptNumber || sale.receiptNumber)}</span>
+    <span class="label">${l.receipt}</span><span class="value">${escapeHtml(sale.fiscalReceiptNumber || sale.receiptNumber)}</span>
     <span class="label">${l.date}</span><span class="value">${dateStr} ${timeStr}</span>
     <span class="label">${l.cashier}</span><span class="value">${escapeHtml(sale.cashierName)}</span>
   </div>
