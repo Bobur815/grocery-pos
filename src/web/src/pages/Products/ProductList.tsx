@@ -584,7 +584,7 @@ export function ProductList() {
 
         <Select
           selectSize="small"
-          style={{ padding: "8px", flexShrink: 0, minWidth: 130 }}
+          style={{ padding: "8px", flexShrink: 0, minWidth: 100 }}
           options={[
             { value: "active", label: t("products.active") },
             { value: "inactive", label: t("products.inactive") },
