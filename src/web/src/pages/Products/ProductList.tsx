@@ -30,6 +30,7 @@ import {
   X,
   Eye,
   Plus,
+  Power,
   ScanBarcode,
 } from "lucide-react";
 import { keyframes } from "styled-components";
@@ -167,6 +168,7 @@ export function ProductList() {
     loadProducts,
     loadCategories,
     loadSuppliers,
+    updateProduct,
     deleteProduct,
     searchByBarcode,
     isLoading,
@@ -361,6 +363,13 @@ export function ProductList() {
     if (success) reloadWithFilters();
   };
 
+  const handleActivate = async (product: Product) => {
+    // The update DTO uses the DB field name `active` (the client type exposes it as isActive).
+    const payload: Partial<Product> & { active: boolean } = { active: true };
+    const success = await updateProduct(String(product.id), payload);
+    if (success) reloadWithFilters();
+  };
+
   const columns = [
     {
       key: "index",
@@ -482,7 +491,7 @@ export function ProductList() {
           >
             <Edit size={18} />
           </Button>
-          {product.isActive && (
+          {product.isActive ? (
             <Button
               variant="danger"
               size="small"
@@ -490,6 +499,15 @@ export function ProductList() {
               onClick={() => handleDelete(product)}
             >
               <Trash size={18} />
+            </Button>
+          ) : (
+            <Button
+              variant="primary"
+              size="small"
+              tooltip={t("products.activate")}
+              onClick={() => handleActivate(product)}
+            >
+              <Power size={18} />
             </Button>
           )}
           <Button
@@ -683,7 +701,7 @@ export function ProductList() {
                   >
                     <Edit size={16} />
                   </Button>
-                  {product.isActive && (
+                  {product.isActive ? (
                     <Button
                       variant="danger"
                       size="small"
@@ -691,6 +709,15 @@ export function ProductList() {
                       onClick={() => handleDelete(product)}
                     >
                       <Trash size={16} />
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      size="small"
+                      tooltip={t("products.activate")}
+                      onClick={() => handleActivate(product)}
+                    >
+                      <Power size={16} />
                     </Button>
                   )}
                   <Button

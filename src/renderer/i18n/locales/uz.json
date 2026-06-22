@@ -193,6 +193,7 @@
     "active": "Faol",
     "inactive": "Nofaol",
     "status": "Holat",
+    "activate": "Faollashtirish",
     "expiryDays": "Yaroqlilik kunlari",
     "expireInDays": "Muddati o'tishgacha",
     "addCategory": "Kategoriya qo'shish",
