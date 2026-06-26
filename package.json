@@ -17,6 +17,7 @@
     "seed:mxik-categories": "npx tsx scripts/seed-mxik-categories.ts",
     "test:regos-vcr": "npx tsx scripts/regos-vcr-test.ts",
     "test:aslbelgisi": "npx tsx scripts/aslbelgisi-test.ts",
+    "check:mxik": "npx tsx scripts/check-mxik-group-codes.ts",
     "build:server": "nest build",
     "prisma:generate": "prisma generate",
     "prisma:generate:sqlite": "prisma generate --schema=prisma/schema.sqlite.prisma",
