@@ -20,13 +20,17 @@ import type {
   RegosVcrConfigInput,
   FiscalConnectionResult,
   FiscalQueueStatus,
+  FiscalBulkResult,
   FiscalLabel,
   FiscalZReportStatus,
 } from '../../shared/types/fiscal.types';
+import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
 
 const MAX_ATTEMPTS = 5; // cap retries for hard (business) failures
-const WORKER_INTERVAL_MS = 30_000;
 const FISCAL_DEBUG = process.env.FISCAL_DEBUG === 'true'; // verbose position/payment logs
+// Marker for the mandatory-marking product group (Asl-Belgisi DataMatrix QR). A category's
+// mxikGroupCode is a comma-separated list; a sale is "marked" if any line's product belongs to it.
+const MARKED_GROUP_CODE = '022';
 const ERR_ZREPORT_EMPTY = 704020; // VCR: can't close an empty Z-report — benign no-op for us
 // UZ statutory VAT rate. Used when neither the product's own vatRate nor the store-wide
 // regos_vcr_vat setting is configured. A 0% fallback would send vat_value=0 for goods that
@@ -649,17 +653,132 @@ class RegosVcrService {
     return { enabled, pending, failed, fiscalized };
   }
 
+  /**
+   * One-shot admin action behind the "Fiscalise all old receipts" button — replaces the removed
+   * background retry worker for clearing a backlog:
+   *   • Receipts WITH a group-022 marked product → repair any marking labels that were captured
+   *     under a Cyrillic keyboard layout (so the VCR accepts them), reset to PENDING, fiscalise.
+   *   • Receipts WITHOUT any 022 product → mark DISABLED so they leave the pending/failed queue;
+   *     an unmarked sale predating the VCR does not need retroactive fiscalisation.
+   * Stops early (leaving the rest PENDING) if the VCR turns out to be unreachable.
+   */
+  async fiscalizeOldReceipts(): Promise<FiscalBulkResult> {
+    const cfg = await this.resolveConfig();
+    if (!cfg.enabled) {
+      return { enabled: false, fiscalized: 0, failed: 0, repaired: 0, disabled: 0 };
+    }
+    const prisma = getPrismaClient();
+
+    // Every not-yet-fiscalised receipt, with just enough to classify it by group code.
+    const sales = await prisma.sale.findMany({
+      where: { fiscalStatus: { not: 'FISCALIZED' } },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        items: {
+          select: { product: { select: { category: { select: { mxikGroupCode: true } } } } },
+        },
+      },
+    });
+
+    type SaleRow = (typeof sales)[number];
+    const isMarked = (s: SaleRow): boolean =>
+      s.items.some((it) =>
+        (it.product?.category?.mxikGroupCode ?? '')
+          .split(',')
+          .map((c) => c.trim())
+          .includes(MARKED_GROUP_CODE),
+      );
+
+    const markedIds = sales.filter(isMarked).map((s) => s.id);
+    const unmarkedIds = sales.filter((s) => !isMarked(s)).map((s) => s.id);
+
+    // Unmarked → DISABLED in one batch so they drop out of the queue badge.
+    let disabled = 0;
+    if (unmarkedIds.length) {
+      const r = await prisma.sale.updateMany({
+        where: { id: { in: unmarkedIds }, fiscalStatus: { not: 'FISCALIZED' } },
+        data: { fiscalStatus: 'DISABLED', fiscalError: null },
+      });
+      disabled = r.count;
+    }
+
+    // Marked → repair labels, reset, fiscalise one at a time (the VCR is single-threaded; each
+    // fiscalizeSale already serialises through runExclusive).
+    let fiscalized = 0;
+    let failed = 0;
+    let repaired = 0;
+    let unreachable = false;
+    for (const id of markedIds) {
+      repaired += await this.repairSaleLabels(id);
+      await prisma.sale
+        .update({ where: { id }, data: { fiscalStatus: 'PENDING', fiscalAttempts: 0, fiscalError: null } })
+        .catch(() => {});
+      try {
+        await this.fiscalizeSale(id);
+        fiscalized++;
+      } catch (e) {
+        failed++;
+        // VCR unreachable → stop hammering; the remaining receipts stay PENDING for a later run.
+        if (e instanceof VcrError && e.code === 0) {
+          unreachable = true;
+          break;
+        }
+      }
+    }
+
+    log.info(
+      `[fiscal] bulk fiscalise: ${fiscalized} fiscalised, ${failed} failed, ${repaired} labels repaired, ${disabled} disabled${unreachable ? ' (VCR unreachable — stopped early)' : ''}`,
+    );
+    return { enabled: true, fiscalized, failed, repaired, disabled, unreachable };
+  }
+
+  /**
+   * Repair a sale's stored marking labels (sale.regosLabels) that were captured while a Cyrillic
+   * keyboard layout was active, mapping each corrupted label back to the ASCII the scanner meant.
+   * Returns the number of labels actually changed; a no-op (0) when there are none or none are
+   * corrupted. See keyboard-layout.ts for why the corruption is deterministic and reversible.
+   */
+  private async repairSaleLabels(saleId: string): Promise<number> {
+    const prisma = getPrismaClient();
+    const sale = await prisma.sale.findUnique({
+      where: { id: saleId },
+      select: { regosLabels: true },
+    });
+    if (!sale?.regosLabels) return 0;
+    let labels: FiscalLabel[];
+    try {
+      const parsed = JSON.parse(sale.regosLabels);
+      if (!Array.isArray(parsed)) return 0;
+      labels = parsed;
+    } catch {
+      return 0;
+    }
+    let changed = 0;
+    const fixed = labels.map((l) => {
+      if (l?.label && isLayoutCorrupted(l.label)) {
+        changed++;
+        return { ...l, label: repairCyrillicLayout(l.label) };
+      }
+      return l;
+    });
+    if (changed > 0) {
+      await prisma.sale
+        .update({ where: { id: saleId }, data: { regosLabels: JSON.stringify(fixed) } })
+        .catch(() => {});
+    }
+    return changed;
+  }
+
   start(): void {
-    if (this.worker) return;
     // One-time startup diagnostic: surface what config the service actually resolved after a
     // reboot, so a "settings keep disappearing" report can be confirmed (or ruled out) from the
     // log instead of guesswork — including whether the stored VCR password decrypted.
     this.logStartupConfig().catch(() => {});
-    this.worker = setInterval(() => {
-      this.processPending().catch((e) =>
-        console.error('[fiscal] worker error:', e instanceof Error ? e.message : e),
-      );
-    }, WORKER_INTERVAL_MS);
+    // NOTE: the periodic background retry worker was removed by request. Fiscalization now happens
+    // (a) immediately when a sale is created, (b) as a flush on shift close (smena:close →
+    // processPending), and (c) on demand via the "Fiscalise all old receipts" admin button
+    // (fiscalizeOldReceipts). A silently-looping retry that hammers the VCR every 30s is gone.
   }
 
   private async logStartupConfig(): Promise<void> {

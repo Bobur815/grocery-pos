@@ -17,6 +17,10 @@ export function setupFiscalHandlers(): void {
     regosVcrService.retrySale(saleId),
   );
 
+  // Bulk: fiscalise all old (group-022) receipts and disable the rest. Manual replacement for
+  // the removed background retry worker.
+  ipcMain.handle('fiscal:fiscalizeOld', async () => regosVcrService.fiscalizeOldReceipts());
+
   ipcMain.handle('fiscal:refund', async (_event, saleId: string) =>
     regosVcrService.refundSale(saleId),
   );

@@ -25,6 +25,7 @@ import { formatCurrency as formatCurrencyBase } from "@shared/utils";
 import { Product } from "@shared/types";
 import { parseBarcode } from "../../../shared/utils/barcode-parser";
 import { parseWeightBarcode } from "../../../shared/utils/weightBarcode";
+import { physicalKeyToChar } from "../../../shared/utils/keyboard-layout";
 import { Modal } from "@renderer/components/common/Modal";
 import { useSidebar } from "@renderer/context/SidebarContext";
 
@@ -570,6 +571,18 @@ export function POSScreen() {
       setError(t("pos.enterBarcode"));
       return;
     }
+
+    // QR/DataMatrix marking codes are always printable ASCII. A plain EAN barcode is purely
+    // numeric (8/12/13 digits); anything else is treated as a QR payload. If such a payload
+    // carries Cyrillic or any other non-ASCII characters, the scanner read it under the wrong
+    // keyboard layout (e.g. RU) and the data is corrupt — reject it locally instead of doing a
+    // doomed lookup. GS1 group-separator bytes (\x1d) are expected control chars, so ignore them.
+    const isPlainBarcodeRaw = /^\d{8}$|^\d{12}$|^\d{13}$/.test(rawValue);
+    if (!isPlainBarcodeRaw && /[^\x20-\x7E]/.test(rawValue.replace(/\x1d/g, ""))) {
+      setError(t("pos.qrInvalidCharacters"));
+      writeBarcode("", true);
+      return;
+    }
     // Normalize DataMatrix: strip ZXing symbology prefix and leading FNC1 byte
     const normalizedRaw = rawValue
       .replace(/^]d2|^]C1|^]e0/, "")
@@ -927,30 +940,34 @@ export function POSScreen() {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
-      // Number keys
+      // Barcode mode: capture printable input from the PHYSICAL key (KeyboardEvent.code) so the
+      // scanner is immune to the OS input language. Under a Cyrillic (Russian) layout, `e.key`
+      // would render the scanner's keystrokes as Cyrillic and mangle alphanumeric DataMatrix
+      // marking codes (e.g. 01…21'RO+jTyXP); the physical key always yields the intended ASCII.
+      // Shift is honoured for case; Ctrl/Alt/Cmd combos stay app shortcuts. ALT-numeric / IME
+      // input has no mapped physical key but arrives as a correct printable `e.key`, so fall
+      // back to that. Letters/symbols/digits all flow through here in barcode mode.
+      if (inputMode === "barcode" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        const physical = physicalKeyToChar(e.code, e.shiftKey);
+        const ch =
+          physical ??
+          (e.key.length === 1 && /^[\x20-\x7E]$/.test(e.key) ? e.key : null);
+        if (ch !== null) {
+          e.preventDefault();
+          writeBarcode(barcodeRef.current + ch);
+          setError("");
+          return;
+        }
+      }
+
+      // Number keys (ID / quantity modes — barcode digits are handled above)
       if (/^[0-9]$/.test(e.key)) {
         e.preventDefault();
-        if (inputMode === "barcode") {
-          writeBarcode(barcodeRef.current + e.key);
-        } else if (inputMode === "id") {
+        if (inputMode === "id") {
           setId((prev) => prev + e.key);
         } else {
           setQuantity((prev) => (prev === "0" ? e.key : prev + e.key));
         }
-        setError("");
-      }
-      // Non-digit printable characters (letters/symbols) — barcode mode only, so GS1
-      // DataMatrix marking codes (e.g. 01…21'RO+jTyXP)?MA93WGJv) are captured intact.
-      // ID/quantity stay numeric. Modifier combos (Ctrl/Alt/Cmd) are left as shortcuts.
-      else if (
-        inputMode === "barcode" &&
-        e.key.length === 1 &&
-        !e.ctrlKey &&
-        !e.altKey &&
-        !e.metaKey
-      ) {
-        e.preventDefault();
-        writeBarcode(barcodeRef.current + e.key);
         setError("");
       }
       // Backspace

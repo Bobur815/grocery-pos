@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     setConfig: (input: unknown) => ipcRenderer.invoke("fiscal:setConfig", input),
     testConnection: () => ipcRenderer.invoke("fiscal:testConnection"),
     getStatus: () => ipcRenderer.invoke("fiscal:getStatus"),
+    fiscalizeOld: () => ipcRenderer.invoke("fiscal:fiscalizeOld"),
     retrySale: (saleId: string) => ipcRenderer.invoke("fiscal:retrySale", saleId),
     refund: (saleId: string) => ipcRenderer.invoke("fiscal:refund", saleId),
     printDuplicate: (saleId: string) => ipcRenderer.invoke("fiscal:printDuplicate", saleId),
@@ -478,6 +479,7 @@ declare global {
         ) => Promise<import("../shared/types/fiscal.types").RegosVcrConfig>;
         testConnection: () => Promise<import("../shared/types/fiscal.types").FiscalConnectionResult>;
         getStatus: () => Promise<import("../shared/types/fiscal.types").FiscalQueueStatus>;
+        fiscalizeOld: () => Promise<import("../shared/types/fiscal.types").FiscalBulkResult>;
         retrySale: (saleId: string) => Promise<{ ok: boolean; error?: string }>;
         refund: (saleId: string) => Promise<{ ok: boolean; fiscalSign?: string; error?: string }>;
         printDuplicate: (saleId: string) => Promise<{ ok: boolean; error?: string }>;

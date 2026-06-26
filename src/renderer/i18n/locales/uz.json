@@ -146,7 +146,8 @@
     "zeroWeight": "Tarozi nol og'irlik qaytardi — qayta o'lchang",
     "markingCodeInCart": "Bu mahsulot allaqachon savatga qo'shilgan (noyob QR)",
     "markingCodeAlreadySold": "Bu mahsulot allaqachon sotilgan {{when}} (terminal: {{terminal}})",
-    "qrOnlyProduct": "Bu mahsulot faqat markirovka QR-kodi orqali sotiladi — QR ni skaner qiling"
+    "qrOnlyProduct": "Bu mahsulot faqat markirovka QR-kodi orqali sotiladi — QR ni skaner qiling",
+    "qrInvalidCharacters": "QR-kod noto'g'ri o'qildi (kirill/yaroqsiz belgilar) — klaviatura tilini lotinga o'tkazib, qayta skaner qiling"
   },
   "products": {
     "title": "Mahsulotlar",
@@ -308,7 +309,13 @@
     "queueStatus": "Fiskallashtirish navbati",
     "fiscalized": "Fiskallashtirildi",
     "pending": "Kutilmoqda",
-    "failed": "Xatolar"
+    "failed": "Xatolar",
+    "bulkButton": "Barcha eski cheklarni fiskallashtirish",
+    "bulkRunning": "Cheklar qayta ishlanmoqda…",
+    "bulkHint": "Markirovkalangan tovarli (022-guruh) barcha eski cheklarni QR-belgilarini to'g'rilab fiskallashtiradi. Qolgan eski cheklar fiskallashtirish talab qilinmaydi deb belgilanadi.",
+    "bulkDone": "Tayyor: fiskallashtirildi {{fiscalized}}, xatolar {{failed}}, belgilar tuzatildi {{repaired}}, o'chirildi {{disabled}}",
+    "bulkUnreachable": "Virtual kassa mavjud emas — qayta ishlash to'xtatildi",
+    "disabledFirst": "Avval fiskallashtirishni yoqing"
   },
   "reports": {
     "title": "Hisobotlar",

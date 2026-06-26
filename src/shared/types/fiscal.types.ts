@@ -84,3 +84,19 @@ export interface FiscalActionResult {
   ok: boolean;
   error?: string;
 }
+
+/**
+ * Result of the "fiscalise all old receipts" bulk action. Only receipts containing a
+ * group-022 marked product are fiscalised (their marking labels are repaired first, in case
+ * they were captured under a Cyrillic keyboard layout); non-022 unfiscalised receipts are
+ * marked DISABLED so they leave the queue.
+ */
+export interface FiscalBulkResult {
+  enabled: boolean;
+  fiscalized: number; // 022 receipts successfully fiscalised
+  failed: number; // 022 receipts that still failed (e.g. missing/invalid label, VCR error)
+  repaired: number; // marking labels corrected from a corrupted (Cyrillic) capture
+  disabled: number; // non-022 receipts moved out of the queue
+  unreachable?: boolean; // true if the VCR was unreachable and the run stopped early
+  error?: string;
+}

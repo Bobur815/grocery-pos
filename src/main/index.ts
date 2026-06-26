@@ -165,7 +165,9 @@ async function launchMainApp(): Promise<void> {
   syncService = new SyncService();
   syncService.start();
 
-  // Start the REGOS:VCR fiscalization retry worker (no-op unless fiscal is enabled)
+  // REGOS:VCR fiscalization startup (logs resolved config). The periodic background retry worker
+  // was removed — fiscalization runs on new-sale, on shift close, and via the manual
+  // "Fiscalise all old receipts" admin button.
   regosVcrService.start();
 }
 

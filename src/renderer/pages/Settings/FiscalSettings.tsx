@@ -114,6 +114,7 @@ export function FiscalSettings() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<FiscalConnectionResult | null>(null);
   const [queue, setQueue] = useState<FiscalQueueStatus | null>(null);
+  const [bulkRunning, setBulkRunning] = useState(false);
 
   // Config load state. The form must NOT show its editable defaults until the real config has
   // loaded — otherwise a transient load failure would display defaults that, if saved, would
@@ -191,6 +192,45 @@ export function FiscalSettings() {
       toast.error(t('common.error'));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const refreshQueue = useCallback(() => {
+    window.electronAPI.fiscal.getStatus().then(setQueue).catch(() => {});
+  }, []);
+
+  const handleFiscalizeOld = async () => {
+    setBulkRunning(true);
+    try {
+      const r = await window.electronAPI.fiscal.fiscalizeOld();
+      if (!r.enabled) {
+        toast.error(t('fiscalSettings.disabledFirst', 'Сначала включите фискализацию'));
+        return;
+      }
+      const summary = t('fiscalSettings.bulkDone', {
+        defaultValue:
+          'Готово: фискализировано {{fiscalized}}, ошибок {{failed}}, исправлено меток {{repaired}}, отключено {{disabled}}',
+        fiscalized: r.fiscalized,
+        failed: r.failed,
+        repaired: r.repaired,
+        disabled: r.disabled,
+      });
+      if (r.unreachable) {
+        toast.error(
+          t('fiscalSettings.bulkUnreachable', 'Виртуальная касса недоступна — обработка остановлена') +
+            '. ' +
+            summary,
+        );
+      } else if (r.failed > 0) {
+        toast.error(summary);
+      } else {
+        toast.success(summary);
+      }
+    } catch {
+      toast.error(t('common.error'));
+    } finally {
+      setBulkRunning(false);
+      refreshQueue();
     }
   };
 
@@ -360,6 +400,23 @@ export function FiscalSettings() {
             {t('fiscalSettings.pending', 'В ожидании')}: {queue.pending} ·{' '}
             {t('fiscalSettings.failed', 'Ошибки')}: {queue.failed}
           </Muted>
+          <Muted>
+            {t(
+              'fiscalSettings.bulkHint',
+              'Фискализирует все старые чеки с маркированными товарами (группа 022), исправляя QR-метки. Остальные старые чеки помечаются как не требующие фискализации.',
+            )}
+          </Muted>
+          <ButtonRow>
+            <Button
+              variant="secondary"
+              onClick={handleFiscalizeOld}
+              disabled={bulkRunning || !queue.enabled}
+            >
+              {bulkRunning
+                ? t('fiscalSettings.bulkRunning', 'Обработка чеков…')
+                : t('fiscalSettings.bulkButton', 'Фискализировать все старые чеки')}
+            </Button>
+          </ButtonRow>
         </Card>
       )}
 
