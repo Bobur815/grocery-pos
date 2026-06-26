@@ -15,6 +15,7 @@ import {
   KbToggle,
 } from "../../components/common/SearchControls";
 import { debounce } from "../../utils/helpers";
+import { isMarkedMxik } from "../../../shared/utils/marking";
 
 const Container = styled.div`
   flex: 1;
@@ -186,9 +187,6 @@ const NoResults = styled.div`
   grid-column: 1 / -1;
 `;
 
-// MXIK group code for "Salqin ichimliklar" — not sellable from the POS catalog.
-const EXCLUDED_MXIK_GROUP_CODE = "022";
-
 interface ProductSearchProps {
   onSelect: (product: Product) => void;
   // Raise the on-screen keyboard above a host modal (e.g. the Catalog modal, overlay z-index 1000).
@@ -272,25 +270,15 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
   const categoryName = (c: { nameRu: string; nameUz: string }) =>
     i18n.language === "uz" ? c.nameUz || c.nameRu : c.nameRu;
 
-  // "Salqin ichimliklar" (MXIK group 022) can't be sold/selected from the POS
-  // catalog, so hide it from both the quick-filter buttons and the dropdown.
-  const excludedCategoryIds = new Set(
-    categories
-      .filter((c) => c.mxikGroupCode === EXCLUDED_MXIK_GROUP_CODE)
-      .map((c) => Number(c.id)),
-  );
-
-  // Top-selling quick-filter buttons, minus any excluded category.
-  const visibleTopCategories = topCategories.filter(
-    (c) => !excludedCategoryIds.has(Number(c.id)),
-  );
+  // Marked goods (MXIK group 022) are hidden per-product from the catalog below — they require a
+  // QR scan — so categories are no longer excluded wholesale (a category's group list spans many
+  // groups and doesn't imply its products are marked).
+  const visibleTopCategories = topCategories;
 
   // Categories not already shown as a top-5 button — offered in the dropdown.
   const topCategoryIds = new Set(visibleTopCategories.map((c) => c.id));
   const otherCategories = categories.filter(
-    (c) =>
-      !topCategoryIds.has(Number(c.id)) &&
-      !excludedCategoryIds.has(Number(c.id)),
+    (c) => !topCategoryIds.has(Number(c.id)),
   );
   const selectedIsOther =
     selectedCategoryId != null && !topCategoryIds.has(selectedCategoryId);
@@ -319,10 +307,7 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
     searchQuery.trim() || selectedCategoryId != null || priceQuery.trim()
       ? (products as unknown as Product[])
       : topSelling
-  ).filter(
-    (p) =>
-      p.isActive && p.category?.mxikGroupCode !== EXCLUDED_MXIK_GROUP_CODE,
-  );
+  ).filter((p) => p.isActive && !isMarkedMxik(p.mxik));
 
   return (
     <Container>

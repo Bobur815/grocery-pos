@@ -25,12 +25,10 @@ import type {
   FiscalZReportStatus,
 } from '../../shared/types/fiscal.types';
 import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
+import { isMarkedMxik } from '../../shared/utils/marking';
 
 const MAX_ATTEMPTS = 5; // cap retries for hard (business) failures
 const FISCAL_DEBUG = process.env.FISCAL_DEBUG === 'true'; // verbose position/payment logs
-// Marker for the mandatory-marking product group (Asl-Belgisi DataMatrix QR). A category's
-// mxikGroupCode is a comma-separated list; a sale is "marked" if any line's product belongs to it.
-const MARKED_GROUP_CODE = '022';
 const ERR_ZREPORT_EMPTY = 704020; // VCR: can't close an empty Z-report — benign no-op for us
 // UZ statutory VAT rate. Used when neither the product's own vatRate nor the store-wide
 // regos_vcr_vat setting is configured. A 0% fallback would send vat_value=0 for goods that
@@ -669,26 +667,21 @@ class RegosVcrService {
     }
     const prisma = getPrismaClient();
 
-    // Every not-yet-fiscalised receipt, with just enough to classify it by group code.
+    // Every not-yet-fiscalised receipt, with just enough to classify it as marked goods.
+    // Marking is a per-product property (the product's own MXIK group 022), NOT the category's
+    // group list — a category's list can span many groups and must not gate marking.
     const sales = await prisma.sale.findMany({
       where: { fiscalStatus: { not: 'FISCALIZED' } },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
-        items: {
-          select: { product: { select: { category: { select: { mxikGroupCode: true } } } } },
-        },
+        items: { select: { product: { select: { mxik: true } } } },
       },
     });
 
     type SaleRow = (typeof sales)[number];
     const isMarked = (s: SaleRow): boolean =>
-      s.items.some((it) =>
-        (it.product?.category?.mxikGroupCode ?? '')
-          .split(',')
-          .map((c) => c.trim())
-          .includes(MARKED_GROUP_CODE),
-      );
+      s.items.some((it) => isMarkedMxik(it.product?.mxik));
 
     const markedIds = sales.filter(isMarked).map((s) => s.id);
     const unmarkedIds = sales.filter((s) => !isMarked(s)).map((s) => s.id);

@@ -26,6 +26,7 @@ import { Product } from "@shared/types";
 import { parseBarcode } from "../../../shared/utils/barcode-parser";
 import { parseWeightBarcode } from "../../../shared/utils/weightBarcode";
 import { physicalKeyToChar } from "../../../shared/utils/keyboard-layout";
+import { isMarkedMxik } from "../../../shared/utils/marking";
 import { Modal } from "@renderer/components/common/Modal";
 import { useSidebar } from "@renderer/context/SidebarContext";
 
@@ -523,11 +524,9 @@ export function POSScreen() {
           return;
         }
 
-        const idGroupCodes = (product.category?.mxikGroupCode ?? "")
-          .split(",")
-          .map((c) => c.trim())
-          .filter(Boolean);
-        if (idGroupCodes.includes("022")) {
+        // Marked goods (MXIK group 022) are QR-only — keyed off the product's own MXIK, not its
+        // category (a category's group list can span many groups and must not gate marking).
+        if (isMarkedMxik(product.mxik)) {
           setId("");
           setError(t("pos.qrOnlyProduct"));
           return;
@@ -743,12 +742,11 @@ export function POSScreen() {
             return;
           }
 
-          // Group 022 marking code check: prevent resale of unique DataMatrix QR codes
-          const groupCodes = (product.category?.mxikGroupCode ?? "")
-            .split(",")
-            .map((c) => c.trim())
-            .filter(Boolean);
-          if (hasSerial && groupCodes.includes("022")) {
+          // Group 022 marking: marked goods must be sold via their unique DataMatrix QR, never a
+          // plain EAN. Decided per-product from the product's own MXIK (not its category's group
+          // list, which can legitimately span many groups after the audit-coverage expansion).
+          const isMarked = isMarkedMxik(product.mxik);
+          if (hasSerial && isMarked) {
             // Check for duplicate in current cart
             const alreadyInCart = items.some(
               (i) => i.markingCode === normalizedNoGS,
@@ -811,7 +809,7 @@ export function POSScreen() {
           // Block plain EAN barcode entry for group-022 marking products.
           // DataMatrix QR inputs are longer and non-numeric — those pass through.
           const isPlainBarcode = /^\d{8}$|^\d{12}$|^\d{13}$/.test(rawValue);
-          if (isPlainBarcode && groupCodes.includes("022")) {
+          if (isPlainBarcode && isMarked) {
             writeBarcode("", true);
             setError(t("pos.qrOnlyProduct"));
             return;
@@ -1104,11 +1102,8 @@ export function POSScreen() {
         );
         return;
       }
-      const selectGroupCodes = (product.category?.mxikGroupCode ?? "")
-        .split(",")
-        .map((c) => c.trim())
-        .filter(Boolean);
-      if (selectGroupCodes.includes("022")) {
+      // Marked goods (MXIK group 022) can't be added from the catalog — they require a QR scan.
+      if (isMarkedMxik(product.mxik)) {
         setError(t("pos.qrOnlyProduct"));
         return;
       }
