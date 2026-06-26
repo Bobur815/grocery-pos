@@ -84,3 +84,11 @@ src/generated/
 /uploads/*
 !/uploads/.gitkeep
 /uploads-staging/
+
+# MXIK audit artifacts (generated locally, not source)
+/products.json
+/mxik-check-report.csv
+/mxik-check-report.json
+/expand-category-groups.sql
+/outliers-to-recategorise.csv
+/products-022-not-napitki.csv
