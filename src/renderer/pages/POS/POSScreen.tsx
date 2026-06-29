@@ -27,6 +27,7 @@ import { parseBarcode } from "../../../shared/utils/barcode-parser";
 import { parseWeightBarcode } from "../../../shared/utils/weightBarcode";
 import { physicalKeyToChar } from "../../../shared/utils/keyboard-layout";
 import { isMarkedMxik } from "../../../shared/utils/marking";
+import { findBlockedMarkingItems, translateMarkingStatus } from "./markingCirculation";
 import { Modal } from "@renderer/components/common/Modal";
 import { useSidebar } from "@renderer/context/SidebarContext";
 
@@ -776,8 +777,9 @@ export function POSScreen() {
             });
             resetInputs();
 
-            // Background resale check — skippable via Fiscal settings toggle.
+            // Background marking-code checks — skippable via Fiscal settings toggle.
             if (markingCheckRef.current) {
+              // 1) Resale check: has this exact label already been sold (local/cross-terminal)?
               window.electronAPI.markingCodes
                 .check(normalizedNoGS)
                 .then((checkResult) => {
@@ -801,6 +803,30 @@ export function POSScreen() {
                 })
                 .catch(() => {
                   // IPC/network error — allow the sale (offline-first); line stays in cart.
+                });
+
+              // 2) Circulation check (asl-belgisi): block an out-of-circulation / unknown label
+              // early with a clear message, instead of letting REGOS reject the whole receipt at
+              // fiscalization ([704030] товар вне оборота). Offline-first: an unreachable registry
+              // leaves the line in the cart and REGOS stays the authoritative gate.
+              window.electronAPI.markingCodes
+                .checkCirculation(normalizedNoGS)
+                .then((res) => {
+                  const r = res as {
+                    reachable: boolean;
+                    outOfCirculation: boolean;
+                    status?: string;
+                  };
+                  if (!r.reachable || !r.outOfCirculation) return;
+                  removeByMarkingCode(normalizedNoGS);
+                  const msg = t("pos.markingCodeNotValid", {
+                    status: translateMarkingStatus(r.status, t),
+                  });
+                  setError(msg);
+                  toast.error(msg);
+                })
+                .catch(() => {
+                  // IPC/network error — allow the sale (offline-first); REGOS remains the gate.
                 });
             }
             return;
@@ -853,6 +879,23 @@ export function POSScreen() {
         setShowSmenaModal(true);
         return;
       }
+
+      // Synchronous circulation guard: block quick-pay if any marked line is out of circulation,
+      // removing it so the cashier re-pays with a clean cart. Catches the race where the optimistic
+      // scan-time check hasn't resolved yet. Offline-first (unreachable → not blocked).
+      if (markingCheckRef.current) {
+        const blocked = await findBlockedMarkingItems(items);
+        if (blocked.length > 0) {
+          blocked.forEach((b) => removeByMarkingCode(b.code));
+          const msg = t("pos.markingCodeNotValid", {
+            status: translateMarkingStatus(blocked[0].status, t),
+          });
+          setError(msg);
+          toast.error(msg);
+          return;
+        }
+      }
+
       payingRef.current = true;
 
       try {
@@ -923,6 +966,7 @@ export function POSScreen() {
       createSale,
       updateSale,
       clearCart,
+      removeByMarkingCode,
       toast,
       t,
     ],

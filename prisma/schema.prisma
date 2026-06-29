@@ -41,7 +41,6 @@ model Store {
   suppliers            Supplier[]
   supplierTransactions SupplierTransaction[]
   systemSettings       SystemSetting[]
-  auditLogs            AuditLog[]
   terminalHeartbeats   TerminalHeartbeat[]
   terminalLogs         TerminalLog[]
   soldMarkingCodes     SoldMarkingCode[]
@@ -409,26 +408,6 @@ model PendingMarkingCode {
   @@unique([storeId, code])
   @@index([storeId])
   @@map("pending_marking_codes")
-}
-
-model AuditLog {
-  id       String  @id @default(cuid())
-  storeId  String  @map("store_id")
-  store    Store   @relation(fields: [storeId], references: [id])
-  userId   String  @map("user_id")
-  phone    String  @map("phone")
-  action   String  // "create_product", "delete_sale", etc
-  entity   String  // "product", "sale", "user"
-  entityId String  @map("entity_id")
-  details  String? @db.Text // JSON
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@index([storeId])
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-  @@map("audit_logs")
 }
 
 // ==================== MXIK CATALOG ====================

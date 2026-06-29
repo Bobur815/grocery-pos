@@ -20,7 +20,6 @@ import { UserSettings } from './pages/Settings/UserSettings';
 import { DevicesPage } from './pages/Settings/DevicesPage';
 import { StoreList } from './pages/Admin/StoreList';
 import { LogsPage } from './pages/Admin/LogsPage';
-import { AuditLogsPage } from './pages/Admin/AuditLogsPage';
 import { LoginBannerPage } from './pages/Admin/LoginBannerPage';
 import { SubscriptionPlansPage } from './pages/Admin/SubscriptionPlansPage';
 
@@ -106,9 +105,6 @@ export function App() {
           <Route path="settings/system" element={<PrivateRoute adminOnly><SystemSettings /></PrivateRoute>} />
           <Route path="settings/user" element={<UserSettings />} />
           <Route path="settings/devices" element={<DevicesPage />} />
-
-          {/* Audit logs — accessible to ADMIN (own store) and SUPER_ADMIN (all stores) */}
-          <Route path="admin/audit-logs" element={<PrivateRoute adminOnly><AuditLogsPage /></PrivateRoute>} />
 
           {/* Super Admin */}
           <Route path="admin/stores" element={<PrivateRoute superAdminOnly><StoreList /></PrivateRoute>} />

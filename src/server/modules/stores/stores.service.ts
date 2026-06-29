@@ -247,7 +247,6 @@ export class StoresService {
 
     for (const { id } of expired) {
       await this.prisma.$transaction([
-        this.prisma.auditLog.deleteMany({ where: { storeId: id } }),
         this.prisma.terminalHeartbeat.deleteMany({ where: { storeId: id } }),
         this.prisma.systemSetting.deleteMany({ where: { storeId: id } }),
         this.prisma.supplierTransaction.deleteMany({ where: { storeId: id } }),

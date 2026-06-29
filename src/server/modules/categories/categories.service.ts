@@ -36,7 +36,7 @@ export class CategoriesService {
   }
 
   async syncBulk(storeId: string, categories: Array<{ nameUz: string; nameRu: string; active?: boolean; mxikGroupCode?: string | null }>) {
-    let created = 0, updated = 0, errors = 0;
+    let created = 0, skipped = 0, errors = 0;
 
     // Match incoming categories on a normalized `nameUz` ONLY — not exact nameRu+nameUz.
     // The old both-names match spawned a brand-new category on every upload whenever a
@@ -58,16 +58,12 @@ export class CategoriesService {
       try {
         const existing = byNameUz.get(normalize(c.nameUz));
         if (existing) {
-          // NOTE: mxik_group_code is intentionally NOT updated from terminal uploads.
-          // It is server-authoritative (set via the dashboard / mapping scripts) and only
-          // flows DOWN to terminals via syncCategories. Accepting it here let a terminal
-          // with a null local value wipe the server's mapping (category bounce-back).
-          const data: { active?: boolean } = {};
-          if (c.active !== undefined) data.active = c.active;
-          if (Object.keys(data).length > 0) {
-            await this.prisma.category.update({ where: { id: existing.id }, data });
-          }
-          updated++;
+          // VPS is the source of truth for category master data — a terminal must NEVER overwrite
+          // an existing category (active, names, mxik_group_code). active was previously updated
+          // here, which let a terminal revert a web-admin deactivation; mxik_group_code was already
+          // shielded. Existing categories only flow DOWN to terminals via syncCategories; terminals
+          // may only CREATE brand-new offline categories (the else branch below).
+          skipped++;
         } else {
           // New terminal-originated category: leave mxik_group_code null for an admin to map.
           const newCat = await this.prisma.category.create({
@@ -82,7 +78,7 @@ export class CategoriesService {
         errors++;
       }
     }
-    return { created, updated, errors };
+    return { created, skipped, errors };
   }
 
   private async findById(id: number, storeId: string) {

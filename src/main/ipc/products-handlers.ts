@@ -388,21 +388,6 @@ export function setupProductsHandlers(): void {
       include: { category: true, supplier: true },
     });
 
-    // Log action
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUser.id,
-        phone: currentUser.phone,
-        action: "create_product",
-        entity: "product",
-        entityId: String(product.id),
-        details: JSON.stringify({
-          barcode: product.barcode,
-          name: product.nameRu,
-        }),
-      },
-    });
-
     return ipcSafe(serializeProduct(product));
   });
 
@@ -485,21 +470,6 @@ export function setupProductsHandlers(): void {
         include: { category: true, supplier: true },
       });
 
-      // Log action
-      await prisma.auditLog.create({
-        data: {
-          userId: currentUser.id,
-          phone: currentUser.phone,
-          action: "update_product",
-          entity: "product",
-          entityId: String(product.id),
-          details: JSON.stringify({
-            barcode: product.barcode,
-            name: product.nameRu,
-          }),
-        },
-      });
-
       return ipcSafe(serializeProduct(product));
     },
   );
@@ -538,17 +508,6 @@ export function setupProductsHandlers(): void {
 
     // Hard delete the product
     await prisma.product.delete({ where: { id: numericId } });
-
-    // Log action
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUser.id,
-        phone: currentUser.phone,
-        action: "delete_product",
-        entity: "product",
-        entityId: String(id),
-      },
-    });
 
     return true;
   });

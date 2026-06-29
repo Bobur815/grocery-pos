@@ -2,7 +2,7 @@ import { BrowserWindow } from 'electron';
 import { syncSales, SalesSyncResult } from './sales-sync';
 import { syncProducts, syncCategories, syncSuppliers, syncUsers, syncSettings } from './products-sync';
 import { getCurrentUser } from '../ipc/auth-handlers';
-import { uploadLocalData, uploadAuditLogs } from './upload-sync';
+import { uploadLocalData } from './upload-sync';
 import { getAppConfig } from '../config/app-config';
 import { getPrismaClient } from '../database/sqlite-client';
 import { getServerToken, clearServerToken } from './queue-manager';
@@ -95,13 +95,6 @@ export class SyncService {
         } catch (uploadError) {
           console.error('Upload sync failed (non-fatal):', uploadError instanceof Error ? uploadError.message : uploadError);
         }
-      }
-
-      // Upload audit logs — all roles
-      try {
-        await uploadAuditLogs();
-      } catch (auditError) {
-        console.error('Audit log sync failed (non-fatal):', auditError instanceof Error ? auditError.message : auditError);
       }
 
       // Sync sales (upload local sales to VPS) — all roles

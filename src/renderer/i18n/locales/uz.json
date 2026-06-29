@@ -146,6 +146,17 @@
     "zeroWeight": "Tarozi nol og'irlik qaytardi — qayta o'lchang",
     "markingCodeInCart": "Bu mahsulot allaqachon savatga qo'shilgan (noyob QR)",
     "markingCodeAlreadySold": "Bu mahsulot allaqachon sotilgan {{when}} (terminal: {{terminal}})",
+    "markingCodeNotValid": "Markirovka kodi holati: {{status}} — sotish uchun yaroqsiz",
+    "markingStatus": {
+      "WITHDRAWN": "muomaladan chiqarilgan",
+      "SOLD": "allaqachon sotilgan",
+      "RETIRED": "hisobdan chiqarilgan",
+      "EMITTED": "emissiya qilingan, muomalaga kiritilmagan",
+      "WRITTEN_OFF": "hisobdan o'chirilgan",
+      "DISAGGREGATED": "rasformirovka qilingan",
+      "RETURNED": "qaytarilgan",
+      "NOT_FOUND": "reyestrda topilmadi"
+    },
     "qrOnlyProduct": "Bu mahsulot faqat markirovka QR-kodi orqali sotiladi — QR ni skaner qiling",
     "qrInvalidCharacters": "QR-kod noto'g'ri o'qildi (kirill/yaroqsiz belgilar) — klaviatura tilini lotinga o'tkazib, qayta skaner qiling"
   },

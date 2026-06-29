@@ -187,6 +187,169 @@ interface OfdSaleItem {
 **MXIK not syncing to SQLite terminals**
 → Check that `products-sync.ts` includes `mxik` and `packageCode` in the upsert fields.
 
+Request URL
+https://tasnif.soliq.uz/api/cls-api/elasticsearch/search?lang=uz_cyrl&search=01806001008016007&size=20&page=0
+Request Method
+GET
+Status Code
+200 OK
+Remote Address
+109.207.242.14:443
+Referrer Policy
+strict-origin-when-cross-origin
+
+Response:
+{
+    "success": true,
+    "code": 200,
+    "reason": "success",
+    "data": [
+        {
+            "mxikCode": "01806001008016007",
+            "name": "Плиткали шоколад: Победа, Пористый, сутли  180 гр фл/п",
+            "description": "1126",
+            "internationalCode": "4607005401243",
+            "label": "0",
+            "fullName": "ПЛИТКАЛИ ШОКОЛАД ПОБЕДА ПОРИСТЫЙ, СУТЛИ  180 ГР ФЛ/П ШОКОЛАД ПЛИТОЧНЫЙ ПОБЕДА ПОРИСТЫЙ МОЛОЧНЫЙ ПЛИТОЧНЫЙ 180 ГР ФЛ/П PLITKALI SHOKOLAD ПОБЕДА PORISTЫY, SUTLI  180 GR FL/P 01806001008016007 4607005401243",
+            "groupCode": "018",
+            "groupName": "КАКАО ВА УНИНГ МАҲСУЛОТЛАРИ",
+            "classCode": "01806",
+            "className": "Таркибида какао бўлган шоколад ва бошқа озиқ-овқат маҳсулотлари",
+            "positionCode": "01806001",
+            "positionName": "Шоколад ва шоколад маҳсулотлари",
+            "subPositionCode": "01806001008",
+            "subPositionName": "Плиткали шоколад",
+            "brandCode": "01806001008016",
+            "brandName": "Победа",
+            "attributeName": "Пористый, сутли  180 гр фл/п",
+            "usePackage": "1",
+            "categoryUnitId": null,
+            "categoryUnitName": null,
+            "unitsName": "шт (пакет) 180 грамм",
+            "surveyCategoryId": "54",
+            "nonChangeable": "1",
+            "lgotaId": null,
+            "lgotaName": null,
+            "recommendedCategoryUnitName": null,
+            "recommendedUnitsName": null,
+            "packageName": null,
+            "useCard": "0",
+            "property": null,
+            "categoryCode": "7",
+            "categoryName": "Озиқ-овқат маҳсулотлари",
+            "mnnName": null
+        }
+    ],
+    "recordTotal": 1,
+    "errors": null
+}
+Request URL
+https://tasnif.soliq.uz/api/cls-api/mxik/search/by-params?mxikCode=01806001008016007&size=15&page=0&lang=uz_cyrl
+Request Method
+GET
+Status Code
+200 OK
+Remote Address
+109.207.242.14:443
+Referrer Policy
+strict-origin-when-cross-origin
+
+Response:
+{
+    "success": true,
+    "code": 200,
+    "reason": "OK",
+    "data": {
+        "content": [
+            {
+                "groupCode": "018",
+                "classCode": "01806",
+                "positionCode": "01806001",
+                "subPositionCode": "01806001008",
+                "brandCode": "01806001008016",
+                "mxikCode": "01806001008016007",
+                "unitCode": null,
+                "commonUnitCode": null,
+                "groupName": "КАКАО ВА УНИНГ МАҲСУЛОТЛАРИ",
+                "className": "Таркибида какао бўлган шоколад ва бошқа озиқ-овқат маҳсулотлари",
+                "positionName": "Шоколад ва шоколад маҳсулотлари",
+                "subPositionName": "Плиткали шоколад",
+                "brandName": "Победа",
+                "mxikName": "Плиткали шоколад: Победа, Пористый, сутли  180 гр фл/п",
+                "unitName": null,
+                "commonUnitName": null,
+                "attributeName": "Пористый, сутли  180 гр фл/п",
+                "internationalCode": "4607005401243",
+                "myProduct": 0,
+                "label": 0,
+                "packages": null,
+                "units": null
+            }
+        ],
+        "pageable": {
+            "sort": {
+                "unsorted": true,
+                "sorted": false,
+                "empty": true
+            },
+            "pageSize": 15,
+            "pageNumber": 0,
+            "offset": 0,
+            "unpaged": false,
+            "paged": true
+        },
+        "last": true,
+        "totalPages": 1,
+        "totalElements": 1,
+        "sort": {
+            "unsorted": true,
+            "sorted": false,
+            "empty": true
+        },
+        "first": true,
+        "numberOfElements": 1,
+        "size": 15,
+        "number": 0,
+        "empty": false
+    },
+    "errors": null
+}
+
+no product found response:
+{
+    "success": true,
+    "code": 200,
+    "reason": "OK",
+    "data": {
+        "content": [],
+        "pageable": {
+            "sort": {
+                "sorted": false,
+                "unsorted": true,
+                "empty": true
+            },
+            "pageNumber": 0,
+            "pageSize": 15,
+            "offset": 0,
+            "paged": true,
+            "unpaged": false
+        },
+        "last": true,
+        "totalElements": 0,
+        "totalPages": 0,
+        "sort": {
+            "sorted": false,
+            "unsorted": true,
+            "empty": true
+        },
+        "first": true,
+        "numberOfElements": 0,
+        "size": 15,
+        "number": 0,
+        "empty": true
+    },
+    "errors": null
+}
 ---
 
 *Last Updated: 2026-05-12 — reflects current production code*

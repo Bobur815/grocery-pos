@@ -501,57 +501,6 @@ export const logs = {
   },
 };
 
-// ─── Audit Logs ───────────────────────────────────────────────────────────────
-
-export interface AuditLogEntry {
-  id: string;
-  storeId: string;
-  store: { name: string };
-  userId: string;
-  phone: string;
-  action: string;
-  entity: string;
-  entityId: string;
-  details: string | null;
-  createdAt: string;
-}
-
-export interface AuditLogsResponse {
-  items: AuditLogEntry[];
-  total: number;
-  page: number;
-  limit: number;
-  pages: number;
-}
-
-export interface AuditLogsQueryParams {
-  storeId?: string;
-  phone?: string;
-  action?: string;
-  entity?: string;
-  from?: string;
-  to?: string;
-  page?: number;
-  limit?: number;
-}
-
-export interface AuditLogsMeta {
-  stores: string[];
-  actions: string[];
-  entities: string[];
-}
-
-export const auditLogs = {
-  getMeta: async (): Promise<AuditLogsMeta> => {
-    const { data } = await axiosInstance.get('/logs/audit/meta');
-    return data;
-  },
-  getAuditLogs: async (params?: AuditLogsQueryParams): Promise<AuditLogsResponse> => {
-    const { data } = await axiosInstance.get('/logs/audit', { params });
-    return data;
-  },
-};
-
 // ─── Site Config ─────────────────────────────────────────────────────────────
 
 export interface LoginBanner {

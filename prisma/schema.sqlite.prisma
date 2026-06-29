@@ -315,25 +315,6 @@ model SupplierTransaction {
   @@map("supplier_transactions")
 }
 
-// ==================== AUDIT LOG ====================
-
-model AuditLog {
-  id       String  @id @default(cuid())
-  userId   String  @map("user_id")
-  phone    String
-  action   String
-  entity   String
-  entityId String  @map("entity_id")
-  details  String?
-
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@index([userId])
-  @@index([action])
-  @@index([createdAt])
-  @@map("audit_logs")
-}
-
 // ==================== MARKING CODES (Group 022 unique QR tracking) ====================
 
 model SoldMarkingCode {

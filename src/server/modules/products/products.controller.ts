@@ -161,7 +161,7 @@ export class ProductsController {
   @Roles(UserRole.ADMIN)
   @HttpCode(200)
   @ApiOperation({
-    summary: "Bulk upsert products from POS terminal (Admin only)",
+    summary: "Bulk create new offline-created products from POS terminal (Admin only). Existing products are left unchanged — VPS is the source of truth for product master data.",
   })
   async syncBulk(
     @CurrentStore() storeId: string,

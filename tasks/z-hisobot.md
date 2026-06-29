@@ -63,7 +63,9 @@ diff = finalCash - expectedCash   (positive = overage, negative = shortage)
 ## Returns Tracking
 
 Returns are NOT a first-class model. When a sale is deleted:
-1. `sales:delete` handler stores `smenaId` + `finalAmount` in `audit_logs.details` JSON.
+1. `sales:delete` handler stores `smenaId` + `finalAmount` in `audit_logs.details` JSON (written via
+   raw SQL — the general AuditLog feature was removed, so `audit_logs` is now a local SQLite table
+   kept solely for this delete_sale/returns tracking).
 2. `computeSmenaStats()` queries:
    ```sql
    SELECT COUNT(*), SUM(json_extract(details,'$.finalAmount'))

@@ -2,7 +2,6 @@ import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { LogsService } from './logs.service';
 import { UploadLogsDto } from './dto/upload-logs.dto';
-import { UploadAuditLogsDto } from './dto/upload-audit-logs.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { StoreGuard } from '../../common/guards/store.guard';
 import { CurrentStore } from '../../common/decorators/current-store.decorator';
@@ -24,54 +23,11 @@ export class LogsController {
     return this.logsService.uploadLogs(storeId, dto);
   }
 
-  @Post('audit')
-  @UseGuards(JwtAuthGuard, StoreGuard)
-  @ApiOperation({ summary: 'Terminal uploads a batch of audit log entries' })
-  async uploadAudit(
-    @CurrentStore() storeId: string,
-    @Body() dto: UploadAuditLogsDto,
-  ) {
-    return this.logsService.uploadAuditLogs(storeId, dto);
-  }
-
   @Get('meta')
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Distinct stores and terminals present in logs' })
   async getMeta(@CurrentUser() user: { role: string; storeId: string | null }) {
     return this.logsService.getMeta(user.role, user.storeId ?? null);
-  }
-
-  @Get('audit/meta')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Distinct stores, actions and entities present in audit logs' })
-  async getAuditMeta(@CurrentUser() user: { role: string; storeId: string | null }) {
-    return this.logsService.getAuditLogsMeta(user.role, user.storeId ?? null);
-  }
-
-  @Get('audit')
-  @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Query audit logs (admin/super-admin)' })
-  async getAuditLogs(
-    @CurrentUser() user: { role: string; storeId: string | null },
-    @Query('storeId') storeId?: string,
-    @Query('phone') phone?: string,
-    @Query('action') action?: string,
-    @Query('entity') entity?: string,
-    @Query('from') from?: string,
-    @Query('to') to?: string,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
-  ) {
-    return this.logsService.getAuditLogs(user.role, user.storeId ?? null, {
-      storeId,
-      phone,
-      action,
-      entity,
-      from,
-      to,
-      page: page ? parseInt(page, 10) : undefined,
-      limit: limit ? parseInt(limit, 10) : undefined,
-    });
   }
 
   @Get()

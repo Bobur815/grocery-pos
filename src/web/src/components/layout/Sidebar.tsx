@@ -18,7 +18,6 @@ import {
   Store,
   ScrollText,
   Image,
-  ShieldCheck,
   CreditCard,
   type LucideIcon,
 } from "lucide-react";
@@ -338,7 +337,7 @@ export function Sidebar() {
   );
 
   const mobileNavItems = isSuperAdmin
-    ? [{ to: "/admin/stores", icon: Store }, { to: "/admin/logs", icon: ScrollText }, { to: "/admin/audit-logs", icon: ShieldCheck }, { to: "/admin/login-banner", icon: Image }, { to: "/admin/subscription-plans", icon: CreditCard }, { to: "/settings/user", icon: Settings }]
+    ? [{ to: "/admin/stores", icon: Store }, { to: "/admin/logs", icon: ScrollText }, { to: "/admin/login-banner", icon: Image }, { to: "/admin/subscription-plans", icon: CreditCard }, { to: "/settings/user", icon: Settings }]
     : [
         { to: "/products", icon: Package },
         { to: "/products/stock", icon: ClipboardList },
@@ -415,7 +414,6 @@ export function Sidebar() {
                   )}
                   {renderNavItem("/suppliers", Truck, t("suppliers.title"))}
                   {renderNavItem("/users", Users, t("nav.users"))}
-                  {renderNavItem("/admin/audit-logs", ShieldCheck, "Audit Logs")}
                   {renderNavItem("/settings", Settings, t("nav.settings"))}
                 </NavSection>
               )}
@@ -436,7 +434,6 @@ export function Sidebar() {
               <SectionTitle $collapsed={isCollapsed}>Super Admin</SectionTitle>
               {renderNavItem("/admin/stores", Store, "Stores")}
               {renderNavItem("/admin/logs", ScrollText, "Logs")}
-              {renderNavItem("/admin/audit-logs", ShieldCheck, "Audit Logs")}
               {renderNavItem("/admin/login-banner", Image, "Login Banner")}
               {renderNavItem("/admin/subscription-plans", CreditCard, "Subscriptions")}
               {renderNavItem("/settings/user", Settings, t("nav.settings"))}

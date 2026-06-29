@@ -2,7 +2,6 @@ import { getPrismaClient } from "../database/sqlite-client";
 import { getAppConfig } from "../config/app-config";
 import { getServerToken } from "./queue-manager";
 import type {
-  AuditLog,
   Category,
   Supplier,
   Product,
@@ -65,56 +64,6 @@ export async function uploadLocalData(): Promise<void> {
   await setLastUploadTime(prisma);
 }
 
-export async function uploadAuditLogs(): Promise<void> {
-  const prisma = getPrismaClient();
-  const token = getServerToken();
-  if (!token) return;
-
-  const config = getAppConfig();
-
-  const stored = await prisma.systemSetting.findUnique({ where: { key: 'last_audit_log_sync' } });
-  const since = stored ? new Date(stored.value) : new Date(0);
-
-  const entries = await prisma.auditLog.findMany({
-    where: { createdAt: { gt: since } },
-    orderBy: { createdAt: 'asc' },
-    take: 200,
-  });
-
-  if (entries.length === 0) return;
-
-  const res = await fetch(`${config.vpsApiUrl}/logs/audit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({
-      entries: entries.map((e: AuditLog) => ({
-        id: e.id,
-        userId: e.userId,
-        phone: e.phone,
-        action: e.action,
-        entity: e.entity,
-        entityId: e.entityId,
-        details: e.details ?? undefined,
-        createdAt: e.createdAt.toISOString(),
-      })),
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    console.error(`Failed to upload audit logs (HTTP ${res.status}): ${text}`);
-    return;
-  }
-
-  // Advance the watermark to the last entry we uploaded
-  const lastEntry = entries[entries.length - 1];
-  await prisma.systemSetting.upsert({
-    where: { key: 'last_audit_log_sync' },
-    update: { value: lastEntry.createdAt.toISOString() },
-    create: { key: 'last_audit_log_sync', value: lastEntry.createdAt.toISOString() },
-  });
-}
-
 async function uploadUsers(
   prisma: ReturnType<typeof getPrismaClient>,
   token: string,
@@ -148,8 +97,11 @@ async function uploadCategories(
   token: string,
   _since: Date,
 ): Promise<void> {
-  // Always upload all categories — they are few and the server upserts by name,
-  // so this is safe and avoids missing categories created before last_upload_sync was set.
+  // Always upload all categories — they are few, so this avoids missing categories created before
+  // last_upload_sync was set. The VPS treats /categories/sync-bulk as CREATE-ONLY (see
+  // categories.service.ts syncBulk): it is the source of truth for category master data and will
+  // NOT overwrite an existing category from this payload (active / names / mxik_group_code). The
+  // fields below therefore only take effect for brand-new offline-created categories.
   const categories = await prisma.category.findMany({});
 
   if (categories.length === 0) {
@@ -208,6 +160,12 @@ async function uploadProducts(
   token: string,
   since: Date,
 ): Promise<void> {
+  // NOTE: the VPS treats /products/sync-bulk as CREATE-ONLY (see products.service.ts syncBulk) —
+  // the server is the source of truth for product master data and will NOT overwrite an existing
+  // product from this payload. So the master fields below (active, price, name, …) only ever take
+  // effect for brand-new offline-created products; for products already on the VPS they are
+  // ignored. A product's updatedAt bumps on every sale (stock decrement), so this query also
+  // re-sends already-synced products each cycle — that's harmless given the server-side guard.
   const products = await prisma.product.findMany({
     where: { updatedAt: { gt: since } },
   });

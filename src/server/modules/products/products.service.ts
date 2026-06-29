@@ -373,7 +373,7 @@ export class ProductsService {
     }>,
   ) {
     let created = 0,
-      updated = 0,
+      skipped = 0,
       errors = 0;
     for (const p of products) {
       try {
@@ -381,28 +381,14 @@ export class ProductsService {
           where: { storeId_barcode: { storeId, barcode: p.barcode } },
         });
         if (existing) {
-          // Do NOT update stock on existing products — stock is managed exclusively
-          // via sale sync (decrements) and inventory arrivals (increments).
-          // Overwriting stock here would cause double-decrements when a terminal
-          // uploads post-sale local stock and then syncSales also decrements VPS stock.
-          await this.prisma.product.update({
-            where: { id: existing.id },
-            data: {
-              nameUz: p.nameUz,
-              nameRu: p.nameRu,
-              price: p.price,
-              ...(p.cost !== undefined && { cost: p.cost }),
-              ...(p.minStock !== undefined && { minStock: p.minStock }),
-              ...(p.unit && { unit: p.unit }),
-              ...(p.active !== undefined && { active: p.active }),
-              ...(p.productType && { productType: p.productType }),
-              ...(p.internalCode !== undefined && { internalCode: p.internalCode }),
-              ...(p.bulkQuantity !== undefined && { bulkQuantity: p.bulkQuantity }),
-              ...(p.minSaleQty !== undefined && { minSaleQty: p.minSaleQty }),
-              ...(p.maxSaleQty !== undefined && { maxSaleQty: p.maxSaleQty }),
-            },
-          });
-          updated++;
+          // VPS is the source of truth for product master data. A terminal must NEVER overwrite
+          // an existing product's fields (active / price / name / category / …): a terminal re-
+          // uploads a product whenever its local updatedAt advances, and that bumps on every sale
+          // (stock decrement), so allowing updates here would silently revert web-admin edits
+          // (e.g. deactivating a product). Terminals may only PULL existing products down (see
+          // products-sync.ts) and CREATE brand-new offline products (the else branch below).
+          // Stock itself flows only via sale sync (decrements) and inventory arrivals (increments).
+          skipped++;
         } else {
           await this.prisma.product.create({
             data: {
@@ -431,6 +417,6 @@ export class ProductsService {
         errors++;
       }
     }
-    return { created, updated, errors };
+    return { created, skipped, errors };
   }
 }

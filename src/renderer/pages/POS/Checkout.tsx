@@ -9,6 +9,7 @@ import { Modal } from "../../components/common/Modal";
 import { Button } from "../../components/common/Button";
 import { NumberPad } from "../../components/common/NumberPad";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
+import { findBlockedMarkingItems, translateMarkingStatus } from "./markingCirculation";
 
 function parseSaleError(
   err: unknown,
@@ -293,12 +294,15 @@ interface CheckoutProps {
 
 export function Checkout({ onComplete, onCancel }: CheckoutProps) {
   const { t, i18n } = useTranslation();
-  const { items, subtotal, tax, taxRate, discount, total, clearCart, editingSaleId } =
+  const { items, subtotal, tax, taxRate, discount, total, clearCart, editingSaleId, removeByMarkingCode } =
     useCartStore();
   const { createSale, updateSale, isLoading } = useSales();
   const toast = useToast();
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "card">("cash");
   const [printCheck, setPrintCheck] = useState(total >= 10000);
+
+  // Marking-code circulation guard toggle (same Fiscal setting as the scan-time check).
+  const markingCheckRef = useRef(true);
 
   // When REGOS:VCR prints the fiscal receipt itself, default POS receipt printing OFF
   // to avoid a duplicate (cashier can still tick it manually).
@@ -307,6 +311,7 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
       .getConfig()
       .then((cfg) => {
         if (cfg.enabled && cfg.vcrPrintsReceipt) setPrintCheck(false);
+        markingCheckRef.current = cfg.markingCodeCheck;
       })
       .catch(() => {});
   }, []);
@@ -343,6 +348,23 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
 
   const handlePayment = async () => {
     if (isLoading) return;
+
+    // Synchronous circulation guard: block payment if any marked line is out of circulation,
+    // removing it so the cashier re-confirms with a clean cart. Catches the race where the
+    // optimistic scan-time check hasn't resolved yet. Offline-first (unreachable → not blocked).
+    if (markingCheckRef.current) {
+      const blocked = await findBlockedMarkingItems(items);
+      if (blocked.length > 0) {
+        blocked.forEach((b) => removeByMarkingCode(b.code));
+        toast.error(
+          t("pos.markingCodeNotValid", {
+            status: translateMarkingStatus(blocked[0].status, t),
+          }),
+        );
+        return; // abort — cart updated; cashier confirms again to fiscalize the rest
+      }
+    }
+
     try {
       const saleData = {
         items: items.map((item) => ({

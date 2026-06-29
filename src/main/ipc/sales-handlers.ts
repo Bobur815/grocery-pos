@@ -6,6 +6,7 @@ import { getServerToken } from '../sync/queue-manager';
 import { regosVcrService } from '../fiscal/regos-vcr-service';
 import { savePendingMarkingCodes } from './marking-codes-handlers';
 import { format } from 'date-fns';
+import { randomUUID } from 'node:crypto';
 import type { Sale, SaleItem as PrismaSaleItem } from '../../generated/prisma-sqlite';
 
 function ipcSafe<T>(value: T): T {
@@ -152,41 +153,36 @@ export function setupSalesHandlers(): void {
       }
     }
 
-    // Log action
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUser.id,
-        phone: currentUser.phone,
-        action: 'create_sale',
-        entity: 'sale',
-        entityId: sale.id,
-        details: JSON.stringify({
-          receiptNumber: sale.receiptNumber,
-          totalAmount,
-          itemCount: items.length,
-        }),
-      },
-    });
+    // Snapshot the scanned group-020/022 marking labels on the sale row, ALWAYS — not only when
+    // fiscalization is enabled. sale.regosLabels is the authoritative sale→marking-code link that
+    // markingCodes:removeForSale reads to free the SoldMarkingCode rows when this receipt is later
+    // deleted or refunded, so the items can be sold again (the stored label equals SoldMarkingCode.
+    // code). Persisting it synchronously here — rather than relying on the fire-and-forget
+    // savePendingMarkingCodes below — also avoids a race where a quick delete runs before that
+    // pending row is written.
+    const markingLabels = (data.markingCodes as Array<{ barcode: string; label: string }> | undefined)
+      ?.filter((l) => l?.barcode && l?.label) ?? [];
+    const regosLabels = markingLabels.length ? JSON.stringify(markingLabels) : null;
 
     // REGOS:VCR fiscalization — "allow + fiscalize later". The sale is already saved; mark it
-    // PENDING (snapshotting any scanned marking labels) and fiscalize in the BACKGROUND so the
-    // cashier is NOT blocked on the OFD round-trip. The POS receipt is printed immediately
-    // (non-fiscal); the fiscal QR is persisted when the background fiscalization completes and
-    // is then available on reprint. On failure the sale stays PENDING/FAILED for the retry worker.
+    // PENDING and fiscalize in the BACKGROUND so the cashier is NOT blocked on the OFD round-trip.
+    // The POS receipt is printed immediately (non-fiscal); the fiscal QR is persisted when the
+    // background fiscalization completes. On failure the sale stays PENDING/FAILED for the retry worker.
     try {
       if (await regosVcrService.isEnabled()) {
-        const labels = (data.markingCodes as Array<{ barcode: string; label: string }> | undefined)
-          ?.filter((l) => l?.barcode && l?.label) ?? [];
         await prisma.sale.update({
           where: { id: sale.id },
-          data: { fiscalStatus: 'PENDING', regosLabels: labels.length ? JSON.stringify(labels) : null },
+          data: { fiscalStatus: 'PENDING', regosLabels },
         });
         // Fire-and-forget: kick the device immediately but do not await the OFD round-trip.
         regosVcrService.fiscalizeSale(sale.id).catch((e) =>
           console.error('[fiscal] immediate fiscalize failed (will retry):', e instanceof Error ? e.message : e),
         );
       } else {
-        await prisma.sale.update({ where: { id: sale.id }, data: { fiscalStatus: 'DISABLED' } });
+        await prisma.sale.update({
+          where: { id: sale.id },
+          data: { fiscalStatus: 'DISABLED', regosLabels },
+        });
       }
     } catch (e) {
       console.error('[fiscal] enqueue failed:', e instanceof Error ? e.message : e);
@@ -195,11 +191,9 @@ export function setupSalesHandlers(): void {
     // Capture group-022 marking codes that are still IN circulation for later REGOS:VCR
     // out-of-circulation fiscalization (no VCR connected yet). Fire-and-forget: this hits
     // asl-belgisi + the VPS and must not delay the sale/receipt. Never blocks the sale.
-    const markingCodes = (data.markingCodes as Array<{ barcode: string; label: string }> | undefined)
-      ?.filter((m) => m?.label) ?? [];
-    if (markingCodes.length > 0) {
+    if (markingLabels.length > 0) {
       savePendingMarkingCodes(
-        markingCodes.map((m) => ({ code: m.label, productBarcode: m.barcode, saleId: sale.id })),
+        markingLabels.map((m) => ({ code: m.label, productBarcode: m.barcode, saleId: sale.id })),
       ).catch((e) =>
         console.error('[marking] savePending failed:', e instanceof Error ? e.message : e),
       );
@@ -414,22 +408,6 @@ export function setupSalesHandlers(): void {
       }
     }
 
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUser.id,
-        phone: currentUser.phone,
-        action: 'update_sale',
-        entity: 'sale',
-        entityId: saleId,
-        details: JSON.stringify({
-          receiptNumber: existingSale.receiptNumber,
-          oldTotal: Number(existingSale.finalAmount),
-          newTotal: finalAmount,
-          itemCount: newItems.length,
-        }),
-      },
-    });
-
     return ipcSafe(updatedSale);
   });
 
@@ -486,22 +464,25 @@ export function setupSalesHandlers(): void {
       }
     }
 
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUser.id,
-        phone: currentUser.phone,
-        action: 'delete_sale',
-        entity: 'sale',
-        entityId: saleId,
-        details: JSON.stringify({
-          receiptNumber: sale.receiptNumber,
-          totalAmount: Number(sale.finalAmount),
-          finalAmount: Number(sale.finalAmount),
-          smenaId: (sale as { smenaId?: string | null }).smenaId ?? null,
-          itemCount: sale.items.length,
-        }),
-      },
-    });
+    // Record the deletion in the local audit_logs table — kept solely so the shift Z/X-report can
+    // count returns (deleted sales). The details JSON keys (finalAmount, smenaId) are read back by
+    // computeSmenaStats() in smena-handlers.ts; do not rename them. Written via raw SQL because the
+    // Prisma AuditLog model was removed.
+    await prisma.$executeRawUnsafe(
+      `INSERT INTO audit_logs (id, user_id, phone, action, entity, entity_id, details)
+       VALUES (?, ?, ?, 'delete_sale', 'sale', ?, ?)`,
+      randomUUID(),
+      currentUser.id,
+      currentUser.phone,
+      saleId,
+      JSON.stringify({
+        receiptNumber: sale.receiptNumber,
+        totalAmount: Number(sale.finalAmount),
+        finalAmount: Number(sale.finalAmount),
+        smenaId: (sale as { smenaId?: string | null }).smenaId ?? null,
+        itemCount: sale.items.length,
+      }),
+    );
 
     return true;
   });

@@ -236,18 +236,6 @@ export function setupAuthHandlers(): void {
       nameRu: user.nameRu,
     };
 
-    // Log login
-    await prisma.auditLog.create({
-      data: {
-        userId: user.id,
-        phone: user.phone,
-        action: 'login',
-        entity: 'user',
-        entityId: user.id,
-        details: JSON.stringify({ terminalId: config.terminalId }),
-      },
-    });
-
     return {
       token,
       user: currentUser,
@@ -323,18 +311,6 @@ export function setupAuthHandlers(): void {
       nameRu: cashier.nameRu,
     };
 
-    // Log login
-    await prisma.auditLog.create({
-      data: {
-        userId: cashier.id,
-        phone: cashier.phone,
-        action: 'pin_login',
-        entity: 'user',
-        entityId: cashier.id,
-        details: JSON.stringify({ terminalId: config.terminalId }),
-      },
-    });
-
     return {
       token,
       user: currentUser,
@@ -343,21 +319,6 @@ export function setupAuthHandlers(): void {
 
   ipcMain.handle('auth:logout', async () => {
     const prisma = getPrismaClient();
-    const config = getAppConfig();
-
-    if (currentUser) {
-      // Log logout
-      await prisma.auditLog.create({
-        data: {
-          userId: currentUser.id,
-          phone: currentUser.phone,
-          action: 'logout',
-          entity: 'user',
-          entityId: currentUser.id,
-          details: JSON.stringify({ terminalId: config.terminalId }),
-        },
-      });
-    }
 
     // Clear tokens and user
     await clearAuthToken();
@@ -488,18 +449,6 @@ export function setupAuthHandlers(): void {
       },
     });
 
-    // Log action
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUser.id,
-        phone: currentUser.phone,
-        action: 'create_user',
-        entity: 'user',
-        entityId: user.id,
-        details: JSON.stringify({ phone: user.phone }),
-      },
-    });
-
     return user;
   });
 
@@ -580,17 +529,6 @@ export function setupAuthHandlers(): void {
     await prisma.user.update({
       where: { id },
       data: { active: false },
-    });
-
-    // Log action
-    await prisma.auditLog.create({
-      data: {
-        userId: currentUser.id,
-        phone: currentUser.phone,
-        action: 'delete_user',
-        entity: 'user',
-        entityId: id,
-      },
     });
 
     return true;

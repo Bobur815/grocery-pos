@@ -242,6 +242,9 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
     )
   `;
 
+  // Retained only for shift returns tracking: sales:delete writes a 'delete_sale' row here and
+  // computeSmenaStats() (smena-handlers.ts) reads it for the Z/X-report return count/amount. The
+  // general AuditLog feature (model, server module, web page, sync) was removed.
   await prisma.$executeRaw`
     CREATE TABLE IF NOT EXISTS audit_logs (
       id TEXT PRIMARY KEY,
