@@ -42,7 +42,8 @@ interface CartState {
   setActiveTab: (tabId: string) => void;
 
   // Cart operations (operate on active tab)
-  addItem: (item: Omit<CartItem, 'quantity'> & { quantity?: number }) => void;
+  // Returns false when a group-022 unique QR was rejected as a duplicate (already in cart); true otherwise.
+  addItem: (item: Omit<CartItem, 'quantity'> & { quantity?: number }) => boolean;
   removeItem: (productId: number, unitPrice?: number) => void;
   removeByMarkingCode: (markingCode: string) => void;
   updateQuantity: (productId: number, quantity: number, unitPrice?: number) => void;
@@ -139,6 +140,15 @@ export const useCartStore = create<CartState>((set, get) => ({
     const state = get();
     const cart = activeCart(state);
 
+    // Guard against double-adding the same group-022 unique QR: a 2D scanner can emit one scan as
+    // two near-simultaneous submits, and POSScreen's pre-check reads a stale `items` closure so both
+    // slip through. addItem runs synchronously against current store state (get()), so this dedupe
+    // can't be raced — the second call sees the first's line. A genuinely different unit has a
+    // different markingCode and is still added as its own line.
+    if (item.markingCode && cart.items.some((i) => i.markingCode === item.markingCode)) {
+      return false;
+    }
+
     // Pre-weighed items and marking-code items are never merged — each is a unique scan
     const canMerge = !item.preWeighedItemId && !item.markingCode;
     const existingIndex = canMerge
@@ -165,6 +175,7 @@ export const useCartStore = create<CartState>((set, get) => ({
     const updatedCart = { ...cart, items: newItems, ...totals };
     const newTabs = { ...state.tabs, [state.activeTabId]: updatedCart };
     set({ tabs: newTabs, items: newItems, ...totals });
+    return true;
   },
 
   removeItem: (productId, unitPrice?) => {

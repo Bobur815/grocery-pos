@@ -324,7 +324,15 @@
     "bulkButton": "Barcha eski cheklarni fiskallashtirish",
     "bulkRunning": "Cheklar qayta ishlanmoqda…",
     "bulkHint": "Markirovkalangan tovarli (022-guruh) barcha eski cheklarni QR-belgilarini to'g'rilab fiskallashtiradi. Qolgan eski cheklar fiskallashtirish talab qilinmaydi deb belgilanadi.",
-    "bulkDone": "Tayyor: fiskallashtirildi {{fiscalized}}, xatolar {{failed}}, belgilar tuzatildi {{repaired}}, o'chirildi {{disabled}}",
+    "bulkDone": "Tayyor: fiskallashtirildi {{fiscalized}}, xatolar {{failed}}, belgilar tuzatildi {{repaired}}, o'chirildi {{disabled}}, muomaladan tashqari {{outOfCirculation}}",
+    "bulkProgress": {
+      "checking": "Markirovka tekshirilmoqda…",
+      "fiscalizing": "Fiskallashtirilmoqda…",
+      "done": "Tayyor",
+      "disabled": "O'chirildi",
+      "outOfCirculation": "Muomaladan tashqari",
+      "outOfCirculationList": "Markirovka muomaladan chiqqani uchun o'chirilgan cheklar"
+    },
     "bulkUnreachable": "Virtual kassa mavjud emas — qayta ishlash to'xtatildi",
     "disabledFirst": "Avval fiskallashtirishni yoqing"
   },

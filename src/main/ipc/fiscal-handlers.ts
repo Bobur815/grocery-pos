@@ -18,8 +18,13 @@ export function setupFiscalHandlers(): void {
   );
 
   // Bulk: fiscalise all old (group-022) receipts and disable the rest. Manual replacement for
-  // the removed background retry worker.
-  ipcMain.handle('fiscal:fiscalizeOld', async () => regosVcrService.fiscalizeOldReceipts());
+  // the removed background retry worker. Streams live progress to the caller's window over
+  // 'fiscal:bulkProgress' so the Fiscal Settings screen can render a progress UI.
+  ipcMain.handle('fiscal:fiscalizeOld', async (event) =>
+    regosVcrService.fiscalizeOldReceipts((p) => {
+      if (!event.sender.isDestroyed()) event.sender.send('fiscal:bulkProgress', p);
+    }),
+  );
 
   ipcMain.handle('fiscal:refund', async (_event, saleId: string) =>
     regosVcrService.refundSale(saleId),

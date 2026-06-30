@@ -2,7 +2,6 @@ import React from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { Select } from "../common/Select";
-import { Input } from "../common/Input";
 import { Button } from "../common/Button";
 import { ProductFilterParams, Category, Supplier } from "@shared/types";
 import { Eraser } from "lucide-react";
@@ -25,10 +24,6 @@ const FiltersBar = styled.div`
 
 const FilterItem = styled.div`
   min-width: 140px;
-`;
-
-const PriceInput = styled(Input)`
-  max-width: 140px;
 `;
 
 export function ProductFilters({
@@ -196,31 +191,6 @@ export function ProductFilters({
         />
       </FilterItem>
 
-      <FilterItem>
-        <PriceInput
-          type="number"
-          label={t("filters.priceFrom")}
-          value={filters.priceMin ?? ""}
-          onChange={(e) =>
-            update({
-              priceMin: e.target.value ? Number(e.target.value) : undefined,
-            })
-          }
-        />
-      </FilterItem>
-
-      <FilterItem>
-        <PriceInput
-          type="number"
-          label={t("filters.priceTo")}
-          value={filters.priceMax ?? ""}
-          onChange={(e) =>
-            update({
-              priceMax: e.target.value ? Number(e.target.value) : undefined,
-            })
-          }
-        />
-      </FilterItem>
       {hasActiveFilters && (
         <Button variant="secondary" size="medium" onClick={clearFilters}>
           <Eraser size={18}/> {t("filters.clearFilters")}

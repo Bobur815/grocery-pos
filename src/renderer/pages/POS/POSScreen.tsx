@@ -755,6 +755,7 @@ export function POSScreen() {
             if (alreadyInCart) {
               writeBarcode("", true);
               setError(t("pos.markingCodeInCart"));
+              toast.error(t("pos.markingCodeInCart"));
               return;
             }
 
@@ -765,7 +766,7 @@ export function POSScreen() {
             // at fiscalization (REGOS validates the label), so an async warning is enough here.
             const productName =
               i18n.language === "uz" ? product.nameUz : product.nameRu;
-            addItem({
+            const added = addItem({
               productId: product.id,
               productName,
               barcode: product.barcode,
@@ -775,6 +776,15 @@ export function POSScreen() {
               unit: product.unit,
               markingCode: normalizedNoGS,
             });
+            // The store guard caught a duplicate the stale-closure pre-check above missed (2D
+            // scanner double-fire). Surface the same "already in cart" message and skip the
+            // redundant background checks since nothing was added.
+            if (!added) {
+              writeBarcode("", true);
+              setError(t("pos.markingCodeInCart"));
+              toast.error(t("pos.markingCodeInCart"));
+              return;
+            }
             resetInputs();
 
             // Background marking-code checks — skippable via Fiscal settings toggle.

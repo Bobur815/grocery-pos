@@ -2,12 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CheckCircle, XCircle, Keyboard, ChevronDown, ChevronUp } from 'lucide-react';
+import { ArrowLeft, CheckCircle, XCircle, Keyboard, ChevronDown, ChevronUp, Ban, Loader2 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { KbToggle } from '../../components/common/SearchControls';
 import { VirtualKeyboard } from '../../components/common/VirtualKeyboard';
 import { useToast } from '../../context/ToastContext';
-import type { FiscalConnectionResult, FiscalQueueStatus } from '@shared/types';
+import type { FiscalConnectionResult, FiscalQueueStatus, FiscalBulkProgress } from '@shared/types';
+import { translateMarkingStatus } from '../POS/markingCirculation';
 
 const Container = styled.div`
   display: flex;
@@ -94,6 +95,80 @@ const Muted = styled.div`
   color: ${({ theme }) => theme.colors.textSecondary};
 `;
 
+const ProgressHead = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.sm};
+  font-size: 13px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const Spin = styled(Loader2)`
+  animation: fiscal-spin 1s linear infinite;
+  @keyframes fiscal-spin {
+    to { transform: rotate(360deg); }
+  }
+`;
+
+const BarOuter = styled.div`
+  width: 100%;
+  height: 8px;
+  background: ${({ theme }) => theme.colors.border};
+  border-radius: 999px;
+  overflow: hidden;
+`;
+
+const BarInner = styled.div<{ $pct: number; $done?: boolean }>`
+  height: 100%;
+  width: ${({ $pct }) => $pct}%;
+  background: ${({ theme, $done }) => ($done ? theme.colors.success ?? theme.colors.primary : theme.colors.primary)};
+  transition: width 0.25s ease;
+`;
+
+const Chips = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${({ theme }) => theme.spacing.xs};
+`;
+
+const Chip = styled.div<{ $tone: 'ok' | 'error' | 'muted' | 'warn' }>`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: ${({ theme, $tone }) =>
+    ($tone === 'ok' ? theme.colors.success ?? theme.colors.primary
+      : $tone === 'error' || $tone === 'warn' ? theme.colors.error
+      : theme.colors.textSecondary) + '18'};
+  color: ${({ theme, $tone }) =>
+    $tone === 'ok' ? theme.colors.success ?? theme.colors.primary
+      : $tone === 'error' || $tone === 'warn' ? theme.colors.error
+      : theme.colors.textSecondary};
+`;
+
+const OutList = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 140px;
+  overflow-y: auto;
+  border: 1px solid ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.borderRadius};
+  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
+`;
+
+const OutItem = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.text};
+`;
+
 export function FiscalSettings() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -115,6 +190,8 @@ export function FiscalSettings() {
   const [testResult, setTestResult] = useState<FiscalConnectionResult | null>(null);
   const [queue, setQueue] = useState<FiscalQueueStatus | null>(null);
   const [bulkRunning, setBulkRunning] = useState(false);
+  const [progress, setProgress] = useState<FiscalBulkProgress | null>(null);
+  const [outList, setOutList] = useState<{ receipt: string; status: string }[]>([]);
 
   // Config load state. The form must NOT show its editable defaults until the real config has
   // loaded — otherwise a transient load failure would display defaults that, if saved, would
@@ -171,6 +248,15 @@ export function FiscalSettings() {
     window.electronAPI.fiscal.getStatus().then(setQueue).catch(() => {});
   }, [loadConfig]);
 
+  // Live progress from the bulk "fiscalize old receipts" run (streamed over fiscal:bulkProgress).
+  useEffect(() => {
+    const off = window.electronAPI.fiscal.onBulkProgress((p) => {
+      setProgress(p);
+      if (p.lastDisabled) setOutList((prev) => [...prev, p.lastDisabled!]);
+    });
+    return off;
+  }, []);
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -200,6 +286,8 @@ export function FiscalSettings() {
   }, []);
 
   const handleFiscalizeOld = async () => {
+    setProgress(null);
+    setOutList([]);
     setBulkRunning(true);
     try {
       const r = await window.electronAPI.fiscal.fiscalizeOld();
@@ -209,11 +297,12 @@ export function FiscalSettings() {
       }
       const summary = t('fiscalSettings.bulkDone', {
         defaultValue:
-          'Готово: фискализировано {{fiscalized}}, ошибок {{failed}}, исправлено меток {{repaired}}, отключено {{disabled}}',
+          'Готово: фискализировано {{fiscalized}}, ошибок {{failed}}, исправлено меток {{repaired}}, отключено {{disabled}}, вне оборота {{outOfCirculation}}',
         fiscalized: r.fiscalized,
         failed: r.failed,
         repaired: r.repaired,
         disabled: r.disabled,
+        outOfCirculation: r.outOfCirculation,
       });
       if (r.unreachable) {
         toast.error(
@@ -417,6 +506,61 @@ export function FiscalSettings() {
                 : t('fiscalSettings.bulkButton', 'Фискализировать все старые чеки')}
             </Button>
           </ButtonRow>
+
+          {progress && (
+            <>
+              <ProgressHead>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {progress.phase !== 'done' && <Spin size={14} />}
+                  {progress.phase === 'done'
+                    ? t('fiscalSettings.bulkProgress.done', 'Готово')
+                    : progress.phase === 'fiscalizing'
+                      ? t('fiscalSettings.bulkProgress.fiscalizing', 'Фискализация…')
+                      : t('fiscalSettings.bulkProgress.checking', 'Проверка маркировки…')}
+                  {progress.currentReceipt && progress.phase !== 'done' ? ` #${progress.currentReceipt}` : ''}
+                </span>
+                <span>{progress.processed} / {progress.total}</span>
+              </ProgressHead>
+              <BarOuter>
+                <BarInner
+                  $pct={
+                    progress.total
+                      ? Math.round((progress.processed / progress.total) * 100)
+                      : progress.phase === 'done' ? 100 : 0
+                  }
+                  $done={progress.phase === 'done'}
+                />
+              </BarOuter>
+              <Chips>
+                <Chip $tone="ok">
+                  <CheckCircle size={12} /> {t('fiscalSettings.fiscalized', 'Фискализировано')}: {progress.fiscalized}
+                </Chip>
+                <Chip $tone="error">
+                  <XCircle size={12} /> {t('fiscalSettings.failed', 'Ошибки')}: {progress.failed}
+                </Chip>
+                <Chip $tone="muted">
+                  <Ban size={12} /> {t('fiscalSettings.bulkProgress.disabled', 'Отключено')}: {progress.disabled}
+                </Chip>
+                <Chip $tone="warn">
+                  <Ban size={12} /> {t('fiscalSettings.bulkProgress.outOfCirculation', 'Вне оборота')}: {progress.outOfCirculation}
+                </Chip>
+              </Chips>
+              {outList.length > 0 && (
+                <>
+                  <Label>
+                    {t('fiscalSettings.bulkProgress.outOfCirculationList', 'Чеки, отключённые из-за маркировки вне оборота')}
+                  </Label>
+                  <OutList>
+                    {outList.map((o, i) => (
+                      <OutItem key={`${o.receipt}-${i}`}>
+                        <Ban size={12} /> #{o.receipt} — {translateMarkingStatus(o.status, t)}
+                      </OutItem>
+                    ))}
+                  </OutList>
+                </>
+              )}
+            </>
+          )}
         </Card>
       )}
 

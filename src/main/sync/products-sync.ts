@@ -116,8 +116,13 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
       });
 
       try {
-        if (existing && existing.id === product.id) {
-          // IDs match — just update fields
+        if (existing) {
+          // A product with this barcode already exists locally — update it IN PLACE by its local
+          // id, even when that id differs from the server's. Never delete+recreate to "realign"
+          // ids: the server matches sales by BARCODE (see createProductLocal), so a divergent local
+          // id is harmless, and deleting a referenced product throws a foreign-key violation. The
+          // old saleCount guard only checked sale_items, but inventory_arrivals and pre_weighed_items
+          // also reference products — so the delete still failed and the row re-failed every sync.
           await prisma.product.update({
             where: { id: existing.id },
             data: {
@@ -138,34 +143,6 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
               updatedAt: new Date(product.updatedAt),
             },
           });
-        } else if (existing && existing.id !== product.id) {
-          // ID mismatch — fix it if safe (no sales reference the old local ID)
-          const saleCount = await prisma.saleItem.count({ where: { productId: existing.id } });
-          if (saleCount === 0) {
-            await prisma.product.delete({ where: { id: existing.id } });
-            await createProductLocal(product);
-          } else {
-            // Has sales — keep local ID, just update fields
-            await prisma.product.update({
-              where: { id: existing.id },
-              data: {
-                nameRu: product.nameRu,
-                nameUz: product.nameUz,
-                price: product.price,
-                stock: product.stock,
-                minStock: product.minStock,
-                unit: product.unit,
-                categoryId: resolveCategoryId(product),
-                active: product.active,
-                mxik: product.mxik ?? null,
-                packageCode: product.packageCode ?? null,
-                productType: product.productType ?? 'REGULAR',
-                internalCode: product.internalCode ?? null,
-                storeProductCode: product.storeProductCode ?? null,
-                updatedAt: new Date(product.updatedAt),
-              },
-            });
-          }
         } else {
           // No local product with this barcode — create it (VPS id if free, else autoincrement)
           await createProductLocal(product);

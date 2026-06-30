@@ -88,6 +88,8 @@ export type {
   RegosVcrConfigInput,
   FiscalConnectionResult,
   FiscalQueueStatus,
+  FiscalBulkResult,
+  FiscalBulkProgress,
   FiscalLabel,
   FiscalZReport,
   FiscalZReportStatus,

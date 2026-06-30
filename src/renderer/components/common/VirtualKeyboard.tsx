@@ -9,7 +9,7 @@ type KeyDef =
   | { key: string; label?: string; width?: number; active?: boolean };
 
 const QWERTY_NORMAL: KeyDef[][] = [
-  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "00"],
   ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
   ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
   [
@@ -132,7 +132,7 @@ function isLetterKey(key: string) {
 
 function isSymbolKey(key: string) {
   if (SPECIAL_KEYS.has(key)) return false;
-  if (/^[0-9]$/.test(key)) return false;
+  if (/^[0-9]+$/.test(key)) return false; // digits, incl. the "00" quick key — never a symbol
   if (/^[a-zA-Zа-яА-ЯёЁ]$/.test(key)) return false;
   return true;
 }

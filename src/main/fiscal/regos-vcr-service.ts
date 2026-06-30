@@ -21,11 +21,13 @@ import type {
   FiscalConnectionResult,
   FiscalQueueStatus,
   FiscalBulkResult,
+  FiscalBulkProgress,
   FiscalLabel,
   FiscalZReportStatus,
 } from '../../shared/types/fiscal.types';
 import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
 import { isMarkedMxik } from '../../shared/utils/marking';
+import { isCodeOutOfCirculation } from '../marking/circulation-check';
 
 const MAX_ATTEMPTS = 5; // cap retries for hard (business) failures
 const FISCAL_DEBUG = process.env.FISCAL_DEBUG === 'true'; // verbose position/payment logs
@@ -660,21 +662,25 @@ class RegosVcrService {
    *     an unmarked sale predating the VCR does not need retroactive fiscalisation.
    * Stops early (leaving the rest PENDING) if the VCR turns out to be unreachable.
    */
-  async fiscalizeOldReceipts(): Promise<FiscalBulkResult> {
+  async fiscalizeOldReceipts(
+    onProgress?: (p: FiscalBulkProgress) => void,
+  ): Promise<FiscalBulkResult> {
     const cfg = await this.resolveConfig();
     if (!cfg.enabled) {
-      return { enabled: false, fiscalized: 0, failed: 0, repaired: 0, disabled: 0 };
+      return { enabled: false, fiscalized: 0, failed: 0, repaired: 0, disabled: 0, outOfCirculation: 0 };
     }
     const prisma = getPrismaClient();
 
-    // Every not-yet-fiscalised receipt, with just enough to classify it as marked goods.
-    // Marking is a per-product property (the product's own MXIK group 022), NOT the category's
-    // group list — a category's list can span many groups and must not gate marking.
+    // Every not-yet-fiscalised receipt, with just enough to classify it as marked goods and (for
+    // marked ones) verify its marking codes. Marking is a per-product property (the product's own
+    // MXIK group 022), NOT the category's group list — a category's list can span many groups.
     const sales = await prisma.sale.findMany({
       where: { fiscalStatus: { not: 'FISCALIZED' } },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,
+        receiptNumber: true,
+        regosLabels: true,
         items: { select: { product: { select: { mxik: true } } } },
       },
     });
@@ -683,7 +689,7 @@ class RegosVcrService {
     const isMarked = (s: SaleRow): boolean =>
       s.items.some((it) => isMarkedMxik(it.product?.mxik));
 
-    const markedIds = sales.filter(isMarked).map((s) => s.id);
+    const marked = sales.filter(isMarked);
     const unmarkedIds = sales.filter((s) => !isMarked(s)).map((s) => s.id);
 
     // Unmarked → DISABLED in one batch so they drop out of the queue badge.
@@ -696,13 +702,59 @@ class RegosVcrService {
       disabled = r.count;
     }
 
-    // Marked → repair labels, reset, fiscalise one at a time (the VCR is single-threaded; each
-    // fiscalizeSale already serialises through runExclusive).
+    // Marked → for each: verify circulation (asl-belgisi) first; disable if any code is out of
+    // circulation, else repair labels, reset, and fiscalise one at a time (the VCR is
+    // single-threaded; each fiscalizeSale already serialises through runExclusive).
     let fiscalized = 0;
     let failed = 0;
     let repaired = 0;
+    let outOfCirculation = 0;
     let unreachable = false;
-    for (const id of markedIds) {
+    const total = marked.length;
+    let processed = 0;
+
+    const emit = (extra: Partial<FiscalBulkProgress>): void => {
+      onProgress?.({
+        phase: 'checking', processed, total, fiscalized, failed, disabled, outOfCirculation,
+        ...extra,
+      });
+    };
+    emit({ phase: 'checking', processed: 0 });
+
+    for (const sale of marked) {
+      const id = sale.id;
+      const receipt = sale.receiptNumber;
+
+      // 1) Circulation gate — disable the receipt up front if a marking code is dead, so the VCR
+      // is never asked to fiscalise it (it would reject with [704030]). Offline-first: an
+      // unreachable registry leaves the receipt to the normal fiscalisation path below.
+      emit({ phase: 'checking', currentReceipt: receipt });
+      const labels = sale.regosLabels ? safeParseLabels(sale.regosLabels) : [];
+      let deadStatus: string | null = null;
+      for (const l of labels) {
+        if (!l?.label) continue;
+        const res = await isCodeOutOfCirculation(l.label);
+        if (res.reachable && res.outOfCirculation) {
+          deadStatus = res.status ?? 'OUT';
+          break;
+        }
+      }
+
+      if (deadStatus) {
+        await prisma.sale
+          .update({
+            where: { id },
+            data: { fiscalStatus: 'DISABLED', fiscalError: `out_of_circulation:${deadStatus}` },
+          })
+          .catch(() => {});
+        outOfCirculation++;
+        processed++;
+        emit({ phase: 'disabled', processed, currentReceipt: receipt, lastDisabled: { receipt, status: deadStatus } });
+        continue;
+      }
+
+      // 2) Normal path — repair labels, reset, fiscalise.
+      emit({ phase: 'fiscalizing', currentReceipt: receipt });
       repaired += await this.repairSaleLabels(id);
       await prisma.sale
         .update({ where: { id }, data: { fiscalStatus: 'PENDING', fiscalAttempts: 0, fiscalError: null } })
@@ -715,15 +767,22 @@ class RegosVcrService {
         // VCR unreachable → stop hammering; the remaining receipts stay PENDING for a later run.
         if (e instanceof VcrError && e.code === 0) {
           unreachable = true;
+          processed++;
           break;
         }
       }
+      processed++;
+      emit({ phase: 'fiscalizing', processed, currentReceipt: receipt });
     }
 
+    onProgress?.({
+      phase: 'done', processed, total, fiscalized, failed, disabled, outOfCirculation,
+    });
+
     log.info(
-      `[fiscal] bulk fiscalise: ${fiscalized} fiscalised, ${failed} failed, ${repaired} labels repaired, ${disabled} disabled${unreachable ? ' (VCR unreachable — stopped early)' : ''}`,
+      `[fiscal] bulk fiscalise: ${fiscalized} fiscalised, ${failed} failed, ${repaired} labels repaired, ${disabled} disabled, ${outOfCirculation} out-of-circulation${unreachable ? ' (VCR unreachable — stopped early)' : ''}`,
     );
-    return { enabled: true, fiscalized, failed, repaired, disabled, unreachable };
+    return { enabled: true, fiscalized, failed, repaired, disabled, outOfCirculation, unreachable };
   }
 
   /**

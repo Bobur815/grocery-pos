@@ -97,6 +97,23 @@ export interface FiscalBulkResult {
   failed: number; // 022 receipts that still failed (e.g. missing/invalid label, VCR error)
   repaired: number; // marking labels corrected from a corrupted (Cyrillic) capture
   disabled: number; // non-022 receipts moved out of the queue
+  outOfCirculation: number; // 022 receipts disabled because a marking code is out of circulation (asl-belgisi)
   unreachable?: boolean; // true if the VCR was unreachable and the run stopped early
   error?: string;
+}
+
+/**
+ * Live progress for the "fiscalise all old receipts" run, streamed to the renderer over the
+ * `fiscal:bulkProgress` channel so the admin can watch each receipt being checked/fiscalised.
+ */
+export interface FiscalBulkProgress {
+  phase: 'checking' | 'fiscalizing' | 'disabled' | 'done';
+  processed: number; // marked receipts handled so far
+  total: number; // total marked receipts to process
+  fiscalized: number;
+  failed: number;
+  disabled: number; // non-022 receipts disabled up front
+  outOfCirculation: number; // 022 receipts disabled for a dead marking code
+  currentReceipt?: string; // receiptNumber currently being processed
+  lastDisabled?: { receipt: string; status: string }; // last out-of-circulation hit, for the list
 }

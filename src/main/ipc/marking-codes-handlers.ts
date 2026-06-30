@@ -3,6 +3,7 @@ import { getPrismaClient } from '../database/sqlite-client';
 import { getAppConfig } from '../config/app-config';
 import { getServerToken } from '../sync/queue-manager';
 import { classifyCirculation } from '../../shared/utils/circulation';
+import { verifyCirculation, isCodeOutOfCirculation } from '../marking/circulation-check';
 
 interface MarkingCodeCheckResult {
   alreadySold: boolean;
@@ -91,21 +92,7 @@ export function setupMarkingCodesHandlers(): void {
   // outOfCirculation=false so the sale proceeds and REGOS stays the authoritative gate.
   ipcMain.handle(
     'markingCodes:checkCirculation',
-    async (_event, code: string): Promise<MarkingCirculationResult> => {
-      const { status, isValid, reachable } = await verifyCirculation(code);
-      if (!reachable) return { reachable: false, outOfCirculation: false };
-      // isValid===false → the code is unknown to the registry (will fail REGOS). Otherwise classify
-      // its status; only a confirmed OUT verdict blocks. An UNKNOWN status is NOT blocked here
-      // (avoid false positives from unrecognised status strings) — REGOS will catch it if invalid.
-      if (isValid === false) {
-        return { reachable: true, outOfCirculation: true, status: 'NOT_FOUND' };
-      }
-      return {
-        reachable: true,
-        outOfCirculation: classifyCirculation(status) === 'OUT',
-        status,
-      };
-    },
+    async (_event, code: string): Promise<MarkingCirculationResult> => isCodeOutOfCirculation(code),
   );
 
   // Free the marking codes tied to a sale (called when a sale is deleted or refunded) so the
@@ -234,35 +221,6 @@ export function setupMarkingCodesHandlers(): void {
       }
     },
   );
-}
-
-/**
- * Ask the VPS asl-belgisi proxy for a marking code's circulation status.
- * Returns `reachable: false` when the server can't be consulted (offline / no token /
- * error) so callers can apply the offline-first "save anyway" rule.
- */
-async function verifyCirculation(
-  code: string,
-): Promise<{ status?: string; isValid?: boolean; reachable: boolean }> {
-  const config = getAppConfig();
-  const token = getServerToken();
-  if (!token) return { reachable: false };
-  try {
-    const res = await fetch(`${config.vpsApiUrl}/aslbelgisi/verify`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ code }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!res.ok) return { reachable: false };
-    const data = (await res.json()) as { isValid?: boolean; status?: string };
-    return { status: data.status, isValid: data.isValid, reachable: true };
-  } catch {
-    return { reachable: false };
-  }
 }
 
 /**

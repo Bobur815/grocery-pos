@@ -96,6 +96,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     testConnection: () => ipcRenderer.invoke("fiscal:testConnection"),
     getStatus: () => ipcRenderer.invoke("fiscal:getStatus"),
     fiscalizeOld: () => ipcRenderer.invoke("fiscal:fiscalizeOld"),
+    onBulkProgress: (
+      cb: (p: import("../shared/types/fiscal.types").FiscalBulkProgress) => void,
+    ) => {
+      const h = (
+        _e: IpcRendererEvent,
+        p: import("../shared/types/fiscal.types").FiscalBulkProgress,
+      ) => cb(p);
+      ipcRenderer.on("fiscal:bulkProgress", h);
+      return () => ipcRenderer.removeListener("fiscal:bulkProgress", h);
+    },
     retrySale: (saleId: string) => ipcRenderer.invoke("fiscal:retrySale", saleId),
     refund: (saleId: string) => ipcRenderer.invoke("fiscal:refund", saleId),
     printDuplicate: (saleId: string) => ipcRenderer.invoke("fiscal:printDuplicate", saleId),
@@ -482,6 +492,9 @@ declare global {
         testConnection: () => Promise<import("../shared/types/fiscal.types").FiscalConnectionResult>;
         getStatus: () => Promise<import("../shared/types/fiscal.types").FiscalQueueStatus>;
         fiscalizeOld: () => Promise<import("../shared/types/fiscal.types").FiscalBulkResult>;
+        onBulkProgress: (
+          cb: (p: import("../shared/types/fiscal.types").FiscalBulkProgress) => void,
+        ) => () => void;
         retrySale: (saleId: string) => Promise<{ ok: boolean; error?: string }>;
         refund: (saleId: string) => Promise<{ ok: boolean; fiscalSign?: string; error?: string }>;
         printDuplicate: (saleId: string) => Promise<{ ok: boolean; error?: string }>;
