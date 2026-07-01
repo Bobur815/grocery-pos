@@ -1418,6 +1418,7 @@ export function ReceiptScanModal({
                 mxik: row.mxik || undefined,
                 cost: row.unitCost || undefined,
                 groupCode: row.mxikInfo?.groupCode || undefined,
+                isMarked: row.mxikInfo?.isMarked ?? undefined,
               }}
               onClose={() => setAddingForRowIdx(null)}
               onSuccess={handleProductCreated}

@@ -9,7 +9,6 @@ import { Modal } from "../../components/common/Modal";
 import { Button } from "../../components/common/Button";
 import { NumberPad } from "../../components/common/NumberPad";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
-import { findBlockedMarkingItems, translateMarkingStatus } from "./markingCirculation";
 
 function parseSaleError(
   err: unknown,
@@ -294,25 +293,21 @@ interface CheckoutProps {
 
 export function Checkout({ onComplete, onCancel }: CheckoutProps) {
   const { t, i18n } = useTranslation();
-  const { items, subtotal, tax, taxRate, discount, total, clearCart, editingSaleId, removeByMarkingCode } =
+  const { items, subtotal, tax, taxRate, discount, total, clearCart, editingSaleId } =
     useCartStore();
   const { createSale, updateSale, isLoading } = useSales();
   const toast = useToast();
   const [paymentMethod, setPaymentMethod] = useState<"cash" | "card">("cash");
-  const [printCheck, setPrintCheck] = useState(total >= 10000);
+  // Opt-in fiscalization: when ticked, the receipt is sent to REGOS:VCR to be fiscalized.
+  // Default OFF — the sale is saved un-fiscalized and can be fiscalized later from Sales History.
+  const [fiscalize, setFiscalize] = useState(false);
+  // Only show the fiscalize toggle when REGOS:VCR is actually enabled.
+  const [fiscalEnabled, setFiscalEnabled] = useState(false);
 
-  // Marking-code circulation guard toggle (same Fiscal setting as the scan-time check).
-  const markingCheckRef = useRef(true);
-
-  // When REGOS:VCR prints the fiscal receipt itself, default POS receipt printing OFF
-  // to avoid a duplicate (cashier can still tick it manually).
   useEffect(() => {
     window.electronAPI.fiscal
       .getConfig()
-      .then((cfg) => {
-        if (cfg.enabled && cfg.vcrPrintsReceipt) setPrintCheck(false);
-        markingCheckRef.current = cfg.markingCodeCheck;
-      })
+      .then((cfg) => setFiscalEnabled(cfg.enabled))
       .catch(() => {});
   }, []);
   const [givenAmount, setGivenAmount] = useState(0);
@@ -349,22 +344,6 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
   const handlePayment = async () => {
     if (isLoading) return;
 
-    // Synchronous circulation guard: block payment if any marked line is out of circulation,
-    // removing it so the cashier re-confirms with a clean cart. Catches the race where the
-    // optimistic scan-time check hasn't resolved yet. Offline-first (unreachable → not blocked).
-    if (markingCheckRef.current) {
-      const blocked = await findBlockedMarkingItems(items);
-      if (blocked.length > 0) {
-        blocked.forEach((b) => removeByMarkingCode(b.code));
-        toast.error(
-          t("pos.markingCodeNotValid", {
-            status: translateMarkingStatus(blocked[0].status, t),
-          }),
-        );
-        return; // abort — cart updated; cashier confirms again to fiscalize the rest
-      }
-    }
-
     try {
       const saleData = {
         items: items.map((item) => ({
@@ -380,6 +359,7 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
         markingCodes: items
           .filter((i) => i.markingCode)
           .map((i) => ({ barcode: i.barcode, label: i.markingCode! })),
+        fiscalize,
       };
 
       const sale = editingSaleId
@@ -393,15 +373,6 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
           .map((i) => ({ code: i.markingCode!, productBarcode: i.barcode }));
         if (markingEntries.length > 0) {
           window.electronAPI.markingCodes.record(markingEntries).catch(() => {});
-        }
-
-        // Print receipt if checkbox is checked
-        if (printCheck && sale.id) {
-          try {
-            await window.electronAPI.printer.printReceipt(sale.id);
-          } catch (printErr) {
-            console.error("Receipt print failed:", printErr);
-          }
         }
 
         clearCart();
@@ -561,14 +532,16 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
             </CashHelper>
           )}
 
-          <PrintCheckRow>
-            <Checkbox
-              type="checkbox"
-              checked={printCheck}
-              onChange={(e) => setPrintCheck(e.target.checked)}
-            />
-            {t("pos.printReceipt")}
-          </PrintCheckRow>
+          {fiscalEnabled && (
+            <PrintCheckRow>
+              <Checkbox
+                type="checkbox"
+                checked={fiscalize}
+                onChange={(e) => setFiscalize(e.target.checked)}
+              />
+              {t("pos.fiscalize")}
+            </PrintCheckRow>
+          )}
         </RightCol>
       </Content>
     </Modal>

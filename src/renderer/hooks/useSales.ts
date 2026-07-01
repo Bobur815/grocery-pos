@@ -13,6 +13,9 @@ interface CreateSaleData {
   discountAmount?: number;
   // Scanned mandatory-marking (Asl-Belgisi) codes, by line barcode — used for fiscalization
   markingCodes?: Array<{ barcode: string; label: string }>;
+  // When true, send the receipt to REGOS:VCR to fiscalize immediately. Default (false/absent)
+  // leaves the sale un-fiscalized (PENDING) so it can be fiscalized later from Sales History.
+  fiscalize?: boolean;
 }
 
 interface Summary {

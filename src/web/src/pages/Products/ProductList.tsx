@@ -202,6 +202,7 @@ export function ProductList() {
     productionDate?: string;
     expiryDate?: string;
     packageCode?: string;
+    isMarked?: boolean | null;
   } | null>(null);
   const [fabArrivalProductId, setFabArrivalProductId] = useState<string | null>(
     null,
@@ -252,10 +253,14 @@ export function ProductList() {
       productionDate?: string;
       expiryDate?: string;
       packageCode?: string;
+      isMarked?: boolean | null;
     } = {};
 
     if (type === "datamatrix") {
       if (barcode) initial.barcode = barcode;
+      // A DataMatrix marking code only exists for a mandatory-marking good — flag it upfront.
+      // (The tasnif lookup below may confirm/refine it via the authoritative `label`.)
+      initial.isMarked = true;
       try {
         const info = await aslBelgisi.verifyMarkingCode(qrData);
         if (info.isValid) {
@@ -285,6 +290,8 @@ export function ProductList() {
         if (result?.nameRu) initial.nameRu = result.nameRu;
         if (result?.name) initial.nameUz = result.name;
         if (result?.packageCode) initial.packageCode = result.packageCode;
+        // Authoritative marking flag from tasnif `label`; keep any datamatrix-derived true when unknown.
+        if (result?.isMarked != null) initial.isMarked = result.isMarked;
       } catch {
         // no match — continue with barcode only
       }

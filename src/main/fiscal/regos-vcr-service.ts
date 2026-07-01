@@ -26,7 +26,7 @@ import type {
   FiscalZReportStatus,
 } from '../../shared/types/fiscal.types';
 import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
-import { isMarkedMxik } from '../../shared/utils/marking';
+import { productRequiresMarking } from '../../shared/utils/marking';
 import { isCodeOutOfCirculation } from '../marking/circulation-check';
 
 const MAX_ATTEMPTS = 5; // cap retries for hard (business) failures
@@ -681,16 +681,19 @@ class RegosVcrService {
         id: true,
         receiptNumber: true,
         regosLabels: true,
-        items: { select: { product: { select: { mxik: true } } } },
+        items: { select: { product: { select: { mxik: true, isMarked: true } } } },
       },
     });
 
     type SaleRow = (typeof sales)[number];
+    // getPrismaClient() is dynamically required (untyped), so `sales` is `any`; annotate the
+    // marked-item shape explicitly so this classification is type-checked, not implicit-any.
+    type MarkedItem = { product: { mxik: string | null; isMarked: boolean | null } | null };
     const isMarked = (s: SaleRow): boolean =>
-      s.items.some((it) => isMarkedMxik(it.product?.mxik));
+      (s.items as MarkedItem[]).some((it) => it.product != null && productRequiresMarking(it.product));
 
     const marked = sales.filter(isMarked);
-    const unmarkedIds = sales.filter((s) => !isMarked(s)).map((s) => s.id);
+    const unmarkedIds = sales.filter((s: SaleRow) => !isMarked(s)).map((s: SaleRow) => s.id);
 
     // Unmarked → DISABLED in one batch so they drop out of the queue badge.
     let disabled = 0;

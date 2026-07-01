@@ -610,6 +610,13 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
   if (!(await columnExists(prisma, 'products', 'vat_rate'))) {
     await prisma.$executeRaw`ALTER TABLE products ADD COLUMN vat_rate REAL`;
   }
+
+  // Migration 25: authoritative Asl-Belgisi marking flag from tasnif `label` (1 = marked, 0 = plain).
+  // Null (default for existing rows) = not yet checked → the POS falls back to the isMarkedMxik
+  // group heuristic. Backfilled on the VPS (scripts/backfill-is-marked.ts) and synced down.
+  if (!(await columnExists(prisma, 'products', 'is_marked'))) {
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN is_marked INTEGER`;
+  }
 }
 
 /** True if `column` exists on `table` — silent (no thrown query, no prisma:error log). */

@@ -251,6 +251,7 @@ interface ProductFormProps {
     productionDate?: string;
     expiryDate?: string;
     packageCode?: string;
+    isMarked?: boolean | null;
   };
   openArrival?: boolean;
   onClose: () => void;
@@ -305,6 +306,9 @@ export function ProductForm({
     active: true,
     mxik: initialData?.mxik || "",
     packageCode: initialData?.packageCode || "",
+    // Asl-Belgisi mandatory-marking flag. Null = unknown (POS falls back to the MXIK group
+    // heuristic); auto-set from the tasnif `label` on lookup, overridable by the admin here.
+    isMarked: (initialData?.isMarked ?? null) as boolean | null,
     // New products default to "" = use the store-wide default rate (not a hardcoded 0%, which
     // mis-fiscalized VAT-able goods). Pick 0/6/12 explicitly per product, or let fiscal self-heal.
     vatRate: "",
@@ -466,6 +470,7 @@ export function ProductForm({
           mxik: info.code,
           nameUz: info.name,
           nameRu: info.nameRu,
+          isMarked: info.isMarked ?? prev.isMarked,
         }));
         autoSelectCategory(info.code.slice(0, 3));
       } catch {
@@ -563,7 +568,7 @@ export function ProductForm({
           toast.error(t("products.categoryNotAllowed", { category: mxikData.nameRu }));
           return;
         }
-        setFormData((prev) => ({ ...prev, mxik: mxikData.code }));
+        setFormData((prev) => ({ ...prev, mxik: mxikData.code, isMarked: mxikData.isMarked ?? prev.isMarked }));
         autoSelectCategory(mxikData.code.slice(0, 3));
         toast.success(t("products.mxikCodeScanned"));
       } catch {
@@ -624,8 +629,9 @@ export function ProductForm({
           return;
         }
 
-        // Step 3: Lookup in tasnif registry
-        setFormData((prev) => ({ ...prev, barcode: gtin }));
+        // Step 3: Lookup in tasnif registry.
+        // A DataMatrix marking code only exists for a mandatory-marking good → isMarked = true.
+        setFormData((prev) => ({ ...prev, barcode: gtin, isMarked: true }));
         try {
           const tasnifData = await mxikApi.searchByBarcode(gtin);
           if (isMxikExcluded(tasnifData.code)) {
@@ -639,6 +645,7 @@ export function ProductForm({
             nameRu: tasnifData.nameRu,
             nameUz: tasnifData.name,
             mxik: tasnifData.code,
+            isMarked: tasnifData.isMarked ?? true,
             productionDate: mcVerif.productionDate
               ? mcVerif.productionDate.split("T")[0]
               : prev.productionDate,
@@ -786,6 +793,7 @@ export function ProductForm({
         active: product.isActive,
         mxik: product.mxik || "",
         packageCode: product.packageCode || "",
+        isMarked: product.isMarked ?? null,
         vatRate: product.vatRate != null ? String(product.vatRate) : "",
         productType: product.productType || "REGULAR",
         internalCode: product.internalCode || "",
@@ -837,6 +845,7 @@ export function ProductForm({
       active: formData.active,
       mxik: formData.mxik || undefined,
       packageCode: formData.packageCode || undefined,
+      isMarked: formData.isMarked,
       vatRate: formData.vatRate === "" ? null : parseFloat(formData.vatRate),
       productType: formData.productType,
       internalCode: formData.internalCode || undefined,
@@ -858,7 +867,7 @@ export function ProductForm({
     }
   };
 
-  const handleChange = (field: string, value: string | boolean) => {
+  const handleChange = (field: string, value: string | boolean | null) => {
     setFormData((prev) => ({
       ...prev,
       [field]: value,
@@ -954,6 +963,28 @@ export function ProductForm({
                   <option value="0">0.00%</option>
                   <option value="6">6.00%</option>
                   <option value="12">12.00%</option>
+                </Select>
+              </FormGroup>
+              <FormGroup>
+                <Label>{t("products.marking", "Маркировка (Asl-Belgisi)")}</Label>
+                <Select
+                  value={
+                    formData.isMarked === null ? "" : formData.isMarked ? "1" : "0"
+                  }
+                  onChange={(e) =>
+                    handleChange(
+                      "isMarked",
+                      e.target.value === "" ? null : e.target.value === "1",
+                    )
+                  }
+                  title={t(
+                    "products.markingHint",
+                    "Авто — POS определит по группе МХИК; иначе задаёт обязательную маркировку (продажа только по QR)",
+                  )}
+                >
+                  <option value="">{t("products.markingAuto", "Авто (по группе МХИК)")}</option>
+                  <option value="1">{t("products.markingYes", "Маркируется (только QR)")}</option>
+                  <option value="0">{t("products.markingNo", "Не маркируется")}</option>
                 </Select>
               </FormGroup>
               <FormGroup>

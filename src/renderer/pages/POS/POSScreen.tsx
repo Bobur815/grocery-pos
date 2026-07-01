@@ -26,8 +26,7 @@ import { Product } from "@shared/types";
 import { parseBarcode } from "../../../shared/utils/barcode-parser";
 import { parseWeightBarcode } from "../../../shared/utils/weightBarcode";
 import { physicalKeyToChar } from "../../../shared/utils/keyboard-layout";
-import { isMarkedMxik } from "../../../shared/utils/marking";
-import { findBlockedMarkingItems, translateMarkingStatus } from "./markingCirculation";
+import { productRequiresMarking } from "../../../shared/utils/marking";
 import { Modal } from "@renderer/components/common/Modal";
 import { useSidebar } from "@renderer/context/SidebarContext";
 
@@ -525,9 +524,9 @@ export function POSScreen() {
           return;
         }
 
-        // Marked goods (MXIK group 022) are QR-only — keyed off the product's own MXIK, not its
-        // category (a category's group list can span many groups and must not gate marking).
-        if (isMarkedMxik(product.mxik)) {
+        // Marked goods are QR-only — decided from the product's authoritative isMarked flag
+        // (tasnif `label`), falling back to the MXIK group heuristic while isMarked is null.
+        if (productRequiresMarking(product)) {
           setId("");
           setError(t("pos.qrOnlyProduct"));
           return;
@@ -743,11 +742,11 @@ export function POSScreen() {
             return;
           }
 
-          // Group 022 marking: marked goods must be sold via their unique DataMatrix QR, never a
-          // plain EAN. Decided per-product from the product's own MXIK (not its category's group
-          // list, which can legitimately span many groups after the audit-coverage expansion).
-          const isMarked = isMarkedMxik(product.mxik);
-          if (hasSerial && isMarked) {
+          // Marked goods must be sold via their unique DataMatrix QR, never a plain EAN. Decided
+          // per-product from the authoritative isMarked flag (tasnif `label`), falling back to the
+          // MXIK group heuristic while isMarked is null.
+          const requiresMarking = productRequiresMarking(product);
+          if (hasSerial && requiresMarking) {
             // Check for duplicate in current cart
             const alreadyInCart = items.some(
               (i) => i.markingCode === normalizedNoGS,
@@ -787,9 +786,11 @@ export function POSScreen() {
             }
             resetInputs();
 
-            // Background marking-code checks — skippable via Fiscal settings toggle.
+            // Background resale check — skippable via Fiscal settings toggle. Has this exact label
+            // already been sold (local/cross-terminal)? If so, revert the optimistic add and warn.
+            // (Circulation / out-of-circulation is intentionally NOT checked here — such labels are
+            // allowed into the cart; REGOS:VCR remains the authoritative gate at fiscalization.)
             if (markingCheckRef.current) {
-              // 1) Resale check: has this exact label already been sold (local/cross-terminal)?
               window.electronAPI.markingCodes
                 .check(normalizedNoGS)
                 .then((checkResult) => {
@@ -814,38 +815,14 @@ export function POSScreen() {
                 .catch(() => {
                   // IPC/network error — allow the sale (offline-first); line stays in cart.
                 });
-
-              // 2) Circulation check (asl-belgisi): block an out-of-circulation / unknown label
-              // early with a clear message, instead of letting REGOS reject the whole receipt at
-              // fiscalization ([704030] товар вне оборота). Offline-first: an unreachable registry
-              // leaves the line in the cart and REGOS stays the authoritative gate.
-              window.electronAPI.markingCodes
-                .checkCirculation(normalizedNoGS)
-                .then((res) => {
-                  const r = res as {
-                    reachable: boolean;
-                    outOfCirculation: boolean;
-                    status?: string;
-                  };
-                  if (!r.reachable || !r.outOfCirculation) return;
-                  removeByMarkingCode(normalizedNoGS);
-                  const msg = t("pos.markingCodeNotValid", {
-                    status: translateMarkingStatus(r.status, t),
-                  });
-                  setError(msg);
-                  toast.error(msg);
-                })
-                .catch(() => {
-                  // IPC/network error — allow the sale (offline-first); REGOS remains the gate.
-                });
             }
             return;
           }
 
-          // Block plain EAN barcode entry for group-022 marking products.
+          // Block plain EAN barcode entry for marked products.
           // DataMatrix QR inputs are longer and non-numeric — those pass through.
           const isPlainBarcode = /^\d{8}$|^\d{12}$|^\d{13}$/.test(rawValue);
-          if (isPlainBarcode && isMarked) {
+          if (isPlainBarcode && requiresMarking) {
             writeBarcode("", true);
             setError(t("pos.qrOnlyProduct"));
             return;
@@ -890,22 +867,6 @@ export function POSScreen() {
         return;
       }
 
-      // Synchronous circulation guard: block quick-pay if any marked line is out of circulation,
-      // removing it so the cashier re-pays with a clean cart. Catches the race where the optimistic
-      // scan-time check hasn't resolved yet. Offline-first (unreachable → not blocked).
-      if (markingCheckRef.current) {
-        const blocked = await findBlockedMarkingItems(items);
-        if (blocked.length > 0) {
-          blocked.forEach((b) => removeByMarkingCode(b.code));
-          const msg = t("pos.markingCodeNotValid", {
-            status: translateMarkingStatus(blocked[0].status, t),
-          });
-          setError(msg);
-          toast.error(msg);
-          return;
-        }
-      }
-
       payingRef.current = true;
 
       try {
@@ -938,15 +899,6 @@ export function POSScreen() {
             window.electronAPI.markingCodes
               .record(markingEntries)
               .catch(() => {});
-          }
-
-          // Auto-print receipt for quick pay — skipped when the VCR prints the fiscal receipt
-          if (sale.id && !vcrPrintsReceiptRef.current) {
-            try {
-              await window.electronAPI.printer.printReceipt(sale.id);
-            } catch (printErr) {
-              console.error("Receipt print failed:", printErr);
-            }
           }
 
           clearCart();
@@ -1094,16 +1046,13 @@ export function POSScreen() {
     writeBarcode,
   ]);
 
-  // When the VCR prints the fiscal receipt itself, skip posgro's own auto-print.
-  // (The unfiscalized-receipts badge lives in the Cart header.)
-  const vcrPrintsReceiptRef = useRef(false);
   // Group 022 resale check (SoldMarkingCode lookup) — toggleable in Fiscal settings.
+  // (The unfiscalized-receipts badge lives in the Cart header.)
   const markingCheckRef = useRef(true);
   useEffect(() => {
     window.electronAPI.fiscal
       .getConfig()
       .then((c) => {
-        vcrPrintsReceiptRef.current = c.enabled && c.vcrPrintsReceipt;
         markingCheckRef.current = c.markingCodeCheck;
       })
       .catch(() => {});
@@ -1156,8 +1105,8 @@ export function POSScreen() {
         );
         return;
       }
-      // Marked goods (MXIK group 022) can't be added from the catalog — they require a QR scan.
-      if (isMarkedMxik(product.mxik)) {
+      // Marked goods can't be added from the catalog — they require a QR scan.
+      if (productRequiresMarking(product)) {
         setError(t("pos.qrOnlyProduct"));
         return;
       }

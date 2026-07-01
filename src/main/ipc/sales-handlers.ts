@@ -164,20 +164,23 @@ export function setupSalesHandlers(): void {
       ?.filter((l) => l?.barcode && l?.label) ?? [];
     const regosLabels = markingLabels.length ? JSON.stringify(markingLabels) : null;
 
-    // REGOS:VCR fiscalization — "allow + fiscalize later". The sale is already saved; mark it
-    // PENDING and fiscalize in the BACKGROUND so the cashier is NOT blocked on the OFD round-trip.
-    // The POS receipt is printed immediately (non-fiscal); the fiscal QR is persisted when the
-    // background fiscalization completes. On failure the sale stays PENDING/FAILED for the retry worker.
+    // REGOS:VCR fiscalization — opt-in per sale. The sale is always saved as PENDING; it is only
+    // sent to the OFD now when the cashier ticked "fiscalize" at checkout (data.fiscalize). Otherwise
+    // it stays PENDING (un-fiscalized) and can be fiscalized later from Sales History. When fiscalizing,
+    // the OFD round-trip runs in the BACKGROUND so the cashier is not blocked; the fiscal QR is
+    // persisted when it completes, and on failure the sale stays PENDING/FAILED.
     try {
       if (await regosVcrService.isEnabled()) {
         await prisma.sale.update({
           where: { id: sale.id },
           data: { fiscalStatus: 'PENDING', regosLabels },
         });
-        // Fire-and-forget: kick the device immediately but do not await the OFD round-trip.
-        regosVcrService.fiscalizeSale(sale.id).catch((e) =>
-          console.error('[fiscal] immediate fiscalize failed (will retry):', e instanceof Error ? e.message : e),
-        );
+        if (data.fiscalize) {
+          // Fire-and-forget: kick the device immediately but do not await the OFD round-trip.
+          regosVcrService.fiscalizeSale(sale.id).catch((e) =>
+            console.error('[fiscal] immediate fiscalize failed (will retry):', e instanceof Error ? e.message : e),
+          );
+        }
       } else {
         await prisma.sale.update({
           where: { id: sale.id },

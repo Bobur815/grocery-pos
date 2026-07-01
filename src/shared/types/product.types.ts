@@ -32,6 +32,9 @@ export interface Product {
   mxik?: string;
   packageCode?: string;
   vatRate?: number | null; // VAT % for this product's MXIK (0/12). Null → use global default
+  // Authoritative Asl-Belgisi marking flag from tasnif `label`. Null = unchecked → callers fall
+  // back to the isMarkedMxik(mxik) group heuristic. See productRequiresMarking() in shared/utils/marking.
+  isMarked?: boolean | null;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -110,6 +113,7 @@ export interface ProductCreateInput {
   mxik?: string;
   packageCode?: string;
   vatRate?: number | null;
+  isMarked?: boolean | null;
   productType?: ProductType;
   internalCode?: string;
   bulkQuantity?: number;
@@ -138,6 +142,7 @@ export interface ProductUpdateInput {
   mxik?: string;
   packageCode?: string;
   vatRate?: number | null;
+  isMarked?: boolean | null;
   productType?: ProductType;
   internalCode?: string;
   bulkQuantity?: number;

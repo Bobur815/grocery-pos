@@ -89,7 +89,42 @@ export class MxikService {
       orderBy: { mxikCode: 'asc' },
     });
   }
-  async getByCode(code: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string }> {
+  /**
+   * Resolve a 17-digit MXIK's mandatory-marking flag from tasnif's `label` field (1 = marked,
+   * 0 = plain). The `integration-mxik/get/history` endpoint does NOT return `label`, so query the
+   * `by-params` endpoint (elasticsearch fallback). Returns null when tasnif has no usable label —
+   * the caller then leaves Product.isMarked null and the POS falls back to the group heuristic.
+   */
+  async getIsMarked(code: string): Promise<boolean | null> {
+    const readLabel = (row: { label?: unknown } | undefined): boolean | null => {
+      if (!row || row.label === null || row.label === undefined || row.label === '') return null;
+      return Number(row.label) === 1;
+    };
+    try {
+      const res = await fetch(`${TASNIF_BASE}/mxik/search/by-params?mxikCode=${code}&size=15&page=0&lang=uz_cyrl`);
+      if (res.ok) {
+        const j = await res.json() as { data?: { content?: Array<{ mxikCode?: string; label?: unknown }> } };
+        const row = j?.data?.content?.find((r) => r.mxikCode === code) ?? j?.data?.content?.[0];
+        const label = readLabel(row);
+        if (label !== null) return label;
+      }
+    } catch {
+      // fall through to elasticsearch
+    }
+    try {
+      const res = await fetch(`${TASNIF_BASE}/elasticsearch/search?lang=uz_cyrl&search=${code}&size=20&page=0`);
+      if (res.ok) {
+        const j = await res.json() as { data?: Array<{ mxikCode?: string; label?: unknown }> };
+        const row = j?.data?.find((r) => r.mxikCode === code) ?? j?.data?.[0];
+        return readLabel(row);
+      }
+    } catch {
+      // treat as unknown
+    }
+    return null;
+  }
+
+  async getByCode(code: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string; isMarked: boolean | null }> {
     if (!/^\d{17}$/.test(code)) {
       throw new HttpException('Invalid MXIK code — must be 17 digits', HttpStatus.BAD_REQUEST);
     }
@@ -113,10 +148,11 @@ export class MxikService {
       name: brand + (d.attributeNameUz ?? d.subPositionNameUz),
       nameRu: brand + (d.attributeNameRu ?? d.subPositionNameRu),
       packageCode: String(d.packageNames?.[0]?.code ?? '796'),
+      isMarked: await this.getIsMarked(d.mxikCode),
     };
   }
 
-  async searchByBarcode(barcode: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string }> {
+  async searchByBarcode(barcode: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string; isMarked: boolean | null }> {
     let json: MxikSearchResponse;
     try {
       const url = `${TASNIF_BASE}/elasticsearch/search?lang=uz_cyrl&search=${encodeURIComponent(barcode)}&size=5&page=0`;

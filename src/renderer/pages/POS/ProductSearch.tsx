@@ -15,7 +15,7 @@ import {
   KbToggle,
 } from "../../components/common/SearchControls";
 import { debounce } from "../../utils/helpers";
-import { isMarkedMxik } from "../../../shared/utils/marking";
+import { productRequiresMarking } from "../../../shared/utils/marking";
 
 const Container = styled.div`
   flex: 1;
@@ -307,7 +307,7 @@ export function ProductSearch({ onSelect, keyboardZIndex }: ProductSearchProps) 
     searchQuery.trim() || selectedCategoryId != null || priceQuery.trim()
       ? (products as unknown as Product[])
       : topSelling
-  ).filter((p) => p.isActive && !isMarkedMxik(p.mxik));
+  ).filter((p) => p.isActive && !productRequiresMarking(p));
 
   return (
     <Container>

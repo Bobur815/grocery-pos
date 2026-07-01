@@ -83,6 +83,9 @@ model Product {
   pendingPrice          Decimal?  @map("pending_price")
   pendingPriceThreshold Decimal?  @map("pending_price_threshold")
   mxik                  String?   @map("mxik")
+  // Authoritative Asl-Belgisi marking flag from tasnif `label` (1=marked, 0=plain).
+  // Null = not yet checked → callers fall back to the isMarkedMxik(mxik) group heuristic.
+  isMarked              Boolean?  @map("is_marked")
   active                Boolean   @default(true)
 
 

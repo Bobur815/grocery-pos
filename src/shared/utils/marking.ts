@@ -16,3 +16,18 @@ export function isMarkedMxik(mxik?: string | null): boolean {
     typeof mxik === 'string' && MARKING_GROUP_CODES.some((g) => mxik.startsWith(g))
   );
 }
+
+/**
+ * Whether a product must be sold by scanning its unique DataMatrix QR (mandatory marking).
+ *
+ * Prefers the authoritative per-product `isMarked` flag (populated from tasnif's `label`: true =
+ * marked, false = plain). The group-prefix heuristic (isMarkedMxik) is wrong in both directions —
+ * it forces plain goods in groups 020/022 to QR and misses marked goods in other groups — so it is
+ * used ONLY as a fallback while `isMarked` is still null (not yet backfilled from tasnif).
+ */
+export function productRequiresMarking(product: {
+  isMarked?: boolean | null;
+  mxik?: string | null;
+}): boolean {
+  return product.isMarked ?? isMarkedMxik(product.mxik);
+}

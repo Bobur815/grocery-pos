@@ -561,16 +561,24 @@ export interface MxikScanInfo {
   attributeName: string | null;
   unitsName: string | null;
   groupCode: string | null;
+  // Authoritative Asl-Belgisi marking flag from tasnif `label` (1 = marked). Null = unknown.
+  isMarked: boolean | null;
 }
 
 export type { CatalogEntry };
 
+// tasnif `label` → boolean (1 = marked, 0 = plain). Null when absent/unparseable.
+function labelToIsMarked(label: unknown): boolean | null {
+  if (label === null || label === undefined || label === '') return null;
+  return Number(label) === 1;
+}
+
 export const mxik = {
-  lookupCode: async (code: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string }> => {
+  lookupCode: async (code: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string; isMarked: boolean | null }> => {
     const { data } = await axiosInstance.get(`/mxik/code/${encodeURIComponent(code)}`);
     return data;
   },
-  searchByBarcode: async (barcode: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string }> => {
+  searchByBarcode: async (barcode: string): Promise<{ code: string; name: string; nameRu: string; packageCode: string; isMarked: boolean | null }> => {
     // Call tasnif directly from browser (VPS is geo-blocked; browser is in Uzbekistan)
     const TASNIF = 'https://tasnif.soliq.uz/api/cls-api';
     const searchRes = await fetch(`${TASNIF}/elasticsearch/search?lang=uz_cyrl&search=${encodeURIComponent(barcode)}&size=5&page=0`);
@@ -578,6 +586,8 @@ export const mxik = {
     if (!searchJson.success || !searchJson.data?.length) throw new Error('Not found');
     const match = searchJson.data.find((d: any) => d.internationalCode === barcode) ?? searchJson.data[0];
     const mxikCode: string = match.mxikCode;
+    // The elasticsearch match row carries the authoritative `label` marking flag.
+    const isMarked = labelToIsMarked(match.label);
     const detailRes = await fetch(`${TASNIF}/integration-mxik/get/history/${mxikCode}`);
     const detailJson = await detailRes.json();
     if (!detailJson.success || !detailJson.data) throw new Error('Not found');
@@ -588,6 +598,7 @@ export const mxik = {
       name: brand + (d.attributeNameUz ?? d.subPositionNameUz),
       nameRu: brand + (d.attributeNameRu ?? d.subPositionNameRu),
       packageCode: String(d.packageNames?.[0]?.code ?? '796'),
+      isMarked,
     };
   },
   // Batch MXIK lookup via by-params endpoint (called directly from browser — VPS is geo-blocked)
@@ -599,7 +610,7 @@ export const mxik = {
           `${TASNIF}/mxik/search/by-params?mxikCode=${encodeURIComponent(code)}&size=1&page=0&lang=uz_cyrl`,
           { signal: AbortSignal.timeout(6000) },
         );
-        const json = await res.json() as { success: boolean; data: Array<{ mxikCode: string; name: string; brandName: string; attributeName: string; unitsName: string; groupCode: string }> };
+        const json = await res.json() as { success: boolean; data: Array<{ mxikCode: string; name: string; brandName: string; attributeName: string; unitsName: string; groupCode: string; label: unknown }> };
         if (!json.success || !json.data?.length) return { code, info: null };
         const d = json.data[0];
         return {
@@ -610,6 +621,7 @@ export const mxik = {
             attributeName: d.attributeName || null,
             unitsName: d.unitsName || null,
             groupCode: d.groupCode || null,
+            isMarked: labelToIsMarked(d.label),
           } satisfies MxikScanInfo,
         };
       }),

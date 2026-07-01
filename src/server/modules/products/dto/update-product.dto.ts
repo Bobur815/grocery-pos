@@ -118,6 +118,11 @@ export class UpdateProductDto {
   @Type(() => Number)
   vatRate?: number;
 
+  @ApiPropertyOptional({ example: true, description: 'Asl-Belgisi mandatory-marking flag from tasnif `label`. Null → POS falls back to the MXIK group heuristic' })
+  @IsOptional()
+  @IsBoolean()
+  isMarked?: boolean | null;
+
   @ApiPropertyOptional({ example: 'REGULAR', description: 'Product type (REGULAR, BULK_WEIGHTED, PREPACKAGED)' })
   @IsOptional()
   @IsIn(PRODUCT_TYPES)

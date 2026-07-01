@@ -134,6 +134,7 @@ model Product {
   mxik                   String?   @map("mxik") // Uzbekistan national catalog code (nullable, non-unique — multiple products can share one MXIK)
   packageCode            String?   @map("package_code") // REGOS:VCR package (unit) code from MXIK — required for fiscalizing marked goods
   vatRate                Float?    @map("vat_rate") // VAT % registered for this product's MXIK (e.g. 0, 6 or 12). Null → use global regos_vcr_vat default
+  isMarked               Boolean?  @map("is_marked") // Authoritative Asl-Belgisi marking flag from tasnif `label`. Null = unchecked → fall back to isMarkedMxik(mxik) heuristic
   active                 Boolean   @default(true)
   pendingPrice           Decimal?  @db.Decimal(10, 2) @map("pending_price")
   pendingPriceThreshold  Decimal?  @db.Decimal(10, 3) @map("pending_price_threshold")
