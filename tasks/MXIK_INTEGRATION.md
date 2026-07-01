@@ -352,4 +352,50 @@ no product found response:
 }
 ---
 
-*Last Updated: 2026-05-12 — reflects current production code*
+## Backfilling `Product.isMarked` (Asl-Belgisi marking flag)
+
+`Product.isMarked` is the authoritative mandatory-marking flag, sourced from tasnif's per-product `label` (`1` = marked, `0` = plain). It replaces the old MXIK group-020/022 prefix heuristic (which was wrong both ways). The POS uses `productRequiresMarking(product)` = `isMarked ?? isMarkedMxik(mxik)` (`src/shared/utils/marking.ts`), so rows left `NULL` fall back to the heuristic.
+
+`scripts/backfill-is-marked.ts` fills the column for existing products. tasnif is geo-blocked to Uzbekistan IPs and the VPS is in Germany, so the script **runs on a UZ machine** and writes to the VPS Postgres **over an SSH tunnel**.
+
+**Prerequisite:** the `is_marked` column must exist on the target DB (migration `20260701000001_add_product_is_marked`). It is applied by the normal `prisma migrate deploy` on deploy — or apply it yourself over the tunnel (Step 2b).
+
+### Steps (production)
+
+1. **Open the tunnel** — leave this terminal open (local `5433` → VPS Postgres `5432`, which docker publishes on `127.0.0.1:5432`):
+   ```
+   ssh -L 5433:localhost:5432 bobur@144.91.121.160
+   ```
+
+2. **Point `DATABASE_URL` at the tunnel** in a second terminal (repo dir). Take USER/PASS from the VPS `.env` `DATABASE_URL`, but swap the host for `localhost:5433`:
+   - PowerShell: `$env:DATABASE_URL = "postgresql://USER:PASS@localhost:5433/posgro"`
+   - Git Bash:   prefix each command with `DATABASE_URL="postgresql://USER:PASS@localhost:5433/posgro"`
+
+   2b. *(only if the column isn't deployed yet)* apply the migration over the tunnel:
+   ```
+   npx prisma migrate deploy
+   ```
+
+3. **Dry run** — reports counts, writes nothing:
+   ```powershell
+   $env:DRY_RUN = "true"
+   npx tsx scripts/backfill-is-marked.ts
+   ```
+
+4. **Real run:**
+   ```powershell
+   Remove-Item Env:DRY_RUN
+   npx tsx scripts/backfill-is-marked.ts
+   ```
+
+5. **Verify** a few known cases (e.g. `npx prisma studio`): plain goods (Bonduelle corn, Lays) → `is_marked = false`; marked goods (Qaymoq, Baranki) → `is_marked = true`.
+
+Tunables (env): `DRY_RUN`, `ONLY_NULL=true` (only touch `NULL` rows), `DELAY_MS` (tasnif throttle, default 200), `STORE_ID`, `LANG`. Re-runnable / idempotent. Non-17-digit or unknown-to-tasnif MXIK stay `NULL`. Terminals pick up `is_marked` on their next product sync (local SQLite column added by `runMigrations` on app start).
+
+**Staging first:** same steps against `posgro_staging` — check `docker-compose.staging.yml` for its Postgres host port and tunnel to that instead.
+
+Diagnostic probes (read-only, no DB writes): `scripts/check-mxik-label.ts` and `scripts/check-mxik-false-positives.ts` compare tasnif `label` against the old group heuristic over `products.json`.
+
+---
+
+*Last Updated: 2026-07-01 — added Product.isMarked backfill section*
