@@ -1,6 +1,6 @@
 // REGOS:VCR fiscalization — shared types (renderer ↔ main process)
 
-export type FiscalState = 'PENDING' | 'FISCALIZED' | 'FAILED' | 'DISABLED';
+export type FiscalState = "PENDING" | "FISCALIZED" | "FAILED" | "DISABLED";
 
 /** Fiscal config exposed to the renderer. The password is NEVER sent back — only `hasPassword`. */
 export interface RegosVcrConfig {
@@ -85,6 +85,78 @@ export interface FiscalActionResult {
   error?: string;
 }
 
+/** One position exactly as it is sent to REGOS:VCR (money in tiyin, qty ×1000). */
+export interface FiscalPreviewPosition {
+  name: string;
+  barcode: string;
+  icps: string; // MXIK (= product.mxik)
+  amount: number; // tiyin (sum × 100)
+  quantity: number; // qty × 1000
+  vat_value: number; // tiyin; -1 = "Без НДС" (non-VAT-payer sentinel)
+  discount: number; // tiyin
+  package_code?: string;
+  label?: string; // mandatory-marking DataMatrix code (marked goods)
+  unit_name?: string;
+  group_name?: string;
+  owner_type?: string;
+}
+
+export interface FiscalPreviewPayment {
+  type: 1 | 2; // 1 = cash, 2 = card
+  value: number; // tiyin
+  card_type?: number;
+}
+
+/**
+ * Full illustration of a receipt for the Receipt Details modal — the stored receipt +
+ * fiscal metadata, the captured marking labels, and the EXACT Receipt.Sale JSON-RPC body
+ * that is (or would be) sent to REGOS:VCR. Read-only; reconstructed from current product
+ * data, so for an already-fiscalised sale it reflects what a re-send would look like.
+ */
+export interface FiscalSalePreview {
+  saleId: string;
+  receiptNumber: string;
+  createdAt: string;
+  cashierName: string;
+  terminalId: string;
+  paymentMethod: string;
+  totalAmount: number; // sum
+  discountAmount: number; // sum
+  finalAmount: number; // sum
+  // Stored REGOS:VCR fiscal result / status
+  fiscalStatus: string | null; // PENDING | FISCALIZED | FAILED | DISABLED
+  fiscalError: string | null;
+  fiscalAttempts: number | null;
+  regosReceiptNo: string | null;
+  regosReceiptId: string | null;
+  regosFiscalSign: string | null;
+  regosQrCodeUrl: string | null;
+  regosTerminalId: string | null;
+  regosFiscalAt: string | null;
+  refunded: boolean;
+  // Marking (Asl-Belgisi) DataMatrix codes captured for this receipt, by line barcode
+  labels: FiscalLabel[];
+  // Config context that shapes the payload
+  config: {
+    enabled: boolean;
+    url: string;
+    login: string;
+    posId: string;
+    nonVatPayer: boolean;
+    vatPercent: number;
+  };
+  // The exact JSON-RPC Receipt.Sale request body sent to REGOS:VCR
+  request: {
+    method: "Receipt.Sale";
+    code: string; // idempotency key (= sale id)
+    pos_id: string;
+    session_code: string | null;
+    cashier_name: string;
+    positions: FiscalPreviewPosition[];
+    payments: FiscalPreviewPayment[];
+  };
+}
+
 /**
  * Result of the "fiscalise all old receipts" bulk action. Only receipts containing a
  * group-022 marked product are fiscalised (their marking labels are repaired first, in case
@@ -107,7 +179,7 @@ export interface FiscalBulkResult {
  * `fiscal:bulkProgress` channel so the admin can watch each receipt being checked/fiscalised.
  */
 export interface FiscalBulkProgress {
-  phase: 'checking' | 'fiscalizing' | 'disabled' | 'done';
+  phase: "checking" | "fiscalizing" | "disabled" | "done";
   processed: number; // marked receipts handled so far
   total: number; // total marked receipts to process
   fiscalized: number;

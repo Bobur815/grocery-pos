@@ -24,6 +24,9 @@ import type {
   FiscalBulkProgress,
   FiscalLabel,
   FiscalZReportStatus,
+  FiscalSalePreview,
+  FiscalPreviewPosition,
+  FiscalPreviewPayment,
 } from '../../shared/types/fiscal.types';
 import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
 import { productRequiresMarking } from '../../shared/utils/marking';
@@ -428,6 +431,64 @@ class RegosVcrService {
     // paymentMethod may be 'cash'/'card' (POS quick-pay) or upper-case elsewhere.
     if ((sale.paymentMethod ?? '').toUpperCase() === 'CASH') return [{ type: 1, value }];
     return [{ type: 2, value, card_type: 2 }];
+  }
+
+  /**
+   * Reconstruct everything about a receipt for the Receipt Details modal — the stored
+   * fiscal metadata + the EXACT Receipt.Sale body sent to REGOS:VCR. Read-only: it reuses
+   * buildPositions/buildPayments (no VCR calls, no writes), so it's the ground truth for
+   * "what is sent to the fiscal module", including per-line MXIK, package_code, VAT and the
+   * marking DataMatrix labels. Returns null if the sale doesn't exist.
+   */
+  async previewSalePayload(saleId: string): Promise<FiscalSalePreview | null> {
+    const prisma = getPrismaClient();
+    const sale = await prisma.sale.findUnique({ where: { id: saleId }, include: { items: true } });
+    if (!sale) return null;
+
+    const cfg = await this.resolveConfig();
+    const { positions } = await this.buildPositions(sale as never, cfg);
+    const payments = this.buildPayments(sale as never);
+    const labels: FiscalLabel[] = sale.regosLabels ? safeParseLabels(sale.regosLabels) : [];
+
+    return {
+      saleId: sale.id,
+      receiptNumber: sale.receiptNumber,
+      createdAt: sale.createdAt.toISOString(),
+      cashierName: sale.cashierName,
+      terminalId: sale.terminalId,
+      paymentMethod: sale.paymentMethod,
+      totalAmount: Number(sale.totalAmount),
+      discountAmount: Number(sale.discountAmount),
+      finalAmount: Number(sale.finalAmount),
+      fiscalStatus: sale.fiscalStatus ?? null,
+      fiscalError: sale.fiscalError ?? null,
+      fiscalAttempts: sale.fiscalAttempts ?? null,
+      regosReceiptNo: sale.regosReceiptNo ?? null,
+      regosReceiptId: sale.regosReceiptId ?? null,
+      regosFiscalSign: sale.regosFiscalSign ?? null,
+      regosQrCodeUrl: sale.regosQrCodeUrl ?? null,
+      regosTerminalId: sale.regosTerminalId ?? null,
+      regosFiscalAt: sale.regosFiscalAt ? sale.regosFiscalAt.toISOString() : null,
+      refunded: sale.refunded ?? false,
+      labels,
+      config: {
+        enabled: cfg.enabled,
+        url: cfg.url,
+        login: cfg.login,
+        posId: cfg.posId,
+        nonVatPayer: cfg.nonVatPayer,
+        vatPercent: cfg.vatPercent,
+      },
+      request: {
+        method: 'Receipt.Sale',
+        code: sale.id,
+        pos_id: cfg.posId,
+        session_code: sale.smenaId ?? null,
+        cashier_name: sale.cashierName,
+        positions: positions as unknown as FiscalPreviewPosition[],
+        payments: payments as unknown as FiscalPreviewPayment[],
+      },
+    };
   }
 
   // ── Fiscalize one sale ───────────────────────────────────────────────────────

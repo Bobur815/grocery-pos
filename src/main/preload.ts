@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       return () => ipcRenderer.removeListener("fiscal:bulkProgress", h);
     },
     retrySale: (saleId: string) => ipcRenderer.invoke("fiscal:retrySale", saleId),
+    previewPayload: (saleId: string) => ipcRenderer.invoke("fiscal:previewPayload", saleId),
     refund: (saleId: string) => ipcRenderer.invoke("fiscal:refund", saleId),
     printDuplicate: (saleId: string) => ipcRenderer.invoke("fiscal:printDuplicate", saleId),
     zInfo: () => ipcRenderer.invoke("fiscal:zInfo"),
@@ -496,6 +497,9 @@ declare global {
           cb: (p: import("../shared/types/fiscal.types").FiscalBulkProgress) => void,
         ) => () => void;
         retrySale: (saleId: string) => Promise<{ ok: boolean; error?: string }>;
+        previewPayload: (
+          saleId: string,
+        ) => Promise<import("../shared/types/fiscal.types").FiscalSalePreview | null>;
         refund: (saleId: string) => Promise<{ ok: boolean; fiscalSign?: string; error?: string }>;
         printDuplicate: (saleId: string) => Promise<{ ok: boolean; error?: string }>;
         zInfo: () => Promise<import("../shared/types/fiscal.types").FiscalZReportStatus>;

@@ -10,7 +10,8 @@ import { Button } from "../../components/common/Button";
 import { Pagination } from "../../components/common/Pagination";
 import { DateInput } from "../../components/common/DateInput";
 import { usePagination } from "../../hooks/usePagination";
-import { Printer, Trash, Eraser } from "lucide-react";
+import { ReceiptDetailsModal } from "./ReceiptDetailsModal";
+import { Printer, Trash, Eraser, FileSearch } from "lucide-react";
 
 const Container = styled.div`
   display: flex;
@@ -246,8 +247,9 @@ export function ReceiptsSummary() {
   const [terminalId, setTerminalId] = useState("");
   const [knownTerminals, setKnownTerminals] = useState<string[]>([]);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
-  
-  useEffect(() => { 
+  const [detailsSaleId, setDetailsSaleId] = useState<string | null>(null);
+
+  useEffect(() => {
     if (isAdmin) {
       window.electronAPI.terminals
         .getKnown()
@@ -258,7 +260,6 @@ export function ReceiptsSummary() {
 
   const formatCurrency = (amount: number) =>
     formatCurrencyBase(amount, i18n.language as "ru" | "uz");
-
 
   useEffect(() => {
     const start = new Date(startDate);
@@ -352,17 +353,11 @@ export function ReceiptsSummary() {
       <FilterBar>
         <FilterGroup>
           <FilterLabel>{t("reports.startDate")}</FilterLabel>
-          <DateInput
-            value={startDate}
-            onChange={(val) => setStartDate(val)}
-          />
+          <DateInput value={startDate} onChange={(val) => setStartDate(val)} />
         </FilterGroup>
         <FilterGroup>
           <FilterLabel>{t("reports.endDate")}</FilterLabel>
-          <DateInput
-            value={endDate}
-            onChange={(val) => setEndDate(val)}
-          />
+          <DateInput value={endDate} onChange={(val) => setEndDate(val)} />
         </FilterGroup>
         <FilterGroup>
           <FilterLabel>{t("reports.payment")}</FilterLabel>
@@ -498,6 +493,12 @@ export function ReceiptsSummary() {
                     {sale.margin != null ? `${sale.margin.toFixed(1)}%` : "—"}
                   </Td>
                   <Td style={{ textAlign: "center", whiteSpace: "nowrap" }}>
+                    <ActionBtn
+                      onClick={() => setDetailsSaleId(sale.id)}
+                      title={t("reports.receiptDetails.title")}
+                    >
+                      <FileSearch size={16} />
+                    </ActionBtn>
                     <ActionBtn onClick={() => handlePrint(sale.id)}>
                       <Printer size={16} />
                     </ActionBtn>
@@ -525,6 +526,13 @@ export function ReceiptsSummary() {
           />
         )}
       </TableCard>
+
+      {detailsSaleId && (
+        <ReceiptDetailsModal
+          saleId={detailsSaleId}
+          onClose={() => setDetailsSaleId(null)}
+        />
+      )}
 
       {deleteTargetId && (
         <Modal
