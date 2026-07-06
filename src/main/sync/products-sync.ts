@@ -1,22 +1,23 @@
-import { getPrismaClient } from '../database/sqlite-client';
-import { getAppConfig } from '../config/app-config';
-import { getServerToken } from './queue-manager';
+import { getPrismaClient } from "../database/sqlite-client";
+import { getAppConfig } from "../config/app-config";
+import { getServerToken } from "./queue-manager";
 
-export async function syncProducts(): Promise<{ id: number; nameRu: string; stock: number }[]> {
+export async function syncProducts(): Promise<
+  { id: number; nameRu: string; stock: number }[]
+> {
   const prisma = getPrismaClient();
   const config = getAppConfig();
 
   const token = getServerToken();
   if (!token) {
-    throw new Error('No server token available — log in first to sync');
+    throw new Error("No server token available — log in first to sync");
   }
 
   // Get last sync timestamp
   const lastSyncSetting = await prisma.systemSetting.findUnique({
-    where: { key: 'last_product_sync' },
+    where: { key: "last_product_sync" },
   });
   const lastSync = lastSyncSetting?.value || new Date(0).toISOString();
-
 
   try {
     const response = await fetch(
@@ -25,7 +26,7 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
         headers: {
           Authorization: `Bearer ${token}`,
         },
-      }
+      },
     );
 
     if (!response.ok) {
@@ -40,14 +41,28 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
 
     // Build local category lookup maps to resolve VPS categoryId → local id.
     // VPS ids may differ from SQLite autoincrement ids; fall back to nameUz match.
-    const localCategories = await prisma.category.findMany({ select: { id: true, nameUz: true } });
-    const catById  = new Map(localCategories.map((c: { id: number; nameUz: string }) => [c.id, c.id]));
-    const catByName = new Map(localCategories.map((c: { id: number; nameUz: string }) => [c.nameUz, c.id]));
+    const localCategories = await prisma.category.findMany({
+      select: { id: true, nameUz: true },
+    });
+    const catById = new Map(
+      localCategories.map((c: { id: number; nameUz: string }) => [c.id, c.id]),
+    );
+    const catByName = new Map(
+      localCategories.map((c: { id: number; nameUz: string }) => [
+        c.nameUz,
+        c.id,
+      ]),
+    );
 
-    const resolveCategoryId = (p: { categoryId: number; category?: { nameUz?: string } }): number => {
+    const resolveCategoryId = (p: {
+      categoryId: number;
+      category?: { nameUz?: string };
+    }): number => {
       if (catById.has(p.categoryId)) return p.categoryId;
-      const byName = p.category?.nameUz ? catByName.get(p.category.nameUz) : undefined;
-      if (typeof byName === 'number') return byName;
+      const byName = p.category?.nameUz
+        ? catByName.get(p.category.nameUz)
+        : undefined;
+      if (typeof byName === "number") return byName;
       return p.categoryId; // fall back to VPS id — will still fail FK but at least we tried
     };
 
@@ -59,7 +74,9 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
     // matches sales by barcode (local ids are per-terminal autoincrements), so a divergent
     // local id is safe — this prevents a unique-constraint crash when a terminal's DB and
     // the VPS have different id lineages (e.g. after repointing to another environment).
-    const createProductLocal = async (p: typeof products[number]): Promise<void> => {
+    const createProductLocal = async (
+      p: (typeof products)[number],
+    ): Promise<void> => {
       const data: Record<string, unknown> = {
         barcode: p.barcode,
         nameRu: p.nameRu,
@@ -75,13 +92,16 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
         packageCode: p.packageCode ?? null,
         vatRate: p.vatRate ?? null,
         isMarked: p.isMarked ?? null,
-        productType: p.productType ?? 'REGULAR',
+        productType: p.productType ?? "REGULAR",
         internalCode: p.internalCode ?? null,
         storeProductCode: p.storeProductCode ?? null,
         createdAt: new Date(p.createdAt),
         updatedAt: new Date(p.updatedAt),
       };
-      const idTaken = await prisma.product.findUnique({ where: { id: p.id }, select: { id: true } });
+      const idTaken = await prisma.product.findUnique({
+        where: { id: p.id },
+        select: { id: true },
+      });
       if (!idTaken) data.id = p.id; // keep ids aligned when free; else autoincrement
       await prisma.product.create({ data });
     };
@@ -139,7 +159,7 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
               packageCode: product.packageCode ?? null,
               vatRate: product.vatRate ?? null,
               isMarked: product.isMarked ?? null,
-              productType: product.productType ?? 'REGULAR',
+              productType: product.productType ?? "REGULAR",
               internalCode: product.internalCode ?? null,
               storeProductCode: product.storeProductCode ?? null,
               updatedAt: new Date(product.updatedAt),
@@ -151,7 +171,10 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
         }
       } catch (productError) {
         // Log and skip — one bad product must not abort the entire sync
-        console.error(`Failed to sync product barcode=${product.barcode}:`, productError instanceof Error ? productError.message : productError);
+        console.error(
+          `Failed to sync product barcode=${product.barcode}:`,
+          productError instanceof Error ? productError.message : productError,
+        );
         // Track earliest failure so the cursor doesn't advance past it
         const failedAt = new Date(product.updatedAt);
         if (!earliestFailedUpdatedAt || failedAt < earliestFailedUpdatedAt) {
@@ -167,7 +190,8 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
     // env's rows, so `updatedAfter` filters them out and they never sync down).
     // On failure, roll back to just before the earliest failure so it retries next cycle.
     const maxUpdatedAt = products.reduce(
-      (max: number, p: { updatedAt: string }) => Math.max(max, new Date(p.updatedAt).getTime()),
+      (max: number, p: { updatedAt: string }) =>
+        Math.max(max, new Date(p.updatedAt).getTime()),
       0,
     );
     const nextCursor = earliestFailedUpdatedAt
@@ -175,9 +199,9 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
       : new Date(maxUpdatedAt).toISOString();
 
     await prisma.systemSetting.upsert({
-      where: { key: 'last_product_sync' },
+      where: { key: "last_product_sync" },
       update: { value: nextCursor },
-      create: { key: 'last_product_sync', value: nextCursor },
+      create: { key: "last_product_sync", value: nextCursor },
     });
 
     // Detect stock conflicts: products that went negative after VPS overwrite
@@ -186,10 +210,15 @@ export async function syncProducts(): Promise<{ id: number; nameRu: string; stoc
       select: { id: true, nameRu: true, stock: true },
     });
 
-    return conflicted.map((p: { id: number; nameRu: string; stock: unknown }) => ({ id: p.id, nameRu: p.nameRu, stock: Number(p.stock) }));
-
+    return conflicted.map(
+      (p: { id: number; nameRu: string; stock: unknown }) => ({
+        id: p.id,
+        nameRu: p.nameRu,
+        stock: Number(p.stock),
+      }),
+    );
   } catch (error) {
-    console.error('Failed to sync products:', error);
+    console.error("Failed to sync products:", error);
     throw error;
   }
 }
@@ -219,7 +248,7 @@ export async function syncSuppliers(): Promise<void> {
           address: s.address || null,
           active: s.active ?? true,
           balance: s.balance ?? 0,
-          paymentType: s.paymentType ?? 'IMMEDIATE',
+          paymentType: s.paymentType ?? "IMMEDIATE",
         },
         create: {
           id: s.id,
@@ -229,12 +258,15 @@ export async function syncSuppliers(): Promise<void> {
           address: s.address || null,
           active: s.active ?? true,
           balance: s.balance ?? 0,
-          paymentType: s.paymentType ?? 'IMMEDIATE',
+          paymentType: s.paymentType ?? "IMMEDIATE",
         },
       });
     }
   } catch (error) {
-    console.error('Failed to sync suppliers:', error instanceof Error ? error.message : error);
+    console.error(
+      "Failed to sync suppliers:",
+      error instanceof Error ? error.message : error,
+    );
   }
 }
 
@@ -247,9 +279,13 @@ export async function syncUsers(): Promise<void> {
   // Extract storeId from the server token so we can tag synced users
   let tokenStoreId: string | null = null;
   try {
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()) as { storeId?: string | null };
+    const payload = JSON.parse(
+      Buffer.from(token.split(".")[1], "base64").toString(),
+    ) as { storeId?: string | null };
     tokenStoreId = payload.storeId ?? null;
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   console.log(`[syncUsers] token storeId=${tokenStoreId}`);
 
@@ -261,7 +297,16 @@ export async function syncUsers(): Promise<void> {
     if (!response.ok) return;
 
     const users = await response.json();
-    console.log(`[syncUsers] VPS returned ${Array.isArray(users) ? users.length : 'non-array'} users:`, Array.isArray(users) ? users.map((u: { phone: string; role: string }) => `${u.phone}(${u.role})`).join(', ') : users);
+    console.log(
+      `[syncUsers] VPS returned ${Array.isArray(users) ? users.length : "non-array"} users:`,
+      Array.isArray(users)
+        ? users
+            .map(
+              (u: { phone: string; role: string }) => `${u.phone}(${u.role})`,
+            )
+            .join(", ")
+        : users,
+    );
     if (!Array.isArray(users) || users.length === 0) return;
 
     const syncedPhones: string[] = [];
@@ -291,7 +336,10 @@ export async function syncUsers(): Promise<void> {
         });
         syncedPhones.push(u.phone);
       } catch (userError) {
-        console.error(`Failed to sync user phone=${u.phone}:`, userError instanceof Error ? userError.message : userError);
+        console.error(
+          `Failed to sync user phone=${u.phone}:`,
+          userError instanceof Error ? userError.message : userError,
+        );
       }
     }
 
@@ -303,7 +351,10 @@ export async function syncUsers(): Promise<void> {
       });
     }
   } catch (error) {
-    console.error('Failed to sync users:', error instanceof Error ? error.message : error);
+    console.error(
+      "Failed to sync users:",
+      error instanceof Error ? error.message : error,
+    );
   }
 }
 
@@ -313,7 +364,7 @@ export async function syncCategories(): Promise<void> {
 
   const token = getServerToken();
   if (!token) {
-    throw new Error('No server token available — log in first to sync');
+    throw new Error("No server token available — log in first to sync");
   }
 
   try {
@@ -333,7 +384,6 @@ export async function syncCategories(): Promise<void> {
       return;
     }
 
-
     const productCount = await prisma.product.count();
     if (productCount === 0) {
       // No products yet — safe to fully replace categories with VPS IDs
@@ -348,7 +398,9 @@ export async function syncCategories(): Promise<void> {
             nameRu: category.nameRu,
             nameUz: category.nameUz,
             active: category.active,
-            ...(category.mxikGroupCode != null ? { mxikGroupCode: category.mxikGroupCode } : {}),
+            ...(category.mxikGroupCode != null
+              ? { mxikGroupCode: category.mxikGroupCode }
+              : {}),
           },
         });
       }
@@ -378,7 +430,12 @@ export async function syncCategories(): Promise<void> {
               if (alreadyAtServerId) {
                 await prisma.category.update({
                   where: { id: category.id },
-                  data: { nameRu: category.nameRu, nameUz: category.nameUz, active: category.active, mxikGroupCode: category.mxikGroupCode ?? null },
+                  data: {
+                    nameRu: category.nameRu,
+                    nameUz: category.nameUz,
+                    active: category.active,
+                    mxikGroupCode: category.mxikGroupCode ?? null,
+                  },
                 });
               } else {
                 await prisma.$executeRaw`
@@ -394,7 +451,11 @@ export async function syncCategories(): Promise<void> {
           } else {
             await prisma.category.update({
               where: { id: existing.id },
-              data: { nameRu: category.nameRu, active: category.active, mxikGroupCode: category.mxikGroupCode ?? null },
+              data: {
+                nameRu: category.nameRu,
+                active: category.active,
+                mxikGroupCode: category.mxikGroupCode ?? null,
+              },
             });
           }
         } else {
@@ -408,7 +469,12 @@ export async function syncCategories(): Promise<void> {
           } catch {
             // id collision — fall back to autoincrement (rare; new products in this category won't sync until resolved)
             await prisma.category.create({
-              data: { nameRu: category.nameRu, nameUz: category.nameUz, active: category.active, mxikGroupCode: category.mxikGroupCode ?? null },
+              data: {
+                nameRu: category.nameRu,
+                nameUz: category.nameUz,
+                active: category.active,
+                mxikGroupCode: category.mxikGroupCode ?? null,
+              },
             });
           }
         }
@@ -416,22 +482,24 @@ export async function syncCategories(): Promise<void> {
       // A new category means new products may have been silently skipped in prior syncs.
       // Reset the product sync cursor so the next syncProducts() does a full pull.
       if (newCategoryAdded) {
-        await prisma.systemSetting.deleteMany({ where: { key: 'last_product_sync' } });
+        await prisma.systemSetting.deleteMany({
+          where: { key: "last_product_sync" },
+        });
       }
     }
   } catch (error) {
-    console.error('Failed to sync categories:', error);
+    console.error("Failed to sync categories:", error);
     throw error;
   }
 }
 
 // Keys that live only on the terminal and must never be overwritten by VPS sync
 const LOCAL_ONLY_SETTINGS = new Set([
-  'server_token',
-  'last_product_sync',
-  'last_sale_sync',
-  'last_upload_sync',
-  'ai_token_limit_daily',
+  "server_token",
+  "last_product_sync",
+  "last_sale_sync",
+  "last_upload_sync",
+  "ai_token_limit_daily",
 ]);
 
 export async function syncSettings(): Promise<void> {
@@ -446,11 +514,11 @@ export async function syncSettings(): Promise<void> {
     });
     if (!response.ok) return;
 
-    const settings = await response.json() as Record<string, string>;
+    const settings = (await response.json()) as Record<string, string>;
 
     for (const [key, value] of Object.entries(settings)) {
       if (LOCAL_ONLY_SETTINGS.has(key)) continue;
-      if (typeof value !== 'string') continue;
+      if (typeof value !== "string") continue;
 
       await prisma.systemSetting.upsert({
         where: { key },
@@ -459,6 +527,9 @@ export async function syncSettings(): Promise<void> {
       });
     }
   } catch (error) {
-    console.error('Failed to sync settings:', error instanceof Error ? error.message : error);
+    console.error(
+      "Failed to sync settings:",
+      error instanceof Error ? error.message : error,
+    );
   }
 }
