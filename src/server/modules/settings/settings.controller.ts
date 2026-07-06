@@ -1,4 +1,4 @@
-import { Controller, Get, Put, Param, Body, UseGuards } from '@nestjs/common';
+import { Controller, Get, Put, Delete, Param, Body, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { SettingsService } from './settings.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
@@ -39,5 +39,12 @@ export class SettingsController {
   ) {
     await this.settingsService.set(storeId, key, body.value);
     return { key, value: body.value };
+  }
+
+  @Delete(':key')
+  @ApiOperation({ summary: 'Delete a setting by key' })
+  async remove(@CurrentStore() storeId: string, @Param('key') key: string) {
+    await this.settingsService.delete(storeId, key);
+    return { key, deleted: true };
   }
 }

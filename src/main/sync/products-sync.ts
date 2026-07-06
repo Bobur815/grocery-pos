@@ -500,6 +500,10 @@ const LOCAL_ONLY_SETTINGS = new Set([
   "last_sale_sync",
   "last_upload_sync",
   "ai_token_limit_daily",
+  // Machine-scoped fiscal secret: encrypted with THIS terminal's safeStorage/DPAPI key. Pulling a
+  // server copy over it writes a blob this machine can't decrypt, so the cashier password silently
+  // falls back to '' on the next sync cycle.
+  "regos_vcr_password_enc",
 ]);
 
 export async function syncSettings(): Promise<void> {
@@ -515,6 +519,20 @@ export async function syncSettings(): Promise<void> {
     if (!response.ok) return;
 
     const settings = (await response.json()) as Record<string, string>;
+
+    // One-time cleanup: older builds leaked the machine-scoped fiscal secret to the VPS. If the
+    // server still holds it, delete it so it stops being served to (and clobbering) terminals.
+    // Self-terminating — once deleted it never reappears in the response, so no flag is needed.
+    if ("regos_vcr_password_enc" in settings) {
+      try {
+        await fetch(`${config.vpsApiUrl}/settings/regos_vcr_password_enc`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {
+        // Non-fatal — will retry next cycle while the key remains on the server.
+      }
+    }
 
     for (const [key, value] of Object.entries(settings)) {
       if (LOCAL_ONLY_SETTINGS.has(key)) continue;

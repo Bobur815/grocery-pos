@@ -245,6 +245,10 @@ const LOCAL_ONLY_SETTINGS = new Set([
   'last_upload_sync',
   'last_audit_log_sync',
   'ai_token_limit_daily',
+  // Machine-scoped fiscal secret: encrypted with THIS terminal's safeStorage/DPAPI key, so it can
+  // only be decrypted here. Uploading it lets another terminal's blob (or a stale one) sync back
+  // and overwrite the local row, after which decryption throws and the password resolves to ''.
+  'regos_vcr_password_enc',
 ]);
 
 async function uploadSettings(

@@ -26,4 +26,9 @@ export class SettingsService {
       create: { storeId, key, value },
     });
   }
+
+  async delete(storeId: string, key: string): Promise<void> {
+    // deleteMany (not delete) so removing an absent key is a no-op instead of throwing.
+    await this.prisma.systemSetting.deleteMany({ where: { storeId, key } });
+  }
 }
