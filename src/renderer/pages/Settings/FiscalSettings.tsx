@@ -176,7 +176,7 @@ export function FiscalSettings() {
 
   const [enabled, setEnabled] = useState(false);
   const [url, setUrl] = useState('http://127.0.0.1:22298');
-  const [login, setLogin] = useState('cassir');
+  const [login, setLogin] = useState('kassa');
   const [password, setPassword] = useState('');
   const [hasPassword, setHasPassword] = useState(false);
   const [vatPercent, setVatPercent] = useState('12');
