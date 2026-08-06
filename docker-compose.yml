@@ -50,7 +50,10 @@ services:
     volumes:
       - ./uploads:/app/uploads
     ports:
-      - "3001:3001"
+      # Loopback only — nginx proxies to 127.0.0.1:3001. Publishing on 0.0.0.0
+      # exposes the API over plain HTTP and bypasses UFW (Docker's DNAT rules
+      # are traversed before UFW's chains).
+      - "127.0.0.1:3001:3001"
     depends_on:
       postgres:
         condition: service_healthy

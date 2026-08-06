@@ -38,7 +38,8 @@ services:
     volumes:
       - ./uploads-staging:/app/uploads
     ports:
-      - "3002:3002"
+      # Loopback only — nginx proxies to 127.0.0.1:3002. See docker-compose.yml.
+      - "127.0.0.1:3002:3002"
     depends_on:
       postgres:
         condition: service_healthy
