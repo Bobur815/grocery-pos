@@ -282,8 +282,17 @@ export function ProductList() {
       initial.barcode = barcode;
     }
 
-    // 3. Search tasnif for name + MXIK
-    if (initial.barcode) {
+    // 3. Local MxikCatalog first (exact barcode index, no geo-restriction), then tasnif.
+    // packageCode is left unset here — the ProductForm derives it from the resolved MXIK.
+    if (initial.barcode && !initial.mxik) {
+      const entry = await mxikApi.catalogLookup(initial.barcode);
+      if (entry) {
+        initial.mxik = entry.mxikCode;
+        initial.nameRu = entry.mxikName;
+        initial.nameUz = entry.mxikName;
+      }
+    }
+    if (initial.barcode && !initial.mxik) {
       try {
         const result = await mxikApi.searchByBarcode(initial.barcode);
         if (result?.code) initial.mxik = result.code;

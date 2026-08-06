@@ -312,11 +312,14 @@ export function ProductForm({
       if (!active) return;
       const list = pkgs as MxikPackage[];
       setMxikPackages(list);
-      // Auto-select the single-unit package only when none is set yet.
-      if (list.length > 0 && !formData.packageCode) {
+      if (list.length === 0) return;
+      // Keep the selected package only when it belongs to THIS MXIK — changing the MXIK
+      // must not leave the previous product's package_code behind.
+      setFormData((prev) => {
+        if (list.some((p) => p.code === prev.packageCode)) return prev;
         const def = pickSingleUnitPackage(list);
-        if (def) setFormData((prev) => ({ ...prev, packageCode: def.code }));
-      }
+        return def ? { ...prev, packageCode: def.code } : prev;
+      });
     }).catch(() => { if (active) setMxikPackages([]); });
     return () => { active = false; };
   }, [formData.mxik]);

@@ -219,8 +219,12 @@ const PickerList = styled.div`
 const PickerItem = styled.div`
   padding: 10px 12px;
   cursor: pointer;
-  &:not(:last-child) { border-bottom: 1px solid ${({ theme }) => theme.colors.border}; }
-  &:hover { background: ${({ theme }) => theme.colors.background}; }
+  &:not(:last-child) {
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  }
+  &:hover {
+    background: ${({ theme }) => theme.colors.background};
+  }
 `;
 
 const PickerItemName = styled.div`
@@ -338,7 +342,9 @@ export function ProductForm({
   const [isLookingUpAslBelgisi, setIsLookingUpAslBelgisi] = useState(false);
   const [showMxikPicker, setShowMxikPicker] = useState(false);
   const [mxikPickerQuery, setMxikPickerQuery] = useState("");
-  const [mxikPickerResults, setMxikPickerResults] = useState<CatalogEntry[]>([]);
+  const [mxikPickerResults, setMxikPickerResults] = useState<CatalogEntry[]>(
+    [],
+  );
   const [mxikPickerLoading, setMxikPickerLoading] = useState(false);
   const [mxikPickerPage, setMxikPickerPage] = useState(0);
   const [mxikPickerTotal, setMxikPickerTotal] = useState(0);
@@ -378,29 +384,43 @@ export function ProductForm({
       return;
     }
     let active = true;
-    mxikApi.getPackages(mxik).then((pkgs) => {
-      if (!active) return;
-      setMxikPackages(pkgs);
-      if (pkgs.length > 0 && !formData.packageCode) {
-        const def = pickSingleUnitPackage(pkgs);
-        if (def) setFormData((prev) => ({ ...prev, packageCode: def.code }));
-      }
-    }).catch(() => { if (active) setMxikPackages([]); });
-    return () => { active = false; };
+    mxikApi
+      .getPackages(mxik)
+      .then((pkgs) => {
+        if (!active) return;
+        setMxikPackages(pkgs);
+        if (pkgs.length === 0) return;
+        // Keep the selected package only when it belongs to THIS MXIK — changing the MXIK
+        // must not leave the previous product's package_code behind.
+        setFormData((prev) => {
+          if (pkgs.some((p) => p.code === prev.packageCode)) return prev;
+          const def = pickSingleUnitPackage(pkgs);
+          return def ? { ...prev, packageCode: def.code } : prev;
+        });
+      })
+      .catch(() => {
+        if (active) setMxikPackages([]);
+      });
+    return () => {
+      active = false;
+    };
   }, [formData.mxik]);
 
-  const autoSelectCategory = useCallback((groupCode: string) => {
-    // mxikGroupCode may be comma-separated (e.g. "007,008") for categories
-    // that span multiple MXIK groups (e.g. "Meva va sabzavotlar" covers both
-    // vegetables 007 and fruits 008).
-    const cat = categories.find((c) =>
-      c.mxikGroupCode?.split(",").includes(groupCode)
-    );
-    if (cat) {
-      setFormData((prev) => ({ ...prev, categoryId: String(cat.id) }));
-      toast.info(t("products.categoryAutoSelected"));
-    }
-  }, [categories]);
+  const autoSelectCategory = useCallback(
+    (groupCode: string) => {
+      // mxikGroupCode may be comma-separated (e.g. "007,008") for categories
+      // that span multiple MXIK groups (e.g. "Meva va sabzavotlar" covers both
+      // vegetables 007 and fruits 008).
+      const cat = categories.find((c) =>
+        c.mxikGroupCode?.split(",").includes(groupCode),
+      );
+      if (cat) {
+        setFormData((prev) => ({ ...prev, categoryId: String(cat.id) }));
+        toast.info(t("products.categoryAutoSelected"));
+      }
+    },
+    [categories],
+  );
 
   /** Extract EAN-13 from a GS1 DataMatrix QR payload, or return the value as-is. */
   function extractEan13(raw: string): string {
@@ -442,7 +462,11 @@ export function ProductForm({
       const catalogEntry = await mxikApi.catalogLookup(barcode);
       if (catalogEntry) {
         if (isMxikExcluded(catalogEntry.mxikCode)) {
-          toast.error(t("products.categoryNotAllowed", { category: catalogEntry.className }));
+          toast.error(
+            t("products.categoryNotAllowed", {
+              category: catalogEntry.className,
+            }),
+          );
           setFormData((prev) => ({ ...prev, barcode: "" }));
           return;
         }
@@ -461,7 +485,9 @@ export function ProductForm({
         const ean = extractEan13(barcode);
         const info = await mxikApi.searchByBarcode(ean);
         if (isMxikExcluded(info.code)) {
-          toast.error(t("products.categoryNotAllowed", { category: info.nameRu }));
+          toast.error(
+            t("products.categoryNotAllowed", { category: info.nameRu }),
+          );
           setFormData((prev) => ({ ...prev, barcode: "" }));
           return;
         }
@@ -514,7 +540,11 @@ export function ProductForm({
   const handleMxikLoadMore = async () => {
     const nextPage = mxikPickerPage + 1;
     setMxikLoadingMore(true);
-    const { results, total } = await mxikApi.catalogSearch(mxikPickerQuery.trim(), nextPage, 10);
+    const { results, total } = await mxikApi.catalogSearch(
+      mxikPickerQuery.trim(),
+      nextPage,
+      10,
+    );
     setMxikPickerResults((prev) => [...prev, ...results]);
     setMxikPickerTotal(total);
     setMxikPickerPage(nextPage);
@@ -565,10 +595,16 @@ export function ProductForm({
       try {
         const mxikData = await mxikApi.lookupCode(qrData);
         if (isMxikExcluded(mxikData.code)) {
-          toast.error(t("products.categoryNotAllowed", { category: mxikData.nameRu }));
+          toast.error(
+            t("products.categoryNotAllowed", { category: mxikData.nameRu }),
+          );
           return;
         }
-        setFormData((prev) => ({ ...prev, mxik: mxikData.code, isMarked: mxikData.isMarked ?? prev.isMarked }));
+        setFormData((prev) => ({
+          ...prev,
+          mxik: mxikData.code,
+          isMarked: mxikData.isMarked ?? prev.isMarked,
+        }));
         autoSelectCategory(mxikData.code.slice(0, 3));
         toast.success(t("products.mxikCodeScanned"));
       } catch {
@@ -635,7 +671,9 @@ export function ProductForm({
         try {
           const tasnifData = await mxikApi.searchByBarcode(gtin);
           if (isMxikExcluded(tasnifData.code)) {
-            toast.error(t("products.categoryNotAllowed", { category: tasnifData.nameRu }));
+            toast.error(
+              t("products.categoryNotAllowed", { category: tasnifData.nameRu }),
+            );
             setFormData((prev) => ({ ...prev, barcode: "" }));
             return;
           }
@@ -916,7 +954,7 @@ export function ProductForm({
               <FormGroup>
                 <Label>
                   {t("products.mxik")} <Req>*</Req>
-                  </Label>
+                </Label>
                 <div style={{ display: "flex", gap: "8px" }}>
                   <Input
                     value={formData.mxik}
@@ -939,10 +977,14 @@ export function ProductForm({
               </FormGroup>
               {mxikPackages.length > 0 && (
                 <FormGroup>
-                  <Label>{t("products.packageCode", "Код упаковки (МХИК)")}</Label>
+                  <Label>
+                    {t("products.packageCode", "Код упаковки (МХИК)")}
+                  </Label>
                   <Select
                     value={formData.packageCode}
-                    onChange={(e) => handleChange("packageCode", e.target.value)}
+                    onChange={(e) =>
+                      handleChange("packageCode", e.target.value)
+                    }
                   >
                     {mxikPackages.map((p) => (
                       <option key={p.code} value={p.code}>
@@ -957,19 +999,30 @@ export function ProductForm({
                 <Select
                   value={formData.vatRate}
                   onChange={(e) => handleChange("vatRate", e.target.value)}
-                  title={t("products.vatRateHint", "Пусто — использовать ставку по умолчанию")}
+                  title={t(
+                    "products.vatRateHint",
+                    "Пусто — использовать ставку по умолчанию",
+                  )}
                 >
-                  <option value="">{t("products.vatRateHint", "По умолчанию")}</option>
+                  <option value="">
+                    {t("products.vatRateHint", "По умолчанию")}
+                  </option>
                   <option value="0">0.00%</option>
                   <option value="6">6.00%</option>
                   <option value="12">12.00%</option>
                 </Select>
               </FormGroup>
               <FormGroup>
-                <Label>{t("products.marking", "Маркировка (Asl-Belgisi)")}</Label>
+                <Label>
+                  {t("products.marking", "Маркировка (Asl-Belgisi)")}
+                </Label>
                 <Select
                   value={
-                    formData.isMarked === null ? "" : formData.isMarked ? "1" : "0"
+                    formData.isMarked === null
+                      ? ""
+                      : formData.isMarked
+                        ? "1"
+                        : "0"
                   }
                   onChange={(e) =>
                     handleChange(
@@ -982,9 +1035,15 @@ export function ProductForm({
                     "Авто — POS определит по группе МХИК; иначе задаёт обязательную маркировку (продажа только по QR)",
                   )}
                 >
-                  <option value="">{t("products.markingAuto", "Авто (по группе МХИК)")}</option>
-                  <option value="1">{t("products.markingYes", "Маркируется (только QR)")}</option>
-                  <option value="0">{t("products.markingNo", "Не маркируется")}</option>
+                  <option value="">
+                    {t("products.markingAuto", "Авто (по группе МХИК)")}
+                  </option>
+                  <option value="1">
+                    {t("products.markingYes", "Маркируется (только QR)")}
+                  </option>
+                  <option value="0">
+                    {t("products.markingNo", "Не маркируется")}
+                  </option>
                 </Select>
               </FormGroup>
               <FormGroup>
@@ -1083,7 +1142,6 @@ export function ProductForm({
                 onChange={(e) => handleChange("price", e.target.value)}
                 required
                 onFocus={(e) => e.target.select()}
-
               />
               <Input
                 label={t("products.cost")}
@@ -1658,26 +1716,46 @@ export function ProductForm({
             onChange={(e) => setMxikPickerQuery(e.target.value)}
           />
           {mxikPickerLoading && <Spinner centered size={24} />}
-          {!mxikPickerLoading && mxikPickerQuery.trim().length >= 2 && mxikPickerResults.length === 0 && (
-            <div style={{ padding: "12px", textAlign: "center", color: "var(--color-text-secondary)", fontSize: 13 }}>
-              {t("products.noMxikResults")}
-            </div>
-          )}
+          {!mxikPickerLoading &&
+            mxikPickerQuery.trim().length >= 2 &&
+            mxikPickerResults.length === 0 && (
+              <div
+                style={{
+                  padding: "12px",
+                  textAlign: "center",
+                  color: "var(--color-text-secondary)",
+                  fontSize: 13,
+                }}
+              >
+                {t("products.noMxikResults")}
+              </div>
+            )}
           {mxikPickerResults.length > 0 && (
             <>
               <PickerList>
                 {mxikPickerResults.map((entry, i) => (
-                  <PickerItem key={`${entry.mxikCode}-${i}`} onClick={() => handlePickerSelect(entry)}>
+                  <PickerItem
+                    key={`${entry.mxikCode}-${i}`}
+                    onClick={() => handlePickerSelect(entry)}
+                  >
                     <PickerItemName>{entry.mxikName}</PickerItemName>
                     <PickerItemMeta>
                       {entry.className} · {entry.mxikCode}
-                      {entry.internationalCode ? ` · ${entry.internationalCode}` : ""}
+                      {entry.internationalCode
+                        ? ` · ${entry.internationalCode}`
+                        : ""}
                     </PickerItemMeta>
                   </PickerItem>
                 ))}
               </PickerList>
               {mxikPickerResults.length < mxikPickerTotal && (
-                <div style={{ display: "flex", justifyContent: "center", paddingTop: 8 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "center",
+                    paddingTop: 8,
+                  }}
+                >
                   <Button
                     type="button"
                     variant="secondary"
@@ -1685,9 +1763,11 @@ export function ProductForm({
                     onClick={handleMxikLoadMore}
                     disabled={mxikLoadingMore}
                   >
-                    {mxikLoadingMore
-                      ? <Spinner size={14} />
-                      : `${t("common.load")} ${Math.min(10, mxikPickerTotal - mxikPickerResults.length)}`}
+                    {mxikLoadingMore ? (
+                      <Spinner size={14} />
+                    ) : (
+                      `${t("common.load")} ${Math.min(10, mxikPickerTotal - mxikPickerResults.length)}`
+                    )}
                   </Button>
                 </div>
               )}

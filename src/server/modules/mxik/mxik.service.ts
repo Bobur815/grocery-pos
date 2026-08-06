@@ -2,6 +2,8 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { EXCLUDED_MXIK_GROUPS } from '@shared/types/mxik.types';
 import type { CatalogEntry, MxikGroup } from '@shared/types/mxik.types';
+import { mapPackageNames, pickSingleUnitPackage } from '@shared/utils/mxik-packages';
+import { findBarcodeMatch } from '@shared/utils/mxik-lookup';
 
 const TASNIF_BASE = 'https://tasnif.soliq.uz/api/cls-api';
 
@@ -147,7 +149,9 @@ export class MxikService {
       code: d.mxikCode,
       name: brand + (d.attributeNameUz ?? d.subPositionNameUz),
       nameRu: brand + (d.attributeNameRu ?? d.subPositionNameRu),
-      packageCode: String(d.packageNames?.[0]?.code ?? '796'),
+      // The single-unit package, not packageNames[0] — that first entry is often a
+      // multi-pack ("блок=6 шт"), and a piece-sold product must report the unit package.
+      packageCode: pickSingleUnitPackage(mapPackageNames(d.packageNames))?.code ?? '796',
       isMarked: await this.getIsMarked(d.mxikCode),
     };
   }
@@ -166,7 +170,12 @@ export class MxikService {
       throw new HttpException('Product not found in MXIK registry', HttpStatus.NOT_FOUND);
     }
 
-    const match = json.data.find((d) => d.internationalCode === barcode) ?? json.data[0];
+    // Exact barcode match only — tasnif's search is fuzzy and its first row is regularly a
+    // different product with a near-miss barcode (see findBarcodeMatch).
+    const match = findBarcodeMatch(json.data, barcode);
+    if (!match) {
+      throw new HttpException('Product not found in MXIK registry', HttpStatus.NOT_FOUND);
+    }
     return this.getByCode(match.mxikCode);
   }
 }

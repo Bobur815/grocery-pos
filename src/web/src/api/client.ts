@@ -1,6 +1,11 @@
 import axios from "axios";
 import type { CatalogEntry, MxikGroup } from "@shared/types";
-import { mapPackageNames, type MxikPackage } from "@shared/utils";
+import {
+  mapPackageNames,
+  pickSingleUnitPackage,
+  findBarcodeMatch,
+  type MxikPackage,
+} from "@shared/utils";
 
 export interface DeviceSession {
   id: string;
@@ -584,7 +589,10 @@ export const mxik = {
     const searchRes = await fetch(`${TASNIF}/elasticsearch/search?lang=uz_cyrl&search=${encodeURIComponent(barcode)}&size=5&page=0`);
     const searchJson = await searchRes.json();
     if (!searchJson.success || !searchJson.data?.length) throw new Error('Not found');
-    const match = searchJson.data.find((d: any) => d.internationalCode === barcode) ?? searchJson.data[0];
+    // Exact barcode match only — tasnif's search is fuzzy and its first row is regularly a
+    // different product with a near-miss barcode (see findBarcodeMatch).
+    const match = findBarcodeMatch(searchJson.data as Array<{ internationalCode?: string | null; mxikCode: string; label?: unknown }>, barcode);
+    if (!match) throw new Error('Not found');
     const mxikCode: string = match.mxikCode;
     // The elasticsearch match row carries the authoritative `label` marking flag.
     const isMarked = labelToIsMarked(match.label);
@@ -597,7 +605,9 @@ export const mxik = {
       code: d.mxikCode,
       name: brand + (d.attributeNameUz ?? d.subPositionNameUz),
       nameRu: brand + (d.attributeNameRu ?? d.subPositionNameRu),
-      packageCode: String(d.packageNames?.[0]?.code ?? '796'),
+      // The single-unit package, not packageNames[0] — that first entry is often a
+      // multi-pack ("блок=6 шт"), and a piece-sold product must report the unit package.
+      packageCode: pickSingleUnitPackage(mapPackageNames(d.packageNames))?.code ?? '796',
       isMarked,
     };
   },

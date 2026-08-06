@@ -16,6 +16,7 @@ import {
 } from "../printer/thermal-printer";
 import { convertUzbekText } from "../../shared/utils/transliterator";
 import { mapPackageNames } from "../../shared/utils/mxik-packages";
+import { findBarcodeMatch } from "../../shared/utils/mxik-lookup";
 
 export function setupIpcHandlers(): void {
   // Setup all IPC handlers
@@ -75,7 +76,10 @@ function setupMxikHandlers(): void {
         data?: Array<{ mxikCode: string; internationalCode?: string }>;
       };
       if (!searchJson?.success || !searchJson.data?.length) return null;
-      const match = searchJson.data.find((d) => d.internationalCode === bc) ?? searchJson.data[0];
+      // Exact barcode match only — tasnif's search is fuzzy and its first row is regularly a
+      // different product with a near-miss barcode (see findBarcodeMatch).
+      const match = findBarcodeMatch(searchJson.data, bc);
+      if (!match) return null;
 
       const detailRes = await fetch(`${TASNIF}/integration-mxik/get/history/${match.mxikCode}`, {
         signal: AbortSignal.timeout(8000),
