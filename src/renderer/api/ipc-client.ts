@@ -122,6 +122,12 @@ export const analytics = {
     ipc?.analytics.getData(filters),
 };
 
+export const markingCheck = {
+  verify: (code: string) => ipc?.markingCheck.verify(code),
+  apiKeyStatus: () => ipc?.markingCheck.apiKeyStatus(),
+  setApiKey: (key: string) => ipc?.markingCheck.setApiKey(key),
+};
+
 export const app = {
   getVersion: () => ipc?.app.getVersion(),
   getTerminalId: () => ipc?.app.getTerminalId(),

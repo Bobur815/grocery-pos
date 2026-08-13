@@ -392,6 +392,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("markingCodes:removeForSale", saleId),
   },
 
+  // Marking check — staff-facing registry lookup for a single DataMatrix (/marking-check)
+  markingCheck: {
+    verify: (code: string) => ipcRenderer.invoke("markingCheck:verify", code),
+    apiKeyStatus: () => ipcRenderer.invoke("markingCheck:apiKeyStatus"),
+    setApiKey: (key: string) => ipcRenderer.invoke("markingCheck:setApiKey", key),
+  },
+
   // Logger — forwards renderer errors to the main-process electron-log file
   logger: {
     error: (msg: string) => ipcRenderer.send("log:renderer", "error", msg),
@@ -399,6 +406,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     info: (msg: string) => ipcRenderer.send("log:renderer", "info", msg),
   },
 });
+
+/** Server-side asl-belgisi key state + rotation outcome (see marking/circulation-check.ts). */
+export interface MarkingApiKeyResult {
+  ok: boolean;
+  status?: {
+    configured: boolean;
+    source: "store" | "env" | "none";
+    maskedKey?: string;
+    updatedAt?: string;
+    expiresAt?: string;
+  };
+  error?: string;
+}
 
 // Type declarations for the exposed API
 declare global {
@@ -686,6 +706,37 @@ declare global {
         }>;
         record: (entries: { code: string; productBarcode?: string }[]) => Promise<void>;
         removeForSale: (saleId: string) => Promise<void>;
+      };
+      markingCheck: {
+        verify: (code: string) => Promise<{
+          reachable: boolean;
+          lookupCode?: string;
+          error?: string;
+          verdict: 'IN' | 'OUT' | 'UNKNOWN';
+          gtin?: string;
+          details?: {
+            isValid: boolean;
+            status?: string;
+            extendedStatus?: string;
+            gtin?: string;
+            productId?: string;
+            productionDate?: string;
+            expirationDate?: string;
+            productSeries?: string;
+            packageType?: string;
+            issuerName?: string;
+          };
+          product?: {
+            id: string;
+            nameUz: string;
+            nameRu: string;
+            barcode: string | null;
+            mxik: string | null;
+          };
+          alreadySold?: { soldAt?: string; terminalId?: string };
+        }>;
+        apiKeyStatus: () => Promise<MarkingApiKeyResult>;
+        setApiKey: (key: string) => Promise<MarkingApiKeyResult>;
       };
       logger: {
         error: (msg: string) => void;

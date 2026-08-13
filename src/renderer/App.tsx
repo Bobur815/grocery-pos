@@ -14,6 +14,7 @@ import { POSScreen } from "./pages/POS/POSScreen";
 import { ProductList } from "./pages/Products/ProductList";
 import { ProductDetails } from "./pages/Products/ProductDetails";
 import { StockManagement } from "./pages/Products/StockManagement";
+import { MarkingCheckPage } from "./pages/Marking/MarkingCheckPage";
 import { DailySummary } from "./pages/Reports/DailySummary";
 import { MonthlyReport } from "./pages/Reports/MonthlyReport";
 import { Analytics } from "./pages/Reports/Analytics";
@@ -109,6 +110,9 @@ function App() {
             </RoleGuard>
           }
         />
+
+        {/* Marking check — registry lookup for a single DataMatrix (all roles) */}
+        <Route path="marking-check" element={<MarkingCheckPage />} />
 
         {/* Reports */}
         <Route path="reports/daily" element={<DailySummary />} />

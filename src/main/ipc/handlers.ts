@@ -6,6 +6,7 @@ import { setupWeighedItemsHandlers } from "./weighed-items-handlers";
 import { setupScaleHandlers } from "./scale-handlers";
 import { setupSmenaHandlers } from "./smena-handlers";
 import { setupMarkingCodesHandlers } from "./marking-codes-handlers";
+import { setupMarkingCheckHandlers } from "./marking-check-handlers";
 import { setupFiscalHandlers } from "./fiscal-handlers";
 import { getAppConfig, updateConfig } from "../config/app-config";
 import { getAuthToken, getServerToken } from "../sync/queue-manager";
@@ -34,6 +35,7 @@ export function setupIpcHandlers(): void {
   setupAppHandlers();
   setupReceiptHandlers();
   setupMarkingCodesHandlers();
+  setupMarkingCheckHandlers();
   setupMxikHandlers();
   setupFiscalHandlers();
 }

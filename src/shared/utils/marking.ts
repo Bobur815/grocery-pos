@@ -31,3 +31,51 @@ export function productRequiresMarking(product: {
 }): boolean {
   return product.isMarked ?? isMarkedMxik(product.mxik);
 }
+
+/**
+ * Strip the symbology prefix a scanner prepends (`]d2`, `]C1`, `]e0`) and a LEADING FNC1 byte.
+ * Internal \x1d separators are preserved — asl-belgisi needs them to find the crypto group.
+ */
+export function normalizeDataMatrix(raw: string): string {
+  return (raw || '')
+    .trim()
+    .replace(/^\](?:d2|C1|e0)/i, '')
+    .replace(/^\x1d/, '');
+}
+
+/**
+ * Reduce a scanned DataMatrix to the key asl-belgisi indexes on: AIs 01 (GTIN) + 21 (serial).
+ * The trailing crypto/verification group (AI 91/92/93) is NOT part of that key — including it
+ * makes /codes return an empty array, i.e. a false "not found".
+ *
+ * Canonical implementation, shared by the VPS proxy and the POS main process.
+ */
+export function stripCryptoTail(code: string): string {
+  // Real scans separate the crypto group with a GS byte (\x1d); cut at the first GS.
+  const gsIdx = code.indexOf('\x1d');
+  if (gsIdx !== -1) return code.slice(0, gsIdx);
+  // No GS (e.g. manually entered): anchor past the 01+GTIN+21 header (18 chars) and drop a
+  // trailing 91/92/93 group from the serial region, leaving the serial intact. Serials may
+  // legitimately contain '(' and digits, so never split the code on parentheses.
+  if (code.length > 18 && /^01\d{14}21/.test(code)) {
+    return code.slice(0, 18) + code.slice(18).replace(/9[123][^\x1d]*$/, '');
+  }
+  return code;
+}
+
+/**
+ * The exact form the SALE path persists in `sold_marking_codes.code` / cart `markingCode`:
+ * symbology prefix removed, then ALL internal GS bytes removed — crypto tail KEPT.
+ *
+ * Deliberately different from stripCryptoTail() (which produces the asl-belgisi *lookup* key).
+ * Anything querying the sold/pending tables must use this form or it will silently never match.
+ */
+export function toSoldCodeKey(raw: string): string {
+  return normalizeDataMatrix(raw).replace(/\x1d/g, '');
+}
+
+/** GTIN-14 → EAN-13 (drops the leading pad zero). Returns null when the code has no AI 01. */
+export function extractGtinFromDataMatrix(raw: string): string | null {
+  const m = normalizeDataMatrix(raw).match(/^01(\d{14})/);
+  return m ? m[1].replace(/^0/, '') : null;
+}

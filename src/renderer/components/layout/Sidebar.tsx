@@ -17,6 +17,7 @@ import {
   ReceiptText,
   Download,
   CheckCircle,
+  ShieldCheck,
 } from "lucide-react";
 import { SyncButton } from "../common/SyncButton";
 import { useAuthStore } from "../../store/auth-store";
@@ -273,6 +274,7 @@ export function Sidebar() {
               <NavText>{t("nav.smena")}</NavText>
             </NavButton>
             {renderNavItem("/products", Package, t("nav.products"))}
+            {renderNavItem("/marking-check", ShieldCheck, t("nav.markingCheck"))}
           </NavSection>
 
           <NavSection>
