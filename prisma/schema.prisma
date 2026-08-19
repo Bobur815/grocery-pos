@@ -45,6 +45,7 @@ model Store {
   terminalLogs         TerminalLog[]
   soldMarkingCodes     SoldMarkingCode[]
   pendingMarkingCodes  PendingMarkingCode[]
+  inventoryCounts      InventoryCount[]
 
   @@map("stores")
 }
@@ -149,11 +150,17 @@ model Product {
 
   storeProductCode Int? @map("store_product_code")
 
+  // Set when a stocktake (InventoryCount) last wrote this product's stock absolutely.
+  // Sale-sync uses it as a watermark: a sale that happened BEFORE the count is already
+  // reflected in the counted figure, so it must not decrement stock a second time.
+  stockCountedAt DateTime? @map("stock_counted_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  sales              SaleItem[]
-  inventoryMovements InventoryArrival[]
+  sales               SaleItem[]
+  inventoryMovements  InventoryArrival[]
+  inventoryCountItems InventoryCountItem[]
 
   @@unique([storeId, barcode]) // Same barcode can exist in different stores
   @@unique([storeId, internalCode]) // internalCode unique per store
@@ -240,6 +247,84 @@ model InventoryArrival {
   @@map("inventory_arrivals")
 }
 
+// ==================== INVENTARIZATSIYA (STOCKTAKE) ====================
+// A physical stock count is a *document* with a lifecycle, not a one-shot button:
+// it snapshots the expected quantity at creation, records the physical count per line,
+// and on completion writes stock absolutely for counted lines only. Web/admin only —
+// this never reaches the Electron POS terminals (absent from schema.sqlite.prisma).
+
+enum InventoryCountStatus {
+  DRAFT // Yangi / Новый
+  IN_PROGRESS // Jarayonda / В процессе
+  COMPLETED // Tasdiqlandi / Подтверждён
+  CANCELLED // Bekor qilindi / Отменён
+}
+
+enum InventoryCountScope {
+  FULL // count every active product
+  CATEGORY // one category
+  CUSTOM // a hand-picked list — reserved, not implemented yet
+}
+
+model InventoryCount {
+  id      String @id @default(cuid())
+  storeId String @map("store_id")
+  store   Store  @relation(fields: [storeId], references: [id])
+  number  Int // human-readable doc №, sequential per store
+
+  status     InventoryCountStatus @default(DRAFT)
+  scope      InventoryCountScope  @default(FULL)
+  categoryId Int?                 @map("category_id") // set when scope = CATEGORY
+  note       String?              @db.Text
+
+  createdById   String    @map("created_by_id")
+  createdByName String    @map("created_by_name") // denormalized for the list
+  completedById String?   @map("completed_by_id")
+  completedAt   DateTime? @map("completed_at")
+
+  // summary, filled on completion
+  totalItems      Int     @default(0) @map("total_items")
+  countedItems    Int     @default(0) @map("counted_items")
+  totalDifference Decimal @default(0) @map("total_difference") @db.Decimal(14, 3)
+  totalValueDiff  Decimal @default(0) @map("total_value_diff") @db.Decimal(14, 2)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items InventoryCountItem[]
+
+  @@unique([storeId, number])
+  @@index([storeId, status])
+  @@index([storeId, createdAt])
+  @@map("inventory_counts")
+}
+
+model InventoryCountItem {
+  id      String         @id @default(cuid())
+  countId String         @map("count_id")
+  count   InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+
+  productId Int     @map("product_id")
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Snapshot taken at document creation — never re-read from the live product.
+  // Both names are stored so the UI renders in either language without a join.
+  productName   String   @map("product_name") // nameRu
+  productNameUz String   @map("product_name_uz")
+  barcode       String
+  unit          String
+  expectedQty   Decimal  @map("expected_qty") @db.Decimal(10, 3)
+  cost          Decimal? @db.Decimal(10, 2)
+
+  countedQty Decimal? @map("counted_qty") @db.Decimal(10, 3) // null = not counted yet
+  difference Decimal? @db.Decimal(10, 3) // counted − expected, set on completion
+  counted    Boolean  @default(false)
+
+  @@unique([countId, productId])
+  @@index([countId])
+  @@index([countId, barcode])
+  @@map("inventory_count_items")
+}
 model Supplier {
   id      String  @id @default(cuid())
   storeId String  @map("store_id")

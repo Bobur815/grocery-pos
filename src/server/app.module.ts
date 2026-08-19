@@ -7,6 +7,7 @@ import { UsersModule } from './modules/users/users.module';
 import { ProductsModule } from './modules/products/products.module';
 import { SalesModule } from './modules/sales/sales.module';
 import { InventoryModule } from './modules/inventory/inventory.module';
+import { InventoryCountModule } from './modules/inventory-count/inventory-count.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { TelegramModule } from './modules/telegram/telegram.module';
 import { SuppliersModule } from './modules/suppliers/suppliers.module';
@@ -35,6 +36,7 @@ import { MarkingCodesModule } from './modules/marking-codes/marking-codes.module
     SettingsModule,
     SalesModule,
     InventoryModule,
+    InventoryCountModule,
     AnalyticsModule,
     TelegramModule,
     SuppliersModule,

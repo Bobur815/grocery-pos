@@ -15,6 +15,8 @@ interface TableProps<T> {
   emptyMessage?: string;
   footer?: React.ReactNode;
   tfoot?: React.ReactNode;
+  /** When set, rows become clickable (pointer cursor + click handler). */
+  onRowClick?: (item: T, index: number) => void;
 }
 
 const Container = styled.div`
@@ -44,7 +46,9 @@ const Th = styled.th`
 
 const Tbody = styled.tbody``;
 
-const Tr = styled.tr`
+const Tr = styled.tr<{ $clickable?: boolean }>`
+  cursor: ${({ $clickable }) => ($clickable ? "pointer" : "inherit")};
+
   &:hover {
     background-color: ${({ theme }) => theme.colors.background};
   }
@@ -78,6 +82,7 @@ export function Table<T>({
   emptyMessage = "No data",
   footer,
   tfoot,
+  onRowClick,
 }: TableProps<T>) {
   const { t } = useTranslation();
 
@@ -106,7 +111,11 @@ export function Table<T>({
             </EmptyRow>
           ) : (
             data.map((item, index) => (
-              <Tr key={index}>
+              <Tr
+                key={index}
+                $clickable={!!onRowClick}
+                onClick={onRowClick ? () => onRowClick(item, index) : undefined}
+              >
                 {columns.map((column) => (
                   <Td key={column.key}>
                     {column.render

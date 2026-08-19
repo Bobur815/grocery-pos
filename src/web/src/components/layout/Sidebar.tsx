@@ -8,6 +8,7 @@ import {
   TrendingUp,
   LineChart,
   ClipboardList,
+  ClipboardCheck,
   Users,
   Settings,
   User,
@@ -341,6 +342,10 @@ export function Sidebar() {
     : [
         { to: "/products", icon: Package },
         { to: "/products/stock", icon: ClipboardList },
+        // Stocktake is an admin-only route — showing it to a cashier would just bounce them.
+        ...(isAdmin
+          ? [{ to: "/products/stock/inventarizatsiya", icon: ClipboardCheck }]
+          : []),
         { to: "/suppliers", icon: Truck },
         { to: "/reports/daily", icon: BarChart3 },
         ...(isAdmin ? [{ to: "/users", icon: Users }] : []),
@@ -405,13 +410,29 @@ export function Sidebar() {
               {isAdmin && (
                 <NavSection>
                   <SectionTitle $collapsed={isCollapsed}>
-                    {t("nav.management")}
+                    {t("nav.inventory")}
                   </SectionTitle>
+                  {/* `end` — without it NavLink would also mark Kirimlar active
+                      while the nested stocktake route is open. */}
                   {renderNavItem(
                     "/products/stock",
                     ClipboardList,
-                    t("nav.inventory"),
+                    t("nav.arrivals"),
+                    true,
                   )}
+                  {renderNavItem(
+                    "/products/stock/inventarizatsiya",
+                    ClipboardCheck,
+                    t("nav.stocktake"),
+                  )}
+                </NavSection>
+              )}
+
+              {isAdmin && (
+                <NavSection>
+                  <SectionTitle $collapsed={isCollapsed}>
+                    {t("nav.management")}
+                  </SectionTitle>
                   {renderNavItem("/suppliers", Truck, t("suppliers.title"))}
                   {renderNavItem("/users", Users, t("nav.users"))}
                   {renderNavItem("/settings", Settings, t("nav.settings"))}

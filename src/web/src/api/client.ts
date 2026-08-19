@@ -216,6 +216,124 @@ export const inventory = {
   },
 };
 
+// ─── Inventarizatsiya (stocktake) ────────────────────────────────────────────
+
+export type InventoryCountStatus =
+  | "DRAFT"
+  | "IN_PROGRESS"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type InventoryCountScope = "FULL" | "CATEGORY" | "CUSTOM";
+
+/** Row shape returned by the list endpoint (no items). */
+export interface InventoryCountSummary {
+  id: string;
+  number: number;
+  status: InventoryCountStatus;
+  scope: InventoryCountScope;
+  note: string | null;
+  createdByName: string;
+  createdAt: string;
+  completedAt: string | null;
+  totalItems: number;
+  countedItems: number;
+  totalDifference: string;
+  totalValueDiff: string;
+}
+
+export interface InventoryCountItem {
+  id: string;
+  productId: number;
+  productName: string;
+  productNameUz: string;
+  barcode: string;
+  unit: string;
+  expectedQty: string;
+  cost: string | null;
+  countedQty: string | null;
+  difference: string | null;
+  counted: boolean;
+}
+
+export interface InventoryCountDetail extends InventoryCountSummary {
+  storeId: string;
+  categoryId: number | null;
+  completedById: string | null;
+  updatedAt: string;
+  items: InventoryCountItem[];
+}
+
+export interface InventoryCountListResponse {
+  rows: InventoryCountSummary[];
+  total: number;
+  page: number;
+  limit: number;
+  totalPages: number;
+}
+
+/** Returned by the per-line endpoints — only the touched line plus progress counters. */
+export interface InventoryCountProgress {
+  item: InventoryCountItem;
+  countedItems: number;
+  totalItems: number;
+  status: InventoryCountStatus;
+}
+
+export const inventoryCounts = {
+  list: async (params?: {
+    search?: string;
+    status?: InventoryCountStatus;
+    page?: number;
+    limit?: number;
+  }): Promise<InventoryCountListResponse> => {
+    const { data } = await axiosInstance.get("/inventory-counts", { params });
+    return data;
+  },
+  get: async (id: string): Promise<InventoryCountDetail> => {
+    const { data } = await axiosInstance.get(`/inventory-counts/${id}`);
+    return data;
+  },
+  create: async (payload: {
+    scope?: InventoryCountScope;
+    categoryId?: number;
+    note?: string;
+  }): Promise<{ id: string; number: number }> => {
+    const { data } = await axiosInstance.post("/inventory-counts", payload);
+    return data;
+  },
+  setItem: async (
+    id: string,
+    itemId: string,
+    countedQty: number,
+  ): Promise<InventoryCountProgress> => {
+    const { data } = await axiosInstance.patch(
+      `/inventory-counts/${id}/items/${itemId}`,
+      { countedQty },
+    );
+    return data;
+  },
+  scan: async (
+    id: string,
+    barcode: string,
+    qty = 1,
+  ): Promise<InventoryCountProgress> => {
+    const { data } = await axiosInstance.post(`/inventory-counts/${id}/scan`, {
+      barcode,
+      qty,
+    });
+    return data;
+  },
+  complete: async (id: string): Promise<InventoryCountSummary> => {
+    const { data } = await axiosInstance.post(`/inventory-counts/${id}/complete`);
+    return data;
+  },
+  cancel: async (id: string): Promise<InventoryCountSummary> => {
+    const { data } = await axiosInstance.post(`/inventory-counts/${id}/cancel`);
+    return data;
+  },
+};
+
 // ─── Suppliers ───────────────────────────────────────────────────────────────
 
 export const suppliers = {
@@ -767,6 +885,7 @@ export const api = {
   products,
   categories,
   inventory,
+  inventoryCounts,
   suppliers,
   sales,
   users,

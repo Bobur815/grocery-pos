@@ -7,6 +7,8 @@ import { LoginPage } from './pages/Login/LoginPage';
 import { ProductList } from './pages/Products/ProductList';
 import { ProductDetails } from './pages/Products/ProductDetails';
 import { StockManagement } from './pages/Products/StockManagement';
+import { InventoryCountList } from './pages/Products/InventoryCountList';
+import { InventoryCountDetail } from './pages/Products/InventoryCountDetail';
 import { SupplierList } from './pages/Suppliers/SupplierList';
 import { SupplierDetails } from './pages/Suppliers/SupplierDetails';
 import { DailySummary } from './pages/Reports/DailySummary';
@@ -82,6 +84,8 @@ export function App() {
           {/* Products (not for super admin) */}
           <Route path="products" element={<PrivateRoute excludeSuperAdmin><ProductList /></PrivateRoute>} />
           <Route path="products/stock" element={<PrivateRoute excludeSuperAdmin><StockManagement /></PrivateRoute>} />
+          <Route path="products/stock/inventarizatsiya" element={<PrivateRoute adminOnly excludeSuperAdmin><InventoryCountList /></PrivateRoute>} />
+          <Route path="products/stock/inventarizatsiya/:id" element={<PrivateRoute adminOnly excludeSuperAdmin><InventoryCountDetail /></PrivateRoute>} />
           <Route path="products/:id" element={<PrivateRoute excludeSuperAdmin><ProductDetails /></PrivateRoute>} />
 
           {/* Suppliers (not for super admin) */}

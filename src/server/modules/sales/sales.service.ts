@@ -122,6 +122,8 @@ export class SalesService {
     // terminals rely on updatedAt to detect changed products in the next sync pull.
     // Wrapped in try-catch per item so a failed update never causes a 500 response —
     // a 500 would leave the local sale un-synced and cause infinite DUPLICATE retries.
+    const saleCreatedAt = new Date(syncSaleDto.createdAt);
+
     for (const item of syncSaleDto.items) {
       const serverId = productIdByBarcode.get(item.barcode);
       if (!serverId) {
@@ -135,13 +137,25 @@ export class SalesService {
         // and the single SQL statement eliminates the T1/T2 race condition that
         // the old read→compute→write pattern had (two concurrent terminals both
         // reading the same stock value and overwriting each other's decrement).
-        await this.prisma.$executeRaw`
+        //
+        // The stock_counted_at guard is the stocktake watermark. Completing an
+        // InventoryCount writes stock ABSOLUTELY from a physical count, so any sale that
+        // happened BEFORE that count is already baked into the counted figure. Without
+        // this clause an offline terminal's backlog would decrement a second time on
+        // reconnect and understate stock — do not "simplify" it away.
+        const affected = await this.prisma.$executeRaw`
           UPDATE products
           SET stock = GREATEST(0, stock - ${decrement}::numeric),
               updated_at = NOW()
           WHERE id = ${serverId}
+            AND (stock_counted_at IS NULL
+                 OR stock_counted_at < ${saleCreatedAt}::timestamptz)
         `;
-        console.log(`[sale-sync] Stock decremented: product id=${serverId} barcode=${item.barcode} -${decrement} (atomic)`);
+        if (affected === 0) {
+          console.log(`[sale-sync] Stock NOT decremented: product id=${serverId} barcode=${item.barcode} — sale predates the last stocktake (already counted)`);
+        } else {
+          console.log(`[sale-sync] Stock decremented: product id=${serverId} barcode=${item.barcode} -${decrement} (atomic)`);
+        }
       } catch (stockErr) {
         console.error(`[sale-sync] STOCK UPDATE FAILED for product id=${serverId} barcode=${item.barcode}:`, stockErr instanceof Error ? stockErr.message : stockErr);
       }

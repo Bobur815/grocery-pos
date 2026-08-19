@@ -260,6 +260,11 @@ export class ProductsService {
     // Delete inventory arrivals
     await this.prisma.inventoryArrival.deleteMany({ where: { productId: id } });
 
+    // Drop the product's lines from any stocktake document — the FK is RESTRICT, so the
+    // delete below would fail otherwise. Each document's stored summary totals are
+    // unaffected; only the per-product line disappears.
+    await this.prisma.inventoryCountItem.deleteMany({ where: { productId: id } });
+
     // Hard delete the product
     await this.prisma.product.delete({ where: { id } });
 

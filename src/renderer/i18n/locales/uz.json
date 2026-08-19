@@ -75,6 +75,8 @@
     "analytics": "Tahlil",
     "management": "Boshqaruv",
     "inventory": "Ombor",
+    "arrivals": "Kirimlar",
+    "stocktake": "Inventarizatsiya",
     "users": "Foydalanuvchilar",
     "settings": "Sozlamalar",
     "userSettings": "Sozlamalarim",
@@ -336,6 +338,74 @@
     "editArrival": "Kirimni tahrirlash",
     "currentValue": "Joriy qiymat",
     "currentTotal": "Joriy summa"
+  },
+  "inventoryCount": {
+    "title": "Inventarizatsiya",
+    "create": "Yaratish",
+    "search": "№, izoh yoki xodim bo'yicha qidirish...",
+    "empty": "Hali inventarizatsiya yo'q",
+    "emptyHint": "Qoldiqlarni qayta sanash uchun hujjat yarating",
+    "loadError": "Inventarizatsiyalarni yuklab bo'lmadi",
+    "created": "Inventarizatsiya yaratildi",
+    "createError": "Inventarizatsiya yaratib bo'lmadi",
+    "alreadyOpen": "Ochiq inventarizatsiya mavjud — avval uni yakunlang yoki bekor qiling",
+    "columns": {
+      "number": "№",
+      "openedAt": "Ochilgan",
+      "closedAt": "Yopilgan",
+      "employee": "Xodim",
+      "status": "Holat",
+      "difference": "Farq",
+      "note": "Izoh"
+    },
+    "notClosed": "Yopilmagan",
+    "allStatuses": "Barchasi",
+    "status": {
+      "draft": "Yangi",
+      "inProgress": "Jarayonda",
+      "completed": "Tasdiqlandi",
+      "cancelled": "Bekor qilindi"
+    },
+    "scope": {
+      "label": "Qamrov",
+      "full": "To'liq",
+      "category": "Kategoriya bo'yicha",
+      "custom": "Tanlab"
+    },
+    "form": {
+      "category": "Kategoriya",
+      "selectCategory": "Kategoriyani tanlang",
+      "note": "Izoh",
+      "notePlaceholder": "Masalan: oylik inventarizatsiya",
+      "submit": "Yaratish"
+    },
+    "detail": {
+      "back": "Ro'yxatga",
+      "scan": "Shtrix-kodni skanerlang",
+      "scanCamera": "Kamera bilan skanerlash",
+      "blindCount": "Ko'r sanoq",
+      "blindCountHint": "Sanoqchiga ta'sir qilmaslik uchun kutilgan miqdorni yashirish",
+      "expected": "Kutilgan",
+      "counted": "Sanaldi",
+      "difference": "Farq",
+      "product": "Mahsulot",
+      "complete": "Yakunlash",
+      "cancel": "Bekor qilish",
+      "cancelConfirm": "Ushbu inventarizatsiya bekor qilinsinmi? Qoldiqlar o'zgarmaydi.",
+      "cancelled": "Inventarizatsiya bekor qilindi",
+      "completed": "Inventarizatsiya yakunlandi, qoldiqlar yangilandi",
+      "completeTitle": "Inventarizatsiya yakunlansinmi?",
+      "completeSummary": "{{total}} tadan {{counted}} ta sanaldi. Farq: {{difference}} ({{value}}).",
+      "progress": "{{total}} tadan {{counted}} ta sanaldi",
+      "uncountedWarning": "Sanalmagan mahsulotlar o'zgarmaydi",
+      "notInList": "Mahsulot ushbu ro'yxatda yo'q",
+      "searchItems": "Mahsulot qidirish...",
+      "onlyUncounted": "Faqat sanalmaganlar",
+      "noItems": "Mahsulot topilmadi",
+      "readOnly": "Hujjat yakunlangan, faqat o'qish uchun",
+      "loadError": "Hujjatni yuklab bo'lmadi",
+      "saveError": "Miqdorni saqlab bo'lmadi"
+    }
   },
   "bulkWeigh": {
     "title": "Mahsulotni tortish",
