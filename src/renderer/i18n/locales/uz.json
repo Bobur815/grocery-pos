@@ -879,7 +879,19 @@
     "width80": "80 mm (standart)",
     "width58": "58 mm (tor)",
     "preview": "Ko'rib chiqish",
-    "storeInfoHint": "Do'kon ma'lumotlarini Tizim sozlamalarida to'ldiring"
+    "storeInfoHint": "Do'kon ma'lumotlarini Tizim sozlamalarida to'ldiring",
+    "logoUpload": "Rasm yuklash",
+    "logoReplace": "Almashtirish",
+    "logoRemove": "O'chirish",
+    "logoTop": "Chek tepasidagi rasm (logotip yoki QR-kod)",
+    "logoBottom": "Chek pastidagi rasm (logotip yoki QR-kod)",
+    "logoSize": "O'lchami",
+    "logoHint": "PNG, JPEG, WEBP, GIF yoki BMP. Rasm chek kengligiga avtomatik moslashtiriladi.",
+    "logoError": {
+      "type": "Rasm faylini tanlang (PNG, JPEG va h.k.)",
+      "tooLarge": "Rasm juda katta — kichikroq fayl tanlang",
+      "decode": "Rasmni o'qib bo'lmadi"
+    }
   },
   "printer": {
     "availablePrinters": "Mavjud printerlar",

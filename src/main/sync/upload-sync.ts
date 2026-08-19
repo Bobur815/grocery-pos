@@ -251,6 +251,11 @@ const LOCAL_ONLY_SETTINGS = new Set([
   'regos_vcr_password_enc',
 ]);
 
+// Values pushed successfully in this process run, so unchanged settings aren't re-uploaded
+// every cycle. Some values are large (receipt_logo_top/_bottom hold base64 images); re-sending them
+// every 5 minutes wastes the terminal's connection. Cleared on restart — one re-push then.
+const uploadedSettings = new Map<string, string>();
+
 async function uploadSettings(
   prisma: ReturnType<typeof getPrismaClient>,
   token: string,
@@ -261,13 +266,15 @@ async function uploadSettings(
 
   for (const s of settings) {
     if (LOCAL_ONLY_SETTINGS.has(s.key)) continue;
+    if (uploadedSettings.get(s.key) === s.value) continue;
 
     try {
-      await fetch(`${config.vpsApiUrl}/settings/${encodeURIComponent(s.key)}`, {
+      const res = await fetch(`${config.vpsApiUrl}/settings/${encodeURIComponent(s.key)}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ value: s.value }),
       });
+      if (res.ok) uploadedSettings.set(s.key, s.value);
     } catch {
       // Non-fatal — will retry next cycle
     }

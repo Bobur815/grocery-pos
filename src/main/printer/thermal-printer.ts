@@ -110,6 +110,10 @@ async function loadReceiptSettings(): Promise<ReceiptSettings> {
           "receipt_width",
           "receipt_language",
           "tax_rate_as_discount",
+          "receipt_logo_top",
+          "receipt_logo_top_size",
+          "receipt_logo_bottom",
+          "receipt_logo_bottom_size",
         ],
       },
     },
@@ -134,6 +138,10 @@ async function loadReceiptSettings(): Promise<ReceiptSettings> {
     receipt_width: (map.receipt_width as "80" | "58") || "80",
     receipt_language: (map.receipt_language as "ru" | "uz") || "ru",
     tax_rate_as_discount: map.tax_rate_as_discount || "false",
+    receipt_logo_top: map.receipt_logo_top || "",
+    receipt_logo_top_size: map.receipt_logo_top_size || "50",
+    receipt_logo_bottom: map.receipt_logo_bottom || "",
+    receipt_logo_bottom_size: map.receipt_logo_bottom_size || "50",
   };
 }
 

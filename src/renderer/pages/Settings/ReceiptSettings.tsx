@@ -1,14 +1,19 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ImagePlus, Trash2 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { Select } from '../../components/common/Select';
 import { buildSampleReceiptHTML } from '../../../shared/receipt-html';
 import type { ReceiptSettings as ReceiptSettingsType } from '../../../shared/receipt-html';
 import { useToast } from '../../context/ToastContext';
+import {
+  ACCEPTED_LOGO_TYPES,
+  ReceiptLogoError,
+  prepareReceiptLogo,
+} from '../../utils/receipt-logo';
 
 const Container = styled.div`
   display: flex;
@@ -96,6 +101,146 @@ const Actions = styled.div`
   margin-top: ${({ theme }) => theme.spacing.sm};
 `;
 
+const FieldLabel = styled.label`
+  display: block;
+  margin-bottom: ${({ theme }) => theme.spacing.xs};
+  font-weight: 500;
+  font-size: 14px;
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const LogoBox = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.sm};
+  border: 1px dashed ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.borderRadius};
+`;
+
+const LogoPreview = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 90px;
+  padding: ${({ theme }) => theme.spacing.sm};
+  background: #fff;
+  border-radius: ${({ theme }) => theme.borderRadius};
+
+  img {
+    max-width: 100%;
+    max-height: 120px;
+    object-fit: contain;
+  }
+`;
+
+const LogoHint = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const LogoActions = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.sm};
+`;
+
+const HiddenFileInput = styled.input`
+  display: none;
+`;
+
+interface LogoFieldProps {
+  label: string;
+  /** Data URL of the configured image, or '' when none is set */
+  value: string;
+  /** Image width as a percentage of the paper width */
+  size: string;
+  onChange: (dataUrl: string) => void;
+  onSizeChange: (size: string) => void;
+}
+
+/**
+ * One receipt image slot (top or bottom) — upload, preview, resize, remove.
+ * Each slot owns its own file input so the two are fully independent.
+ */
+function LogoField({ label, value, size, onChange, onSizeChange }: LogoFieldProps) {
+  const { t } = useTranslation();
+  const { showToast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handlePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset so picking the same file again still fires onChange
+    e.target.value = '';
+    if (!file) return;
+
+    try {
+      onChange(await prepareReceiptLogo(file));
+    } catch (err) {
+      const reason = err instanceof ReceiptLogoError ? err.reason : 'decode';
+      console.error('Failed to prepare receipt logo:', err);
+      showToast(t(`receipt.logoError.${reason}`), 'error');
+    }
+  };
+
+  return (
+    <div>
+      <FieldLabel>{label}</FieldLabel>
+      <LogoBox>
+        {value ? (
+          <>
+            <LogoPreview>
+              <img src={value} alt={label} />
+            </LogoPreview>
+            <Select
+              label={t('receipt.logoSize')}
+              selectSize="small"
+              value={size}
+              onChange={(e) => onSizeChange(e.target.value)}
+              options={[
+                { value: '30', label: '30%' },
+                { value: '50', label: '50%' },
+                { value: '70', label: '70%' },
+                { value: '100', label: '100%' },
+              ]}
+            />
+            <LogoActions>
+              <Button
+                type="button"
+                variant="secondary"
+                size="small"
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <ImagePlus size={16} /> {t('receipt.logoReplace')}
+              </Button>
+              <Button type="button" variant="danger" size="small" onClick={() => onChange('')}>
+                <Trash2 size={16} /> {t('receipt.logoRemove')}
+              </Button>
+            </LogoActions>
+          </>
+        ) : (
+          <>
+            <Button
+              type="button"
+              variant="secondary"
+              size="small"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <ImagePlus size={16} /> {t('receipt.logoUpload')}
+            </Button>
+            <LogoHint>{t('receipt.logoHint')}</LogoHint>
+          </>
+        )}
+        <HiddenFileInput
+          ref={fileInputRef}
+          type="file"
+          accept={ACCEPTED_LOGO_TYPES}
+          onChange={handlePick}
+        />
+      </LogoBox>
+    </div>
+  );
+}
+
 export function ReceiptSettings() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -111,6 +256,10 @@ export function ReceiptSettings() {
     store_phone: '',
     store_stir: '',
     tax_rate: '0',
+    receipt_logo_top: '',
+    receipt_logo_top_size: '50',
+    receipt_logo_bottom: '',
+    receipt_logo_bottom_size: '50',
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -129,6 +278,10 @@ export function ReceiptSettings() {
           store_phone: all.store_phone || '',
           store_stir: all.store_stir || '',
           tax_rate: all.tax_rate || '0',
+          receipt_logo_top: all.receipt_logo_top || '',
+          receipt_logo_top_size: all.receipt_logo_top_size || '50',
+          receipt_logo_bottom: all.receipt_logo_bottom || '',
+          receipt_logo_bottom_size: all.receipt_logo_bottom_size || '50',
         });
       } catch (err) {
         console.error('Failed to load receipt settings:', err);
@@ -150,6 +303,19 @@ export function ReceiptSettings() {
       await window.electronAPI.settings.set('receipt_language', settings.receipt_language);
       await window.electronAPI.settings.set('receipt_header', settings.receipt_header);
       await window.electronAPI.settings.set('receipt_footer', settings.receipt_footer);
+      await window.electronAPI.settings.set('receipt_logo_top', settings.receipt_logo_top || '');
+      await window.electronAPI.settings.set(
+        'receipt_logo_top_size',
+        settings.receipt_logo_top_size || '50'
+      );
+      await window.electronAPI.settings.set(
+        'receipt_logo_bottom',
+        settings.receipt_logo_bottom || ''
+      );
+      await window.electronAPI.settings.set(
+        'receipt_logo_bottom_size',
+        settings.receipt_logo_bottom_size || '50'
+      );
       showToast(t('common.saved'), 'success');
     } catch (err) {
       console.error('Failed to save receipt settings:', err);
@@ -223,6 +389,30 @@ export function ReceiptSettings() {
               value={settings.receipt_footer}
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, receipt_footer: e.target.value }))
+              }
+            />
+
+            <LogoField
+              label={t('receipt.logoTop')}
+              value={settings.receipt_logo_top || ''}
+              size={settings.receipt_logo_top_size || '50'}
+              onChange={(dataUrl) =>
+                setSettings((prev) => ({ ...prev, receipt_logo_top: dataUrl }))
+              }
+              onSizeChange={(size) =>
+                setSettings((prev) => ({ ...prev, receipt_logo_top_size: size }))
+              }
+            />
+
+            <LogoField
+              label={t('receipt.logoBottom')}
+              value={settings.receipt_logo_bottom || ''}
+              size={settings.receipt_logo_bottom_size || '50'}
+              onChange={(dataUrl) =>
+                setSettings((prev) => ({ ...prev, receipt_logo_bottom: dataUrl }))
+              }
+              onSizeChange={(size) =>
+                setSettings((prev) => ({ ...prev, receipt_logo_bottom_size: size }))
               }
             />
 

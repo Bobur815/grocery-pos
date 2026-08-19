@@ -30,6 +30,8 @@ export interface ReceiptData {
   fiscalQrBase64?: string;
 }
 
+export type ReceiptLogoPosition = "top" | "bottom";
+
 export interface ReceiptSettings {
   receipt_width: "80" | "58";
   receipt_language: "ru" | "uz";
@@ -41,6 +43,14 @@ export interface ReceiptSettings {
   store_stir?: string;
   tax_rate?: string;
   tax_rate_as_discount?: string;
+  /** Base64 data URL of the image printed above the store header ("" = none) */
+  receipt_logo_top?: string;
+  /** Top image width as a percentage of the paper width (e.g. "50") */
+  receipt_logo_top_size?: string;
+  /** Base64 data URL of the image printed below the footer ("" = none) */
+  receipt_logo_bottom?: string;
+  /** Bottom image width as a percentage of the paper width (e.g. "50") */
+  receipt_logo_bottom_size?: string;
 }
 
 const labels: Record<string, Record<string, string>> = {
@@ -92,6 +102,33 @@ function fmt(amount: number, currency: string): string {
   return amount.toLocaleString("ru-RU") + " " + currency;
 }
 
+
+/** Only base64 image data URLs are accepted — anything else is dropped, not printed. */
+const LOGO_DATA_URL_RE =
+  /^data:image\/(png|jpeg|jpg|gif|webp|bmp);base64,[A-Za-z0-9+/=]+$/;
+
+/**
+ * Renders the logo/QR block for one end of the receipt, or "" when no valid
+ * image is configured there. Top and bottom images are independent.
+ */
+function logoHTML(
+  settings: ReceiptSettings,
+  position: ReceiptLogoPosition,
+): string {
+  const src = (
+    (position === "top"
+      ? settings.receipt_logo_top
+      : settings.receipt_logo_bottom) || ""
+  ).trim();
+  if (!src || !LOGO_DATA_URL_RE.test(src)) return "";
+
+  const rawSize =
+    (position === "top"
+      ? settings.receipt_logo_top_size
+      : settings.receipt_logo_bottom_size) || "50";
+  const size = Math.min(100, Math.max(10, parseInt(rawSize, 10) || 50));
+  return `<div class="logo-block"><img src="${src}" style="width: ${size}%" alt="" /></div>`;
+}
 
 function escapeHtml(str: string): string {
   return str
@@ -181,6 +218,8 @@ function baseStyles(widthMm: number): string {
     .fiscal-block img { width: ${sm ? "110px" : "135px"}; height: ${sm ? "110px" : "135px"}; display: block; margin: 4px auto; }
     .fiscal-label { font-size: ${sm ? "11px" : "12px"}; font-weight: 600; color: #000; }
     .fiscal-sub { font-size: ${sm ? "10px" : "11px"}; color: #000; margin-top: 2px; }
+    .logo-block { text-align: center; margin: 4px 0; }
+    .logo-block img { max-width: 100%; height: auto; display: block; margin: 0 auto; }
   `;
 }
 
@@ -266,6 +305,7 @@ export function buildReceiptHTML(
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>${baseStyles(widthMm)}</style></head>
 <body>
+  ${logoHTML(settings, "top")}
   <div class="center">
     ${settings.store_name ? `<div class="brand">${escapeHtml(settings.store_name)}</div>` : ""}
     ${settings.store_address ? `<div class="sub">${escapeHtml(settings.store_address)}</div>` : ""}
@@ -314,6 +354,8 @@ export function buildReceiptHTML(
 
   ${fiscalHTML}
 
+  ${logoHTML(settings, "bottom")}
+
 </body></html>`;
 }
 
@@ -332,6 +374,7 @@ export function buildTestReceiptHTML(settings: ReceiptSettings): string {
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>${baseStyles(widthMm)}</style></head>
 <body>
+  ${logoHTML(settings, "top")}
   <div class="center">
     <hr class="double">
     <div class="brand">${l.testTitle}</div>
@@ -341,6 +384,7 @@ export function buildTestReceiptHTML(settings: ReceiptSettings): string {
     ${settings.store_name ? `<div class="sub" style="margin-top: 4px;">${escapeHtml(settings.store_name)}</div>` : ""}
     <hr class="double">
   </div>
+  ${logoHTML(settings, "bottom")}
 </body></html>`;
 }
 
