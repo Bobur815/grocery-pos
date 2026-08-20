@@ -2,25 +2,12 @@ import { ipcMain } from 'electron';
 import { getPrismaClient } from '../database/sqlite-client';
 import { getAppConfig } from '../config/app-config';
 import { getServerToken } from '../sync/queue-manager';
-import { classifyCirculation } from '../../shared/utils/circulation';
-import { verifyCirculation, isCodeOutOfCirculation } from '../marking/circulation-check';
 
 interface MarkingCodeCheckResult {
   alreadySold: boolean;
   soldAt?: string;
   terminalId?: string;
   source?: 'local' | 'server';
-}
-
-interface MarkingCirculationResult {
-  // false when asl-belgisi could not be consulted (offline / no token / error). Callers follow
-  // the offline-first rule: do NOT block the sale when unreachable — REGOS:VCR remains the
-  // authoritative check at fiscalization.
-  reachable: boolean;
-  // true only when asl-belgisi positively says the code may not be sold: it is out of circulation
-  // (WITHDRAWN / SOLD / RETIRED / EMITTED / …) or not present in the registry at all.
-  outOfCirculation: boolean;
-  status?: string; // raw asl-belgisi status (or 'NOT_FOUND'), for the cashier message
 }
 
 interface MarkingCodeEntry {
@@ -84,16 +71,6 @@ export function setupMarkingCodesHandlers(): void {
 
     return { alreadySold: false };
   });
-
-  // Check a group-022 marking code's CIRCULATION status against asl-belgisi (distinct from the
-  // resale check above). Used during a sale to block an out-of-circulation code early with a clear
-  // message, instead of letting REGOS:VCR reject the whole receipt at fiscalization ([704030]
-  // "товар вне оборота"). Offline-first: when asl-belgisi is unreachable we report
-  // outOfCirculation=false so the sale proceeds and REGOS stays the authoritative gate.
-  ipcMain.handle(
-    'markingCodes:checkCirculation',
-    async (_event, code: string): Promise<MarkingCirculationResult> => isCodeOutOfCirculation(code),
-  );
 
   // Free the marking codes tied to a sale (called when a sale is deleted or refunded) so the
   // group-022 items can be sold again. The codes are gathered from both the sale's regosLabels
@@ -224,12 +201,15 @@ export function setupMarkingCodesHandlers(): void {
 }
 
 /**
- * Capture group-022 marking codes that were sold while still IN circulation, so they can
- * later be sent to a REGOS:VCR to be taken out of circulation. Called after a sale completes
- * (there is no VCR connected yet). Rules:
- *   - Skip a code ONLY when asl-belgisi positively reports it OUT of circulation.
- *   - Save it when IN circulation, status unknown, or asl-belgisi is unreachable (offline-first).
- * Writes locally (SQLite) first, then best-effort syncs to the VPS for cross-terminal consistency.
+ * Capture group-022 marking codes from a completed sale, so they can later be sent to a REGOS:VCR
+ * to be taken out of circulation (there is no VCR connected yet). Called after a sale completes.
+ *
+ * Deliberately does NO registry lookup: circulation is no longer consulted anywhere on the sale
+ * path. Interrogating a code is now the job of the staff-facing Marking Check screen
+ * (/marking-check), and REGOS:VCR remains the authoritative gate at fiscalization. So every code is
+ * captured with `circulationStatus: null` (= unverified) and the sale finishes without touching the
+ * network. Writes locally (SQLite) first, then best-effort syncs to the VPS for cross-terminal
+ * consistency.
  */
 export async function savePendingMarkingCodes(
   entries: PendingMarkingCodeEntry[],
@@ -245,15 +225,10 @@ export async function savePendingMarkingCodes(
     code: string;
     productBarcode?: string;
     saleId?: string;
-    circulationStatus: string | null;
   }> = [];
 
   for (const entry of entries) {
     if (!entry?.code) continue;
-
-    const { status, reachable } = await verifyCirculation(entry.code);
-    // Only a confirmed OUT status excludes the code; everything else is saved.
-    if (reachable && classifyCirculation(status) === 'OUT') continue;
 
     try {
       await (prisma as any).pendingMarkingCode.upsert({
@@ -263,7 +238,7 @@ export async function savePendingMarkingCodes(
           productBarcode: entry.productBarcode ?? null,
           saleId: entry.saleId ?? null,
           terminalId,
-          circulationStatus: status ?? null,
+          circulationStatus: null, // unverified — no registry lookup on the sale path
           synced: false,
         },
         update: {}, // first capture wins — don't overwrite
@@ -272,7 +247,6 @@ export async function savePendingMarkingCodes(
         code: entry.code,
         productBarcode: entry.productBarcode,
         saleId: entry.saleId,
-        circulationStatus: status ?? null,
       });
     } catch {
       // ignore duplicate constraint errors

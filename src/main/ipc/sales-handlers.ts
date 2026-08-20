@@ -191,9 +191,10 @@ export function setupSalesHandlers(): void {
       console.error('[fiscal] enqueue failed:', e instanceof Error ? e.message : e);
     }
 
-    // Capture group-022 marking codes that are still IN circulation for later REGOS:VCR
-    // out-of-circulation fiscalization (no VCR connected yet). Fire-and-forget: this hits
-    // asl-belgisi + the VPS and must not delay the sale/receipt. Never blocks the sale.
+    // Capture the sale's group-022 marking codes for later REGOS:VCR out-of-circulation
+    // fiscalization (no VCR connected yet). No asl-belgisi lookup happens here — circulation is
+    // checked on the /marking-check screen, not during a sale. Fire-and-forget anyway: the local
+    // write is followed by a best-effort VPS sync, and neither may delay the sale/receipt.
     if (markingLabels.length > 0) {
       savePendingMarkingCodes(
         markingLabels.map((m) => ({ code: m.label, productBarcode: m.barcode, saleId: sale.id })),

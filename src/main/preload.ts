@@ -384,8 +384,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
   markingCodes: {
     check: (code: string) =>
       ipcRenderer.invoke("markingCodes:check", code),
-    checkCirculation: (code: string) =>
-      ipcRenderer.invoke("markingCodes:checkCirculation", code),
     record: (entries: { code: string; productBarcode?: string }[]) =>
       ipcRenderer.invoke("markingCodes:record", entries),
     removeForSale: (saleId: string) =>
@@ -698,11 +696,6 @@ declare global {
           soldAt?: string;
           terminalId?: string;
           source?: 'local' | 'server';
-        }>;
-        checkCirculation: (code: string) => Promise<{
-          reachable: boolean;
-          outOfCirculation: boolean;
-          status?: string;
         }>;
         record: (entries: { code: string; productBarcode?: string }[]) => Promise<void>;
         removeForSale: (saleId: string) => Promise<void>;

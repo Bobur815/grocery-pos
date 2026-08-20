@@ -1,6 +1,8 @@
-// Shared asl-belgisi circulation check for the main process. Used by the marking-code IPC handlers
-// (POS scan-time / checkout guards) and by the bulk "fiscalize old receipts" admin action, so the
-// fiscal service does not have to depend on the IPC-handlers module.
+// Shared asl-belgisi circulation check for the main process. Nothing on the SALE path calls this
+// any more — scan-time and checkout guards were removed, and savePendingMarkingCodes() captures
+// codes unverified. The two remaining consumers are the staff-facing Marking Check screen
+// (verifyMarkingCodeDetails, via marking-check-handlers) and the bulk "fiscalize old receipts"
+// admin action (isCodeOutOfCirculation, via regos-vcr-service).
 //
 // The actual asl-belgisi request goes through the VPS proxy (POST /aslbelgisi/verify → xtrace.
 // aslbelgisi.uz), which strips the crypto tail and returns { isValid, status }. We classify the
