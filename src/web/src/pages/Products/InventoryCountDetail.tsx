@@ -17,9 +17,14 @@ import { Spinner } from "@components/common/Spinner";
 import { useToast } from "@context/ToastContext";
 import { formatCurrency } from "@shared/utils";
 import { formatDateTime } from "../../utils/formatters";
-import { MobileCardList, DesktopOnly } from "../../components/common/MobileCard";
+import {
+  MobileCardList,
+  DesktopOnly,
+} from "../../components/common/MobileCard";
 import { BarcodeScannerModal } from "../../components/common/BarcodeScannerModal";
 import { InventoryCountStatusBadge } from "./InventoryCountStatusBadge";
+import { CompleteCountModal } from "./CompleteCountModal";
+import { ScanQuantityModal } from "./ScanQuantityModal";
 import {
   inventoryCounts,
   type InventoryCountDetail as CountDetail,
@@ -33,18 +38,6 @@ const Container = styled.div`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.md};
-`;
-
-const BackButton = styled.button`
-  display: flex;
-  align-items: center;
-  gap: ${({ theme }) => theme.spacing.xs};
-  background: none;
-  border: none;
-  cursor: pointer;
-  padding: 0;
-  font-size: 14px;
-  color: ${({ theme }) => theme.colors.textSecondary};
 `;
 
 /* Sticky so "Yakunlash" is always reachable while walking the aisles. */
@@ -123,7 +116,7 @@ const Toggle = styled.label`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.xs};
-  font-size: 13px;
+  font-size: 14px;
   color: ${({ theme }) => theme.colors.textSecondary};
   cursor: pointer;
   white-space: nowrap;
@@ -172,6 +165,17 @@ const QtyInput = styled.input`
   background-color: ${({ theme }) => theme.colors.surface};
   color: ${({ theme }) => theme.colors.text};
 
+  /* Hide the native number spinners — the -/+ steppers beside the field are the
+     control, and the tiny built-in arrows are both redundant and hard to hit. */
+  appearance: textfield;
+  -moz-appearance: textfield;
+
+  &::-webkit-outer-spin-button,
+  &::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+
   &:disabled {
     opacity: 0.6;
   }
@@ -185,6 +189,19 @@ const Diff = styled.span<{ $negative: boolean }>`
 
 const Muted = styled.span`
   color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+/* Marks a line zeroed by a write-off, so it doesn't read as "someone counted zero". */
+const WrittenOffPill = styled.span`
+  display: inline-block;
+  margin-left: ${({ theme }) => theme.spacing.xs};
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  background-color: ${({ theme }) => theme.colors.warning};
+  color: #fff;
 `;
 
 const ItemCard = styled.div<{ $highlight: boolean }>`
@@ -276,6 +293,8 @@ export function InventoryCountDetail() {
   const [onlyUncounted, setOnlyUncounted] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
+  const [scannedItem, setScannedItem] = useState<InventoryCountItem | null>(null);
+  const [isSavingScan, setIsSavingScan] = useState(false);
   const [showComplete, setShowComplete] = useState(false);
   const [showCancel, setShowCancel] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -346,17 +365,53 @@ export function InventoryCountDetail() {
     [id, isReadOnly, applyProgress, toast, t],
   );
 
+  /** Returns false when the save failed, so callers can keep their input open. */
   const setItemQty = useCallback(
-    async (item: InventoryCountItem, qty: number) => {
-      if (!id || isReadOnly) return;
+    async (item: InventoryCountItem, qty: number): Promise<boolean> => {
+      if (!id || isReadOnly) return false;
       const next = Number.isFinite(qty) ? Math.max(0, qty) : 0;
       try {
         applyProgress(await inventoryCounts.setItem(id, item.id, next));
+        return true;
       } catch {
         toast.error(t("inventoryCount.detail.saveError"));
+        return false;
       }
     },
     [id, isReadOnly, applyProgress, toast, t],
+  );
+
+  /**
+   * Camera scans open a quantity prompt instead of applying +1. A handheld scanner fires
+   * repeatedly and +1 per shot is the fast aisle flow; a camera scan is one deliberate
+   * act, so the counter should say how many they actually see.
+   */
+  const handleCameraScan = useCallback(
+    (scanned: string) => {
+      const value = scanned.trim();
+      if (!count || !value || isReadOnly) return;
+      const item = count.items.find((i) => i.barcode === value);
+      if (!item) {
+        toast.error(t("inventoryCount.detail.notInList"));
+        return;
+      }
+      setScannedItem(item);
+    },
+    [count, isReadOnly, toast, t],
+  );
+
+  const handleScannedQty = useCallback(
+    async (qty: number) => {
+      if (!scannedItem) return;
+      setIsSavingScan(true);
+      try {
+        // Keep the modal open on failure so the typed quantity isn't lost.
+        if (await setItemQty(scannedItem, qty)) setScannedItem(null);
+      } finally {
+        setIsSavingScan(false);
+      }
+    },
+    [scannedItem, setItemQty],
   );
 
   const visibleItems = useMemo(() => {
@@ -412,12 +467,18 @@ export function InventoryCountDetail() {
     );
   }, [count]);
 
-  const handleComplete = async () => {
+  const handleComplete = async (writeOffUncounted: boolean) => {
     if (!id || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await inventoryCounts.complete(id);
-      toast.success(t("inventoryCount.detail.completed"));
+      await inventoryCounts.complete(id, { writeOffUncounted });
+      toast.success(
+        t(
+          writeOffUncounted
+            ? "inventoryCount.detail.writeOff.done"
+            : "inventoryCount.detail.completed",
+        ),
+      );
       setShowComplete(false);
       setCount(await inventoryCounts.get(id));
     } catch (err) {
@@ -466,7 +527,8 @@ export function InventoryCountDetail() {
           const next = Number(raw);
           // `null` means "not counted yet", which is NOT the same as a counted 0 —
           // only skip the request when the line already holds this exact value.
-          if (item.countedQty !== null && next === Number(item.countedQty)) return;
+          if (item.countedQty !== null && next === Number(item.countedQty))
+            return;
           setItemQty(item, next);
         }}
         onKeyDown={(e) => {
@@ -502,6 +564,11 @@ export function InventoryCountDetail() {
       render: (item: InventoryCountItem) => (
         <HighlightRow $highlight={highlightId === item.id}>
           {productLabel(item)}
+          {item.writtenOff && (
+            <WrittenOffPill>
+              {t("inventoryCount.detail.writeOff.badge")}
+            </WrittenOffPill>
+          )}
           <br />
           <Muted style={{ fontSize: 12 }}>{item.barcode}</Muted>
         </HighlightRow>
@@ -544,9 +611,14 @@ export function InventoryCountDetail() {
   if (!count) {
     return (
       <Container>
-        <BackButton onClick={() => navigate("/products/stock/inventarizatsiya")}>
-          <ArrowLeft size={18} /> {t("inventoryCount.detail.back")}
-        </BackButton>
+        <Button
+          variant="secondary"
+          size="small"
+          onClick={() => navigate("/products/stock/inventarizatsiya")}
+          tooltip={t("inventoryCount.detail.back")}
+        >
+          <ArrowLeft size={20} />
+        </Button>
         <Muted>{t("inventoryCount.detail.loadError")}</Muted>
       </Container>
     );
@@ -554,11 +626,15 @@ export function InventoryCountDetail() {
 
   return (
     <Container>
-      <BackButton onClick={() => navigate("/products/stock/inventarizatsiya")}>
-        <ArrowLeft size={18} /> {t("inventoryCount.detail.back")}
-      </BackButton>
-
       <Header>
+        <Button
+          variant="secondary"
+          size="small"
+          onClick={() => navigate("/products/stock/inventarizatsiya")}
+          tooltip={t("inventoryCount.detail.back")}
+        >
+          <ArrowLeft size={20} />
+        </Button>
         <HeaderInfo>
           <DocNumber>#{count.number}</DocNumber>
           <InventoryCountStatusBadge status={count.status} />
@@ -614,6 +690,18 @@ export function InventoryCountDetail() {
               )}
             </strong>
           </SummaryItem>
+          {count.wroteOffUncounted && (
+            <SummaryItem>
+              {t("inventoryCount.detail.writeOff.summary")}
+              <strong>
+                {count.writtenOffItems} ·{" "}
+                {formatCurrency(
+                  Number(count.writeOffValue),
+                  i18n.language as "ru" | "uz",
+                )}
+              </strong>
+            </SummaryItem>
+          )}
           {count.completedAt && (
             <SummaryItem>
               {t("inventoryCount.columns.closedAt")}
@@ -636,6 +724,7 @@ export function InventoryCountDetail() {
               if (e.key === "Enter") handleScan(barcode);
             }}
             placeholder={t("inventoryCount.detail.scan")}
+            style={{ paddingRight: "32px", fontSize: 18, fontWeight: "bold" }}
           />
           <IconButton
             type="button"
@@ -653,6 +742,7 @@ export function InventoryCountDetail() {
           value={itemSearch}
           onChange={(e) => setItemSearch(e.target.value)}
           placeholder={t("inventoryCount.detail.searchItems")}
+          style={{ paddingRight: "32px", fontSize: 18, fontWeight: "bold" }}
         />
         <Toggle>
           <input
@@ -675,7 +765,14 @@ export function InventoryCountDetail() {
       <MobileCardList>
         {visibleItems.slice(0, mobileCount).map((item) => (
           <ItemCard key={item.id} $highlight={highlightId === item.id}>
-            <CardTitle>{productLabel(item)}</CardTitle>
+            <CardTitle>
+              {productLabel(item)}
+              {item.writtenOff && (
+                <WrittenOffPill>
+                  {t("inventoryCount.detail.writeOff.badge")}
+                </WrittenOffPill>
+              )}
+            </CardTitle>
             <Muted style={{ fontSize: 12 }}>{item.barcode}</Muted>
             {!blindCount && (
               <CardRow>
@@ -713,34 +810,29 @@ export function InventoryCountDetail() {
           title={t("inventoryCount.detail.scanCamera")}
           onScan={(value) => {
             setShowScanner(false);
-            handleScan(value);
+            handleCameraScan(value);
           }}
           onClose={() => setShowScanner(false)}
         />
       )}
 
+      {scannedItem && (
+        <ScanQuantityModal
+          item={scannedItem}
+          blindCount={blindCount}
+          isSaving={isSavingScan}
+          onSave={handleScannedQty}
+          onClose={() => setScannedItem(null)}
+        />
+      )}
+
       {showComplete && (
-        <ConfirmDialog
-          title={t("inventoryCount.detail.completeTitle")}
-          message={`${t("inventoryCount.detail.completeSummary", {
-            counted: count.countedItems,
-            total: count.totalItems,
-            difference: `${netDifference.qty > 0 ? "+" : ""}${netDifference.qty}`,
-            value: formatCurrency(
-              netDifference.value,
-              i18n.language as "ru" | "uz",
-            ),
-          })}${
-            count.countedItems < count.totalItems
-              ? ` ${t("inventoryCount.detail.uncountedWarning")}`
-              : ""
-          }`}
-          confirmLabel={t("inventoryCount.detail.complete")}
-          cancelLabel={t("common.cancel")}
-          variant="primary"
-          isLoading={isSubmitting}
+        <CompleteCountModal
+          count={count}
+          netDifference={netDifference}
+          isSubmitting={isSubmitting}
           onConfirm={handleComplete}
-          onCancel={() => setShowComplete(false)}
+          onClose={() => setShowComplete(false)}
         />
       )}
 

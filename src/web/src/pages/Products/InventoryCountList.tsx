@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import styled from "styled-components";
-import { ClipboardCheck, X } from "lucide-react";
+import styled, { keyframes } from "styled-components";
+import { ClipboardCheck, Plus, X } from "lucide-react";
 import { Table } from "@components/common/Table";
 import { Button } from "@components/common/Button";
 import { Input } from "@components/common/Input";
@@ -98,6 +98,13 @@ const Diff = styled.span<{ $negative: boolean }>`
   font-weight: 500;
 `;
 
+const WriteOffNote = styled.span`
+  display: block;
+  font-size: 11px;
+  color: ${({ theme }) => theme.colors.warning};
+  white-space: nowrap;
+`;
+
 const NoteCell = styled.span`
   display: inline-block;
   max-width: 220px;
@@ -105,6 +112,41 @@ const NoteCell = styled.span`
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+`;
+
+/* Floating create button — same treatment as the one on the suppliers list. */
+const pulse = keyframes`
+  0% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb, 59, 130, 246), 0.5); }
+  70% { box-shadow: 0 0 0 12px rgba(var(--primary-rgb, 59, 130, 246), 0); }
+  100% { box-shadow: 0 0 0 0 rgba(var(--primary-rgb, 59, 130, 246), 0); }
+`;
+
+const FAB = styled.button`
+  position: fixed;
+  bottom: 50px;
+  right: 16px;
+  z-index: 100;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  border: none;
+  background-color: ${({ theme }) => theme.colors.primary};
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  animation: ${pulse} 2s ease-out infinite;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+
+  &:hover {
+    transform: scale(1.1);
+  }
+
+  &:active {
+    transform: scale(0.95);
+  }
 `;
 
 const EmptyWrapper = styled.div`
@@ -185,10 +227,20 @@ export function InventoryCountList() {
     if (row.status !== "COMPLETED") return <Muted>—</Muted>;
     const qty = Number(row.totalDifference);
     return (
-      <Diff $negative={qty < 0}>
-        {qty > 0 ? "+" : ""}
-        {qty} · {formatMoney(row.totalValueDiff)}
-      </Diff>
+      <>
+        <Diff $negative={qty < 0}>
+          {qty > 0 ? "+" : ""}
+          {qty} · {formatMoney(row.totalValueDiff)}
+        </Diff>
+        {/* A loss that came from a write-off reads very differently from a counted
+            shortfall, so say which one it was without opening the document. */}
+        {row.wroteOffUncounted && (
+          <WriteOffNote>
+            {t("inventoryCount.detail.writeOff.summary")}: {row.writtenOffItems} ·{" "}
+            {formatMoney(row.writeOffValue)}
+          </WriteOffNote>
+        )}
+      </>
     );
   };
 
@@ -263,9 +315,6 @@ export function InventoryCountList() {
             </ClearBtn>
           )}
         </SearchWrapper>
-        <Button variant="primary" onClick={() => setShowCreate(true)}>
-          {t("inventoryCount.create")}
-        </Button>
       </Toolbar>
 
       <Chips>
@@ -361,6 +410,14 @@ export function InventoryCountList() {
           }}
         />
       )}
+
+      <FAB
+        onClick={() => setShowCreate(true)}
+        title={t("inventoryCount.create")}
+        aria-label={t("inventoryCount.create")}
+      >
+        <Plus size={38} />
+      </FAB>
     </Container>
   );
 }

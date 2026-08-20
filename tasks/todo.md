@@ -51,6 +51,65 @@ Spec: `INVENTARIZATSIYA_IMPLEMENTATION.md` (repo root). Feature must NOT reach t
 - [x] `src/renderer/i18n/locales/{ru,uz}.json` — `nav.arrivals`, `nav.stocktake`, `inventoryCount.*`.
 - [x] `nest build`, `src/web` `tsc --noEmit && vite build`, root `tsc --noEmit` (0 errors), 40/40 tests.
 
+## Follow-up: write off uncounted items (2026-08-20)
+
+Completing a count left uncounted lines untouched, so a product that never turned up during a
+category count stayed "in stock" forever. Added an opt-in write-off at completion.
+
+- [x] `prisma/schema.prisma` — `InventoryCount.wroteOffUncounted / writtenOffItems / writeOffValue`,
+      `InventoryCountItem.writtenOff`. Migration `20260820000001_add_inventory_count_writeoff`,
+      hand-written and idempotent, verified column-for-column against `prisma migrate diff`.
+- [x] `dto/complete-count.dto.ts` — `writeOffUncounted?: boolean`; controller passes it through.
+- [x] `inventory-count.service.ts` — extracted the completion arithmetic into a pure exported
+      `planCompletion(items, writeOffUncounted)`; `complete()` now just executes the plan.
+- [x] `inventory-count.plan.test.ts` (new) — 9 tests over `planCompletion`.
+- [x] `CompleteCountModal.tsx` (new) — replaces the completion `ConfirmDialog` (which takes only
+      strings) with a checkbox + numeric preview + the FULL-scope acknowledgement.
+- [x] Written-off pill on detail lines (table + mobile card), write-off row in the SummaryBar,
+      write-off note in the list's difference cell.
+- [x] `inventoryCount.detail.writeOff.*` in ru/uz; API client types + `complete` payload.
+- [x] `nest build`, web `tsc --noEmit && vite build`, root `tsc --noEmit` (0), 49/49 tests.
+
+**Design: a written-off line travels the existing code path.** It is emitted as `countedQty = 0`,
+`difference = −expectedQty`, `writtenOff = true`, `counted` still false — so the same chunked
+`UPDATE products … FROM (VALUES …)` writes it, including `stock_counted_at` and `updated_at`. No
+parallel branch, and the invariant `difference = countedQty − expectedQty` holds on every row.
+`countedItems` keeps meaning *physically counted*; write-offs are counted separately.
+
+The watermark is correct here, not just inherited: the count asserts the goods are not on the shelf,
+so an offline sale predating it is already reflected and must not decrement again. A delta write
+(`GREATEST(0, stock − qty)`) was considered and rejected — it would have made write-offs behave
+differently from counted lines for no benefit.
+
+**Two guards.** The existing `countedItems === 0` check is now load-bearing in a new way: without it,
+"create a count, count nothing, tick write-off" would zero the document's whole scope in one click.
+And a FULL-scope write-off needs a second acknowledgement naming the exact product count, so three
+deliberate actions stand between a click and a store-wide zeroing.
+
+**Uncounted lines with `expectedQty = 0` are skipped.** Writing 0 over 0 changes nothing but bumps
+`updated_at`, which would make every terminal re-pull thousands of rows on the next products-sync.
+
+**Scope containment is structural, not enforced.** A document's items are snapshotted at creation
+from `{ storeId, active: true, categoryId? }`, and the write-off only ever touches the document's own
+lines — so a Fruits count cannot reach a beverage. Worth keeping that property in mind before anyone
+adds multi-category counts.
+
+**i18n footgun avoided:** the interpolation variable is `{{n}}`, not `{{count}}` — i18next reserves
+`count` for pluralization and would look for `label_one`/`label_few`/`label_many` in RU first.
+
+**NOT verified end-to-end:** nothing has run against a live database. `planCompletion` is unit-tested
+(including the fractional case, where float arithmetic would have produced 0.30000000000000004), but
+the raw SQL — in particular writing `counted_qty` and `written_off` through the extended `VALUES`
+tuple — has not executed. Run cases 1–8 in the plan file on staging, especially: partial count with
+write-off off must still leave uncounted stock alone; a Fruits write-off must leave a Beverages
+product untouched; and an `expectedQty = 0` line must come back `writtenOff = false`.
+
+**Known gap, deliberately not built:** writing off a marked (group-022) product plausibly carries an
+Asl-Belgisi registry obligation — the registry has a real `WRITTEN_OFF` status — and nothing reports
+it. Also out of scope: a losses report. `src/server/modules/analytics/` is sales-only and derives COGS
+from `sale_items`, so write-offs are invisible to every existing report; the document is the record.
+Non-fiscal, like the stocktake: REGOS has no write-off method, its whole surface is receipt-based.
+
 ## Review
 
 **Design corrections against the spec.** Three parts of `INVENTARIZATSIYA_IMPLEMENTATION.md` do not

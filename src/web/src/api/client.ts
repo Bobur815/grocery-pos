@@ -240,6 +240,11 @@ export interface InventoryCountSummary {
   countedItems: number;
   totalDifference: string;
   totalValueDiff: string;
+  /** True when completion zeroed the uncounted lines. */
+  wroteOffUncounted: boolean;
+  writtenOffItems: number;
+  /** Cost value of the write-off alone — a subset of totalValueDiff. */
+  writeOffValue: string;
 }
 
 export interface InventoryCountItem {
@@ -254,6 +259,8 @@ export interface InventoryCountItem {
   countedQty: string | null;
   difference: string | null;
   counted: boolean;
+  /** Zeroed by a write-off rather than physically counted (counted stays false). */
+  writtenOff: boolean;
 }
 
 export interface InventoryCountDetail extends InventoryCountSummary {
@@ -324,8 +331,14 @@ export const inventoryCounts = {
     });
     return data;
   },
-  complete: async (id: string): Promise<InventoryCountSummary> => {
-    const { data } = await axiosInstance.post(`/inventory-counts/${id}/complete`);
+  complete: async (
+    id: string,
+    payload: { writeOffUncounted?: boolean } = {},
+  ): Promise<InventoryCountSummary> => {
+    const { data } = await axiosInstance.post(
+      `/inventory-counts/${id}/complete`,
+      payload,
+    );
     return data;
   },
   cancel: async (id: string): Promise<InventoryCountSummary> => {

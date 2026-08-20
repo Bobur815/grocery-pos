@@ -131,14 +131,14 @@ export function UserSettings() {
   return (
     <Container>
       <TopBar>
-              <Button
-                size="medium"
-                variant="secondary"
-                onClick={() => navigate("/settings")}
-              >
-                <ArrowLeft size={24} />
-              </Button>
-      <Title>{t("settings.userSettings")}</Title>
+        <Button
+          variant="secondary"
+          size="small"
+          onClick={() => navigate("/settings")}
+        >
+          <ArrowLeft size={20} />
+        </Button>
+        <Title>{t("settings.userSettings")}</Title>
       </TopBar>
       <Section>
         <SectionTitle>{t("settings.appearance")}</SectionTitle>

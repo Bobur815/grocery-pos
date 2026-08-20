@@ -69,6 +69,19 @@ const Select = styled.select`
   font-size: 14px;
 `;
 
+const Row = styled.label`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  cursor: pointer;
+`;
+
+const Hint = styled.p`
+  margin: 0;
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
 const ButtonRow = styled.div`
   display: flex;
   gap: ${({ theme }) => theme.spacing.sm};
@@ -82,6 +95,7 @@ export function ScaleSettings() {
 
   const [labelPrinterName, setLabelPrinterName] = useState('');
   const [labelWidthMm, setLabelWidthMm] = useState('58');
+  const [bulkWeighEnabled, setBulkWeighEnabled] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
 
@@ -89,6 +103,7 @@ export function ScaleSettings() {
     window.electronAPI.settings.getAll().then((settings) => {
       if (settings.label_printer_name) setLabelPrinterName(settings.label_printer_name);
       if (settings.label_width_mm) setLabelWidthMm(settings.label_width_mm);
+      setBulkWeighEnabled(settings.bulk_weigh_enabled === 'true');
     }).catch(() => {});
   }, []);
 
@@ -97,6 +112,10 @@ export function ScaleSettings() {
     try {
       await window.electronAPI.settings.set('label_printer_name', labelPrinterName);
       await window.electronAPI.settings.set('label_width_mm', labelWidthMm);
+      await window.electronAPI.settings.set(
+        'bulk_weigh_enabled',
+        bulkWeighEnabled ? 'true' : 'false',
+      );
       toast.success(t('scaleSettings.saved'));
     } catch {
       toast.error(t('common.error'));
@@ -136,6 +155,16 @@ export function ScaleSettings() {
       </Header>
 
       <Card>
+        <Row>
+          <input
+            type="checkbox"
+            checked={bulkWeighEnabled}
+            onChange={(e) => setBulkWeighEnabled(e.target.checked)}
+          />
+          {t('scaleSettings.bulkWeighEnabled')}
+        </Row>
+        <Hint>{t('scaleSettings.bulkWeighEnabledHint')}</Hint>
+
         <Field>
           <Label>{t('scaleSettings.labelPrinterName')}</Label>
           <Input

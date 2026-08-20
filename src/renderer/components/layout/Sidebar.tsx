@@ -8,7 +8,6 @@ import {
   TrendingUp,
   LineChart,
   ClipboardList,
-  Users,
   Settings,
   User,
   Truck,
@@ -293,7 +292,6 @@ export function Sidebar() {
               <SectionTitle>{t("nav.management")}</SectionTitle>
               {renderNavItem("/products/stock", ClipboardList, t("nav.inventory"))}
               {renderNavItem("/suppliers", Truck, t("suppliers.title"))}
-              {renderNavItem("/users", Users, t("nav.users"))}
               <StyledNavLink to="/settings" onClick={collapseSidebar}>
                 <IconWrapper><Settings size={17} /></IconWrapper>
                 <NavText>{t("nav.settings")}</NavText>

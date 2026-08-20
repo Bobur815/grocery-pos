@@ -6,9 +6,9 @@ import {
   UserCog,
   Settings,
   Users,
-  Package,
   MonitorSmartphone,
 } from "lucide-react";
+import { useAuthStore } from "../../store/auth-store";
 
 const Container = styled.div`
   display: flex;
@@ -65,8 +65,21 @@ const CardDescription = styled.p`
 export function SettingsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const { user } = useAuthStore();
 
   const settingsSections = [
+    // /users is `excludeSuperAdmin`, so only offer it to a plain store admin —
+    // a SUPER_ADMIN clicking through would just be bounced to /admin/stores.
+    ...(user?.role === "ADMIN"
+      ? [
+          {
+            icon: <Users size={32} />,
+            title: t("nav.users"),
+            description: t("settings.usersDescription"),
+            path: "/users",
+          },
+        ]
+      : []),
     {
       icon: <UserCog size={32} />,
       title: t("settings.userSettings"),

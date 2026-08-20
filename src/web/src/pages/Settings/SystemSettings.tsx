@@ -300,11 +300,11 @@ export function SystemSettings() {
     <Container>
       <TopBar>
         <Button
-          size="medium"
           variant="secondary"
+          size="small"
           onClick={() => navigate("/settings")}
         >
-          <ArrowLeft size={24} />
+          <ArrowLeft size={20} />
         </Button>
         <Title>{t("settings.systemSettings")}</Title>
       </TopBar>

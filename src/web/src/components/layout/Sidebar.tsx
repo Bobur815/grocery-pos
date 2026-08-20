@@ -9,7 +9,6 @@ import {
   LineChart,
   ClipboardList,
   ClipboardCheck,
-  Users,
   Settings,
   User,
   LogOut,
@@ -348,7 +347,6 @@ export function Sidebar() {
           : []),
         { to: "/suppliers", icon: Truck },
         { to: "/reports/daily", icon: BarChart3 },
-        ...(isAdmin ? [{ to: "/users", icon: Users }] : []),
         { to: "/settings", icon: Settings },
       ];
 
@@ -434,7 +432,6 @@ export function Sidebar() {
                     {t("nav.management")}
                   </SectionTitle>
                   {renderNavItem("/suppliers", Truck, t("suppliers.title"))}
-                  {renderNavItem("/users", Users, t("nav.users"))}
                   {renderNavItem("/settings", Settings, t("nav.settings"))}
                 </NavSection>
               )}

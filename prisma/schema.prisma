@@ -288,6 +288,12 @@ model InventoryCount {
   totalDifference Decimal @default(0) @map("total_difference") @db.Decimal(14, 3)
   totalValueDiff  Decimal @default(0) @map("total_value_diff") @db.Decimal(14, 2)
 
+  // Write-off of uncounted lines, chosen at completion. Denormalized like the counters
+  // above so the list page can render a document without loading its items.
+  wroteOffUncounted Boolean @default(false) @map("wrote_off_uncounted")
+  writtenOffItems   Int     @default(0) @map("written_off_items")
+  writeOffValue     Decimal @default(0) @map("write_off_value") @db.Decimal(14, 2) // subset of totalValueDiff
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -319,6 +325,9 @@ model InventoryCountItem {
   countedQty Decimal? @map("counted_qty") @db.Decimal(10, 3) // null = not counted yet
   difference Decimal? @db.Decimal(10, 3) // counted − expected, set on completion
   counted    Boolean  @default(false)
+  // Set to 0 by a write-off rather than physically counted — `counted` stays false, so
+  // this is what separates "missing, written off" from "counted and found zero".
+  writtenOff Boolean  @default(false) @map("written_off")
 
   @@unique([countId, productId])
   @@index([countId])

@@ -14,6 +14,7 @@ import { InventoryCountService } from './inventory-count.service';
 import { CreateInventoryCountDto } from './dto/create-inventory-count.dto';
 import { UpdateCountItemDto } from './dto/update-count-item.dto';
 import { ScanCountDto } from './dto/scan-count.dto';
+import { CompleteCountDto } from './dto/complete-count.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { StoreGuard } from '../../common/guards/store.guard';
@@ -105,9 +106,10 @@ export class InventoryCountController {
   async complete(
     @CurrentStore() storeId: string,
     @Param('id') id: string,
+    @Body() dto: CompleteCountDto,
     @CurrentUser() user: User,
   ) {
-    return this.inventoryCountService.complete(storeId, id, user);
+    return this.inventoryCountService.complete(storeId, id, user, dto.writeOffUncounted ?? false);
   }
 
   @Post(':id/cancel')

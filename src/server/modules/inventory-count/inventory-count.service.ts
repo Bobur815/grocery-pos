@@ -18,6 +18,90 @@ const OPEN_STATUSES: InventoryCountStatus[] = ['DRAFT', 'IN_PROGRESS'];
 /** Rows per set-based UPDATE on completion — keeps the bound-parameter count sane. */
 const COMPLETE_CHUNK_SIZE = 500;
 
+/** One product's resulting state, ready to be written by the completion SQL. */
+export interface CompletionLine {
+  itemId: string;
+  productId: number;
+  /** Quantity the product ends at — the counted figure, or 0 for a write-off. */
+  countedQty: string;
+  difference: string;
+  writtenOff: boolean;
+}
+
+export interface CompletionPlan {
+  rows: CompletionLine[];
+  countedItems: number;
+  writtenOffItems: number;
+  totalDifference: Prisma.Decimal;
+  totalValueDiff: Prisma.Decimal;
+  /** Cost value of the write-off alone — a subset of totalValueDiff. */
+  writeOffValue: Prisma.Decimal;
+}
+
+/** The subset of a count line the completion arithmetic actually reads. */
+type PlannableItem = Pick<
+  Prisma.InventoryCountItemGetPayload<object>,
+  'id' | 'productId' | 'counted' | 'countedQty' | 'expectedQty' | 'cost'
+>;
+
+/**
+ * Decide what completion will write, with no database involved — which is what makes it
+ * testable. Counted lines and written-off lines produce the same shape, so downstream SQL
+ * treats them identically.
+ *
+ * Uncounted lines are included only when `writeOffUncounted` is set, and only when they
+ * actually hold stock: writing 0 over 0 changes nothing but would still bump `updated_at`
+ * on potentially thousands of rows and make every terminal re-pull them.
+ */
+export function planCompletion(
+  items: PlannableItem[],
+  writeOffUncounted: boolean,
+): CompletionPlan {
+  let totalDifference = new Prisma.Decimal(0);
+  let totalValueDiff = new Prisma.Decimal(0);
+  let writeOffValue = new Prisma.Decimal(0);
+
+  const buildRow = (
+    item: PlannableItem,
+    resultingQty: Prisma.Decimal,
+    writtenOff: boolean,
+  ): CompletionLine => {
+    const difference = resultingQty.minus(item.expectedQty);
+    totalDifference = totalDifference.plus(difference);
+    if (item.cost) {
+      const value = difference.times(item.cost);
+      totalValueDiff = totalValueDiff.plus(value);
+      if (writtenOff) writeOffValue = writeOffValue.plus(value);
+    }
+    return {
+      itemId: item.id,
+      productId: item.productId,
+      countedQty: resultingQty.toString(),
+      difference: difference.toString(),
+      writtenOff,
+    };
+  };
+
+  const counted = items.filter((i) => i.counted && i.countedQty !== null);
+  const toWriteOff = writeOffUncounted
+    ? items.filter((i) => !i.counted && new Prisma.Decimal(i.expectedQty).gt(0))
+    : [];
+
+  const rows = [
+    ...counted.map((item) => buildRow(item, new Prisma.Decimal(item.countedQty!), false)),
+    ...toWriteOff.map((item) => buildRow(item, new Prisma.Decimal(0), true)),
+  ];
+
+  return {
+    rows,
+    countedItems: counted.length,
+    writtenOffItems: toWriteOff.length,
+    totalDifference,
+    totalValueDiff,
+    writeOffValue,
+  };
+}
+
 @Injectable()
 export class InventoryCountService {
   constructor(private prisma: PrismaService) {}
@@ -137,6 +221,9 @@ export class InventoryCountService {
           countedItems: true,
           totalDifference: true,
           totalValueDiff: true,
+          wroteOffUncounted: true,
+          writtenOffItems: true,
+          writeOffValue: true,
         },
       }),
       this.prisma.inventoryCount.count({ where }),
@@ -200,9 +287,17 @@ export class InventoryCountService {
    * write also stamps `stock_counted_at`, which sale-sync uses to avoid decrementing a
    * second time for sales that already happened before the count (see SalesService).
    *
-   * Uncounted lines are left completely untouched — never silently zeroed.
+   * By default uncounted lines are left completely untouched — never silently zeroed.
+   * When `writeOffUncounted` is set they are instead treated as "not physically present":
+   * stock 0, `difference = -expectedQty`, flagged `writtenOff`. They travel the SAME code
+   * path as counted lines, so the arithmetic, the watermark and immutability are identical.
    */
-  async complete(storeId: string, id: string, user: AuthUser) {
+  async complete(
+    storeId: string,
+    id: string,
+    user: AuthUser,
+    writeOffUncounted = false,
+  ) {
     const count = await this.prisma.inventoryCount.findUnique({
       where: { id },
       include: { items: true },
@@ -212,22 +307,11 @@ export class InventoryCountService {
       throw new BadRequestException('Count cannot be completed');
     }
 
-    const counted = count.items.filter((i) => i.counted && i.countedQty !== null);
-    if (counted.length === 0) throw new BadRequestException('Nothing counted yet');
-
-    let totalDifference = new Prisma.Decimal(0);
-    let totalValueDiff = new Prisma.Decimal(0);
-    const rows = counted.map((item) => {
-      const difference = new Prisma.Decimal(item.countedQty!).minus(item.expectedQty);
-      totalDifference = totalDifference.plus(difference);
-      if (item.cost) totalValueDiff = totalValueDiff.plus(difference.times(item.cost));
-      return {
-        itemId: item.id,
-        productId: item.productId,
-        countedQty: new Prisma.Decimal(item.countedQty!).toString(),
-        difference: difference.toString(),
-      };
-    });
+    const plan = planCompletion(count.items, writeOffUncounted);
+    // Load-bearing guard: without it, "create a count, count nothing, tick write-off"
+    // would zero the document's entire scope in one click.
+    if (plan.countedItems === 0) throw new BadRequestException('Nothing counted yet');
+    const rows = plan.rows;
 
     // Set-based updates: a per-row await loop blows Prisma's 5s transaction timeout on a
     // full-store count. The explicit timeout covers very large stores anyway.
@@ -246,12 +330,18 @@ export class InventoryCountService {
             WHERE p.id = v.product_id AND p.store_id = ${storeId}
           `;
 
+          // counted_qty is written here too so a written-off line records the quantity it
+          // ended at (0), keeping the invariant difference = counted_qty - expected_qty.
+          // `counted` is deliberately NOT set for write-offs — written_off is what marks them.
           await tx.$executeRaw`
             UPDATE inventory_count_items i
-            SET difference = v.diff
+            SET difference = v.diff, counted_qty = v.qty, written_off = v.written_off
             FROM (VALUES ${Prisma.join(
-              chunk.map((r) => Prisma.sql`(${r.itemId}::text, ${r.difference}::numeric)`),
-            )}) AS v(id, diff)
+              chunk.map(
+                (r) =>
+                  Prisma.sql`(${r.itemId}::text, ${r.difference}::numeric, ${r.countedQty}::numeric, ${r.writtenOff}::boolean)`,
+              ),
+            )}) AS v(id, diff, qty, written_off)
             WHERE i.id = v.id
           `;
         }
@@ -262,9 +352,12 @@ export class InventoryCountService {
             status: 'COMPLETED',
             completedAt: new Date(),
             completedById: user.id,
-            countedItems: counted.length,
-            totalDifference,
-            totalValueDiff,
+            countedItems: plan.countedItems, // physically counted only — write-offs are separate
+            totalDifference: plan.totalDifference,
+            totalValueDiff: plan.totalValueDiff,
+            wroteOffUncounted: plan.writtenOffItems > 0,
+            writtenOffItems: plan.writtenOffItems,
+            writeOffValue: plan.writeOffValue,
           },
         });
       },

@@ -327,9 +327,9 @@ export function BulkWeighModal({
         <ProductInfo>
           <ProductName>{productName}</ProductName>
           <ProductMeta>
-            <span>{pricePerKg.toLocaleString("ru-RU")} сум/кг</span>
-            {minSaleQty > 0 && <span>min: {minSaleQty} кг</span>}
-            {maxSaleQty > 0 && <span>max: {maxSaleQty} кг</span>}
+            <span>{pricePerKg.toLocaleString("ru-RU")} {t("bulkWeigh.sum")}/{t("bulkWeigh.kg")}</span>
+            {minSaleQty > 0 && <span>min: {minSaleQty} {t("bulkWeigh.kg")}</span>}
+            {maxSaleQty > 0 && <span>max: {maxSaleQty} {t("bulkWeigh.kg")}</span>}
           </ProductMeta>
         </ProductInfo>
 
@@ -337,12 +337,12 @@ export function BulkWeighModal({
           <WeightHint>{t("bulkWeigh.placeOnScale")}</WeightHint>
           <WeightValue $status={status}>
             {weightKg > 0 ? weightKg.toFixed(3) : "0.000"}
-            <WeightUnit>кг</WeightUnit>
+            <WeightUnit>{t("bulkWeigh.kg")}</WeightUnit>
           </WeightValue>
           {weightKg > 0 && (
             <TotalPrice>
               {totalPrice.toLocaleString("ru-RU", { maximumFractionDigits: 0 })}{" "}
-              сум
+              {t("bulkWeigh.sum")}
             </TotalPrice>
           )}
           {validationError && (

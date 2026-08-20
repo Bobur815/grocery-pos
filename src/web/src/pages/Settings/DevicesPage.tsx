@@ -410,8 +410,12 @@ export function DevicesPage() {
   return (
     <Container>
       <TopBar>
-        <Button size="medium" variant="secondary" onClick={() => navigate("/settings")}>
-          <ArrowLeft size={24} />
+        <Button
+          variant="secondary"
+          size="small"
+          onClick={() => navigate("/settings")}
+        >
+          <ArrowLeft size={20} />
         </Button>
         <Title>{t("devices.title")}</Title>
         {hasOthers && (

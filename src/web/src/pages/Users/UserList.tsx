@@ -9,7 +9,7 @@ import { formatDate } from "../../utils/formatters";
 import { users as usersApi } from "../../api/client";
 import { useAuthStore } from "../../store/auth-store";
 import type { UserListItem } from "@shared/types";
-import { Edit, UserCheck, UserX, Plus } from "lucide-react";
+import { Edit, UserCheck, UserX, Plus, ArrowLeft } from "lucide-react";
 import {
   MobileCard,
   MobileCardList,
@@ -87,7 +87,9 @@ const FAB = styled.button`
   cursor: pointer;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
   animation: ${pulse} 2s ease-out infinite;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
 
   &:hover {
     transform: scale(1.1);
@@ -182,7 +184,9 @@ export function UserList() {
             <Button
               size="small"
               variant={user.active ? "danger" : "primary"}
-              tooltip={user.active ? t("users.deactivate") : t("users.activate")}
+              tooltip={
+                user.active ? t("users.deactivate") : t("users.activate")
+              }
               onClick={() => setUserToToggle(user)}
             >
               {user.active ? <UserX size={18} /> : <UserCheck size={18} />}
@@ -196,6 +200,13 @@ export function UserList() {
   return (
     <Container>
       <Header>
+        <Button
+          variant="secondary"
+          size="small"
+          onClick={() => navigate("/settings")}
+        >
+          <ArrowLeft size={20} />
+        </Button>
         <Title>{t("users.title")}</Title>
       </Header>
 
@@ -248,7 +259,11 @@ export function UserList() {
                     }
                     onClick={() => setUserToToggle(user)}
                   >
-                    {user.active ? <UserX size={18} /> : <UserCheck size={18} />}
+                    {user.active ? (
+                      <UserX size={18} />
+                    ) : (
+                      <UserCheck size={18} />
+                    )}
                   </Button>
                 )}
               </>

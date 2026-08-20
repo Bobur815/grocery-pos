@@ -71,6 +71,12 @@ export function SettingsPage() {
 
   const settingsSections = [
     {
+      icon: <Users size={32} />,
+      title: t("nav.users"),
+      description: t("settings.usersDescription"),
+      path: "/users",
+    },
+    {
       icon: <UserCog size={32} />,
       title: t("settings.userSettings"),
       description: t("settings.userSettingsDescription"),

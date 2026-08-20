@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { Cart } from "./Cart";
 import { Catalog } from "./Catalog";
+import { BulkWeighModal } from "../../components/BulkWeighModal";
 import { Checkout } from "./Checkout";
 import { PosTabBar } from "./PosTabBar";
 import { useCartStore } from "../../store/cart-store";
@@ -405,6 +406,29 @@ export function POSScreen() {
   const toast = useToast();
   const payingRef = useRef(false);
 
+  // Bulk-weighed products take their quantity from the connected Rongta scale via
+  // BulkWeighModal instead of the Quantity field. Opt-in per terminal in Scale settings
+  // (a store without a scale must not get a blocking modal at checkout). Held in a ref so
+  // the lookup handlers can read it without joining their dependency arrays.
+  const bulkWeighEnabledRef = useRef(false);
+  useEffect(() => {
+    window.electronAPI.settings
+      .getAll()
+      .then((cfg) => {
+        bulkWeighEnabledRef.current = cfg.bulk_weigh_enabled === "true";
+      })
+      .catch(() => {});
+  }, []);
+
+  const [bulkWeighProduct, setBulkWeighProduct] = useState<Product | null>(null);
+
+  /** True when this product should be weighed on the scale rather than typed. */
+  const needsScaleWeighing = useCallback(
+    (product: Product) =>
+      bulkWeighEnabledRef.current && product.productType === "BULK_WEIGHTED",
+    [],
+  );
+
   const addProductToCart = useCallback(
     (product: Product, qty: number) => {
       if (!product.isActive) {
@@ -511,6 +535,27 @@ export function POSScreen() {
     try {
       const product = (await getById(id.trim())) as Product | null;
       if (product) {
+        // Marked goods are QR-only — decided from the product's authoritative isMarked flag
+        // (tasnif `label`), falling back to the MXIK group heuristic while isMarked is null.
+        if (productRequiresMarking(product)) {
+          setId("");
+          setError(t("pos.qrOnlyProduct"));
+          return;
+        }
+
+        // Weighed on the scale, not typed. Checked BEFORE the stock guard: the Quantity
+        // field is irrelevant here, and its default of 1 would spuriously fail the guard
+        // for a product with under 1 unit left.
+        if (needsScaleWeighing(product)) {
+          setId("");
+          writeBarcode("", true);
+          setQuantity("1");
+          setInputMode("barcode");
+          setError("");
+          setBulkWeighProduct(product);
+          return;
+        }
+
         const qty = parseFloat(quantity) || 1;
         if (qty > product.stock) {
           setError(
@@ -521,14 +566,6 @@ export function POSScreen() {
             }),
           );
           setId("");
-          return;
-        }
-
-        // Marked goods are QR-only — decided from the product's authoritative isMarked flag
-        // (tasnif `label`), falling back to the MXIK group heuristic while isMarked is null.
-        if (productRequiresMarking(product)) {
-          setId("");
-          setError(t("pos.qrOnlyProduct"));
           return;
         }
 
@@ -551,7 +588,16 @@ export function POSScreen() {
       setQuantity("1");
       setError(t("products.noResults"));
     }
-  }, [id, quantity, getById, addProductToCart, t, i18n.language, writeBarcode]);
+  }, [
+    id,
+    quantity,
+    getById,
+    addProductToCart,
+    needsScaleWeighing,
+    t,
+    i18n.language,
+    writeBarcode,
+  ]);
 
   const handleBarcodeSubmit = useCallback(async () => {
     if (inputMode === "id") {
@@ -731,7 +777,11 @@ export function POSScreen() {
       if (product) {
         {
           const qty = parseFloat(quantity) || 1;
-          if (qty > product.stock) {
+          // Scale-weighed products are exempt: their quantity comes from the scale, so the
+          // Quantity field's default of 1 would spuriously fail this for a product with
+          // under 1 unit left. The marking checks below still apply, and the weight is
+          // validated in BulkWeighModal.
+          if (qty > product.stock && !needsScaleWeighing(product)) {
             setError(
               t("errors.insufficientStock", {
                 name: i18n.language === "uz" ? product.nameUz : product.nameRu,
@@ -828,6 +878,12 @@ export function POSScreen() {
             return;
           }
 
+          // Weighed on the scale, not typed — the modal supplies the quantity.
+          if (needsScaleWeighing(product)) {
+            resetInputs();
+            setBulkWeighProduct(product);
+            return;
+          }
           addProductToCart(product, qty);
           resetInputs();
         }
@@ -849,6 +905,7 @@ export function POSScreen() {
     quantity,
     searchByBarcode,
     addProductToCart,
+    needsScaleWeighing,
     addItem,
     removeByMarkingCode,
     items,
@@ -1046,6 +1103,24 @@ export function POSScreen() {
     writeBarcode,
   ]);
 
+  const handleBulkWeighAddNow = useCallback(
+    (weight: number) => {
+      if (!bulkWeighProduct) return;
+      addProductToCart(bulkWeighProduct, weight);
+      setBulkWeighProduct(null);
+    },
+    [bulkWeighProduct, addProductToCart],
+  );
+
+  const handleBulkWeighPrintAndScan = useCallback(
+    (_weighedItemId: string, _barcode: string) => {
+      // The label is printed; the cart line is created when it is scanned back in.
+      setBulkWeighProduct(null);
+      toast.info(t("bulkWeigh.scanLabel"));
+    },
+    [toast, t],
+  );
+
   // Group 022 resale check (SoldMarkingCode lookup) — toggleable in Fiscal settings.
   // (The unfiscalized-receipts badge lives in the Cart header.)
   const markingCheckRef = useRef(true);
@@ -1094,6 +1169,20 @@ export function POSScreen() {
   // POSScreen re-renders (e.g. during a scan burst).
   const handleProductSelect = useCallback(
     (product: Product) => {
+      // Marked goods can't be added from the catalog — they require a QR scan.
+      if (productRequiresMarking(product)) {
+        setError(t("pos.qrOnlyProduct"));
+        return;
+      }
+      // Weighed on the scale, not typed. Checked BEFORE the stock guard: the Quantity
+      // field is irrelevant here, and its default of 1 would spuriously fail the guard
+      // for a product with under 1 unit left.
+      if (needsScaleWeighing(product)) {
+        setQuantity("1");
+        setError("");
+        setBulkWeighProduct(product);
+        return;
+      }
       const qty = parseFloat(quantity) || 1;
       if (qty > product.stock) {
         setError(
@@ -1105,16 +1194,11 @@ export function POSScreen() {
         );
         return;
       }
-      // Marked goods can't be added from the catalog — they require a QR scan.
-      if (productRequiresMarking(product)) {
-        setError(t("pos.qrOnlyProduct"));
-        return;
-      }
       addProductToCart(product, qty);
       setQuantity("1");
       setError("");
     },
-    [quantity, t, i18n.language, addProductToCart],
+    [quantity, t, i18n.language, addProductToCart, needsScaleWeighing],
   );
 
   const handleCheckoutComplete = () => {
@@ -1300,6 +1384,15 @@ export function POSScreen() {
 
         {showCatalog && (
           <Catalog onSelect={handleProductSelect} onClose={closeCatalog} />
+        )}
+
+        {bulkWeighProduct && (
+          <BulkWeighModal
+            product={bulkWeighProduct}
+            onAddToCart={handleBulkWeighAddNow}
+            onPrintAndScan={handleBulkWeighPrintAndScan}
+            onCancel={() => setBulkWeighProduct(null)}
+          />
         )}
       </Container>
     </PageWrapper>
