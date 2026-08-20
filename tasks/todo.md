@@ -177,3 +177,154 @@ to `main`, on staging (`dev` auto-deploys and runs `migrate deploy` against `pos
 **Not bumped:** `package.json` version. Changes are server + `src/web` + i18n keys the POS never
 reads; the only shared-component edit (`Table.onRowClick`) is optional and behaviour-neutral for the
 Electron app, so there is nothing to `deploy:pos`.
+
+---
+
+## Write-off product list (2026-08-20)
+
+The write-off decision was numbers-only: the confirm dialog said "списать 36 товаров · −214 шт
+(−1 240 000)" and the closed document showed the same total in the summary bar. *Which* products
+got zeroed was never shown — only a per-line "Списан" pill scattered through a list that can run to
+thousands of rows. For the one irreversible write in the whole feature, that is not enough to
+approve or to audit afterwards.
+
+- [x] `WriteOffList.tsx` — shared read-only row list (name + barcode / `−qty unit` + `−value`),
+      sorted by loss descending (qty as the tiebreak for cost-less lines), capped at 50 rows with a
+      "… ещё N товаров" tail so a full-store count doesn't render thousands of nodes. Rows are
+      `flex-wrap`, so the amounts drop under the name on a phone instead of squeezing it — one
+      component covers desktop and mobile, no media query.
+- [x] `CompleteCountModal` — collapsible "Показать список (N)" preview above the confirmation, in a
+      260 px scroll panel so the modal stays inside its 90 vh and the buttons stay reachable. The
+      disclosure sits **outside** the `<OptionBox>` label; inside it, every click would have toggled
+      the write-off checkbox. Modal widened to 560 px (desktop only — the container is `width: 90%`).
+      The list is available whether or not the box is ticked, so it can be inspected before deciding.
+- [x] `InventoryCountDetail` — the "Списано" summary tile became a real `<button>` that filters the
+      document to the written-off lines, plus a matching "Только списанные (N)" toggle beside the
+      existing filters and a banner with the totals over the filtered view. Both filters clear each
+      other (written-off lines are uncounted by definition, so the intersection is a confusing
+      partial view). The desktop `<Table>` and the `<MobileCardList>` both read `visibleItems`, so
+      one filter serves both layouts.
+- [x] i18n `showList` / `hideList` / `more` / `onlyWrittenOff` / `listTitle` / `showAll` in ru + uz.
+
+**No server change.** `writtenOff`, `expectedQty`, `cost`, `unit` are already on every item and
+`writtenOffItems` / `writeOffValue` on the document — this is presentation only. CSV / printable
+"акт списания" was considered and explicitly declined.
+
+**Verified:** `cd src/web && npm run build` (tsc --noEmit + vite build) clean. **Not verified:** no
+browser — the Chrome extension was not connected, so nothing was eyeballed. Still to check on
+staging: the disclosure does not untick the write-off checkbox, the 260 px panel scrolls without
+burying the modal buttons, and at ~390 px the rows wrap instead of overflowing.
+
+**Not bumped:** `package.json`. `src/web` + i18n keys only; the POS renderer has no stocktake UI.
+
+---
+
+## UzQR payment method (2026-08-20)
+
+Third sale tender alongside cash and card, branded with the customer-supplied UzQR
+wordmark. **Tender only** — this is NOT the REGOS `Payment.*` QR flow from
+`UZQR_INTEGRATION_TODO.md`: no `Payment.Create`, no `qr_text` on screen, no polling. The
+cashier takes payment through the store's existing UzQR QR, then records the tender. That
+plan doc stays open; its blockers (no confirmed `payment_system_id=5` test key, unverified
+status enum) are untouched by this.
+
+- [x] Logo asset `src/renderer/assets/uzqr.png` + a `*.png` declaration scoped to that
+      folder (the renderer tsconfig has no `vite/client`; the web project already gets the
+      same declarations from its own `types`, so the d.ts must not be visible to both).
+- [x] `UzQrLogo` (`pages/POS/`, not `components/common` — `common` is the surface the web
+      dashboard also compiles, and this asset is POS-only). Navy field
+      `UZQR_BRAND_COLOR` + `background-size: contain`, sized off the artwork's own
+      451:171 ratio, so one component serves the wide checkout tile and the small
+      quick-pay mark. `cover` would crop the wordmark on the narrow button.
+- [x] Checkout modal: third tile, grid → `repeat(3, 1fr)`. No text — the artwork is the
+      label (`aria-label` carries the accessible name). Selected state is a ring, not the
+      pale primary wash the other two use, which is invisible on navy.
+- [x] POS quick-pay: third button on **F9** (cash F11, card F12 unchanged), row → 3 cols.
+- [x] Shared vocabulary in `constants/payment-methods.ts`: `SALE_TENDERS`, `SaleTender`,
+      `SALE_TENDER_I18N_KEYS`, `UZQR_BRAND_COLOR`, and `isCashTender()`. Documented as
+      distinct from the pre-existing upper-case `PAYMENT_METHODS` block — the POS has
+      always written lower-case values and the two vocabularies were never the same.
+- [x] i18n `pos.uzqr` + `reports.uzqrPayments` (ru + uz).
+
+**The bug this avoids.** Every summary counted `=== 'cash'` and `=== 'card'` by equality,
+so a third value would have been counted in *neither* — UzQR sales would vanish from the
+stat tiles while still inflating `totalSales`. Fixed with a real third bucket (not folded
+into card) in: `sales-handlers.ts` (JS filter + the raw-SQL `CASE WHEN`), the server's
+`sales.service.ts`, and all four report pages (renderer + web × daily/monthly). Tiles
+render only when `uzqrSales > 0`, so nothing changes for stores that don't take UzQR.
+
+**Drawer split.** `smena-handlers.ts` bucketed `cash` vs `else`, which was already correct
+for UzQR — rewritten as `isCashTender()` and commented, so the "is it cash" question stays
+the one being asked. Only cash is money in the till; card and UzQR both settle to the bank.
+
+**Fiscalization needed no change.** `buildPayments()` already falls through to
+`{type: 2, card_type: 2}` for anything non-cash, which is exactly how REGOS books UzQR.
+Made explicit with a comment rather than left to the fallback. No `payment_id` is sent
+because the POS does not drive `Payment.Create`.
+
+**No schema change.** `sales.payment_method` is a free-form `String` in both the SQLite and
+PostgreSQL schemas — no enum, no migration, and existing rows are untouched.
+
+**Verified:** `npx electron-vite build` (asset emitted as
+`dist-renderer/assets/uzqr-B_ULtuoS.png`, referenced via
+`new URL(..., import.meta.url)` — the form that survives `file://` in the packaged app,
+and `dist-renderer/**/*` is already in electron-builder's `files`), `cd src/web && npm run
+build`, `npm run build:server`, and `tsc --noEmit` on both projects.
+**Not verified:** no browser or running app — the tiles have not been looked at, and no
+sale has been rung through end to end.
+
+**Not bumped:** `package.json`. Touches renderer + main, so it DOES need a bump — do it at
+deploy time together with whatever else ships, then `npm run deploy:pos`.
+
+---
+
+## Fix: write-off must be per-product, not all-or-nothing (2026-08-20)
+
+`complete(writeOffUncounted: boolean)` zeroed **every** eligible uncounted line. But
+"uncounted" is not "gone": stock can be in transit, delivered-but-not-unpacked, or held
+back for a customer, and it arrives days later. Zeroing those destroyed real stock that the
+next delivery was about to confirm — and because completion is immutable, the only recovery
+was a manual re-count. The operator now picks the lines that are genuinely gone.
+
+- [x] `planCompletion(items, writeOff)` — second arg widened from `boolean` to
+      `WriteOffSelection = boolean | ReadonlySet<string>`. `true`/`false` behave exactly as
+      before, so all pre-existing tests and callers are untouched.
+- [x] Selection is an **intersection with the eligibility rule, never a widening**: an id
+      that isn't an uncounted, in-stock line of *this* document is ignored. A stale or
+      hand-crafted id list therefore cannot reach another document's line, resurrect a
+      zero-stock line, or overwrite a line the cashier actually counted.
+- [x] `CompleteCountDto.writeOffItemIds?: string[]` (`@ArrayMaxSize(10000)` — a full-store
+      count is thousands of lines). The controller treats a present list as authoritative
+      **even when empty**; falling back to the boolean there would turn "I deselected
+      everything" into "write off the whole document".
+- [x] 3 new tests (12 total in the suite, 52 repo-wide): subset writes off only the picked
+      lines and emits **no row at all** for the kept ones; empty set = no write-off;
+      ineligible/foreign ids are ignored.
+- [x] `WriteOffList` gained optional `selected`/`onToggle`/`onShowMore`. Deselected rows go
+      dimmed + struck-through, so a line that will NOT be zeroed cannot read as a loss.
+- [x] `CompleteCountModal` — search box, select-all/clear-all, "show more", a running
+      "{{n}} останутся без изменений" line, and the impact totals recomputed from the
+      selection rather than from all eligible lines.
+- [x] i18n `choose`/`selectAll`/`clearAll`/`showMore`/`keeping` in ru + uz; key parity
+      checked programmatically.
+
+**Selection state is `Set<string> | null`, not a plain Set.** `null` means "not narrowed
+yet" and behaves as every eligible line, so ticking the box and confirming still writes off
+everything exactly as it did before — the picker is opt-in and costs the existing one-click
+flow nothing. It materialises into a real set on the first toggle.
+
+**The row cap was a correctness bug once rows became selectable.** The list rendered only
+the first 50 of potentially thousands; a line the operator cannot see is one they cannot
+deselect, and it would have been zeroed silently. Hence the search box and "show more" —
+every eligible line is now reachable. This is why the cap could stay a plain slice before
+and cannot now.
+
+**Confirm now sends ids, never the boolean.** `onConfirm(writeOffItemIds: string[])`, and
+`handleComplete` posts `{ writeOffItemIds }` verbatim, so the server never re-derives the
+set the operator was looking at. The boolean stays on the DTO for compatibility.
+
+**Verified:** 52/52 tests, `nest build`, `src/web` build + `tsc --noEmit`.
+**Not verified:** no browser and no live database — the picker has not been clicked, and no
+completion has run against Postgres. On staging, the case to prove is the reported one:
+two uncounted products, deselect one, complete → the deselected product's stock must be
+**unchanged**, and it must come back `writtenOff = false` with no row written for it.

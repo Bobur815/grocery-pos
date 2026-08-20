@@ -66,6 +66,7 @@ const labels: Record<string, Record<string, string>> = {
     payment: "Оплата",
     cash: "Наличные",
     card: "Карта",
+    uzqr: "UzQR",
     mixed: "Смешанная",
     currency: "сум",
     thankYou: "Спасибо за покупку!",
@@ -87,6 +88,7 @@ const labels: Record<string, Record<string, string>> = {
     payment: "To'lov",
     cash: "Naqd",
     card: "Karta",
+    uzqr: "UzQR",
     mixed: "Aralash",
     currency: "so'm",
     thankYou: "Xaridingiz uchun rahmat!",
@@ -248,7 +250,9 @@ export function buildReceiptHTML(
       ? l.cash
       : sale.paymentMethod === "card"
         ? l.card
-        : l.mixed;
+        : sale.paymentMethod === "uzqr"
+          ? l.uzqr
+          : l.mixed;
 
   const taxAsDiscount = settings.tax_rate_as_discount === "true" && taxRate > 0;
 

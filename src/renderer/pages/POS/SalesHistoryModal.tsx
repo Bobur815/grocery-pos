@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import styled from 'styled-components';
+import styled, { type DefaultTheme } from 'styled-components';
 import { Modal } from '../../components/common/Modal';
 import { Button } from '../../components/common/Button';
 import { useSales } from '../../hooks/useSales';
 import type { Sale } from '@shared/types/sale.types';
 import { formatCurrency as formatCurrencyBase } from '@shared/utils';
+import { UZQR_BRAND_COLOR, SALE_TENDER_I18N_KEYS, type SaleTender } from '@shared/constants';
 import { ChevronDown, ChevronRight, Pencil, Printer, Trash2, ShieldCheck, ShieldAlert, RotateCcw, Copy } from 'lucide-react';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
@@ -110,16 +111,20 @@ const Time = styled.span`
   white-space: nowrap;
 `;
 
+/** Green = money in the till, house blue = bank card, navy = the UzQR brand. */
+function tenderColor(theme: DefaultTheme, method?: string) {
+  if (method === 'uzqr') return UZQR_BRAND_COLOR;
+  return method === 'card' ? theme.colors.primary : theme.colors.success;
+}
+
 const Badge = styled.span<{ $method?: string }>`
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 4px;
   font-weight: 500;
   white-space: nowrap;
-  background-color: ${({ theme, $method }) =>
-    $method === 'card' ? theme.colors.primary + '15' : theme.colors.success + '15'};
-  color: ${({ theme, $method }) =>
-    $method === 'card' ? theme.colors.primary : theme.colors.success};
+  background-color: ${({ theme, $method }) => tenderColor(theme, $method) + '15'};
+  color: ${({ theme, $method }) => tenderColor(theme, $method)};
 `;
 
 const FiscalBadge = styled.span<{ $ok?: boolean }>`
@@ -419,7 +424,7 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
                       <ReceiptNum>#{sale.receiptNumber}</ReceiptNum>
                       <Time>{formatTime(sale.createdAt)}</Time>
                       <Badge $method={sale.paymentMethod}>
-                        {sale.paymentMethod === 'card' ? t('pos.card') : t('pos.cash')}
+                        {t(SALE_TENDER_I18N_KEYS[sale.paymentMethod as SaleTender] ?? 'pos.cash')}
                       </Badge>
                       {sale.fiscalStatus === 'FISCALIZED' && (
                         sale.refunded ? (

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import styled from "styled-components";
+import styled, { type DefaultTheme } from "styled-components";
 import { Delete, Globe, X } from "lucide-react";
 
 /* ── layout definitions ─────────────────────────────────── */
@@ -123,7 +123,21 @@ function isActive(def: KeyDef) {
   return typeof def !== "string" && def.active;
 }
 
-const SPECIAL_KEYS = new Set(["SHIFT", "BACKSPACE", "SPACE", "ENTER", "GLOBE"]);
+/**
+ * Semantic accent per command key, so a cashier can pick out "delete" from "confirm"
+ * without reading the glyph. Theme tokens rather than literals — these have to survive
+ * the dark theme, where a hardcoded red goes muddy against #1e1e1e.
+ */
+const KEY_ACCENTS: Record<string, keyof DefaultTheme["colors"]> = {
+  BACKSPACE: "error", // destructive
+  ENTER: "success", // confirms / submits
+  SHIFT: "primary", // mode toggle, matches its engaged highlight
+  GLOBE: "info", // language switch
+  SPACE: "textSecondary", // neutral: the label is blank, so the tint is the only cue
+};
+
+/** The command keys are exactly the accented ones — one list, so they can't drift. */
+const SPECIAL_KEYS = new Set(Object.keys(KEY_ACCENTS));
 
 function isLetterKey(key: string) {
   if (SPECIAL_KEYS.has(key)) return false;
@@ -157,9 +171,16 @@ const Overlay = styled.div<{ $fixed?: boolean; $zIndex?: number }>`
   }
 `;
 
+/**
+ * The panel needs its own ground. Without one the blur is the only thing separating the
+ * keys from the page behind them, and in the light theme a white key on a blurred white
+ * page is invisible. Deliberately the *darker* of the two surface tokens so the keys —
+ * which sit on `surface` — read as raised.
+ */
 const Wrapper = styled.div`
   width: 100%;
   border-top: 1px solid ${({ theme }) => theme.colors.border};
+  background: ${({ theme }) => theme.colors.background}f2;
   backdrop-filter: blur(10px);
   padding: 8px 12px 14px;
   user-select: none;
@@ -199,29 +220,60 @@ const Row = styled.div`
   }
 `;
 
+/** Accent for one key, or the primary fallback for plain letter/digit keys. */
+function accentOf(theme: DefaultTheme, accent?: keyof DefaultTheme["colors"]) {
+  return accent ? theme.colors[accent] : theme.colors.primary;
+}
+
+/**
+ * Opaque blend of `color` into the key face. Alpha suffixes (`+ "14"`) were letting the
+ * blurred page show through, which is what made these keys muddy in the light theme.
+ */
+function face(theme: DefaultTheme, color: string, pct: number) {
+  return `color-mix(in srgb, ${color} ${pct}%, ${theme.colors.surface})`;
+}
+
+/**
+ * Pulls an accent toward the theme's text colour: darker on the light theme, lighter on
+ * the dark one. Both themes' accents are mid-tone greens/blues that are readable on their
+ * own background but not on the other's, and this rebalances without a second palette.
+ */
+function labelColor(theme: DefaultTheme, accent: keyof DefaultTheme["colors"]) {
+  return `color-mix(in srgb, ${theme.colors[accent]} 70%, ${theme.colors.text})`;
+}
+
 const Key = styled.button<{
   $w: number;
   $active?: boolean;
-  $special?: boolean;
+  $accent?: keyof DefaultTheme["colors"];
   $disabled?: boolean;
 }>`
   flex: ${({ $w }) => $w};
   height: 56px;
   padding: 0;
   border-radius: 8px;
-  border: 1px solid ${({ theme }) => theme.colors.border};
-  background: ${({ theme, $special, $active, $disabled }) =>
+  /* A disabled key must not advertise itself, so the accent drops out entirely first. */
+  border: 1px solid
+    ${({ theme, $accent, $disabled }) =>
+      $disabled || !$accent
+        ? theme.colors.border
+        : face(theme, theme.colors[$accent], 45)};
+  background: ${({ theme, $active, $accent, $disabled }) =>
     $disabled
-      ? theme.colors.border + "30"
+      ? face(theme, theme.colors.border, 55)
       : $active
-        ? theme.colors.primary + "30"
-        : $special
-          ? theme.colors.background
+        ? face(theme, accentOf(theme, $accent), 26)
+        : $accent
+          ? face(theme, theme.colors[$accent], 12)
           : theme.colors.surface};
-  color: ${({ theme, $disabled }) =>
-    $disabled ? theme.colors.textSecondary + "60" : theme.colors.text};
+  color: ${({ theme, $accent, $disabled }) =>
+    $disabled
+      ? theme.colors.textSecondary + "60"
+      : $accent
+        ? labelColor(theme, $accent)
+        : theme.colors.text};
   font-size: 20px;
-  font-weight: 500;
+  font-weight: ${({ $accent }) => ($accent ? 600 : 500)};
   cursor: ${({ $disabled }) => ($disabled ? "default" : "pointer")};
   display: flex;
   align-items: center;
@@ -229,16 +281,20 @@ const Key = styled.button<{
   transition: background 0.1s;
 
   &:hover {
-    background: ${({ theme, $disabled }) =>
-      $disabled ? theme.colors.border + "30" : theme.colors.primary + "15"};
-    border-color: ${({ theme, $disabled }) =>
-      $disabled ? theme.colors.border : theme.colors.primary};
+    background: ${({ theme, $accent, $disabled }) =>
+      $disabled
+        ? face(theme, theme.colors.border, 55)
+        : face(theme, accentOf(theme, $accent), 18)};
+    border-color: ${({ theme, $accent, $disabled }) =>
+      $disabled ? theme.colors.border : accentOf(theme, $accent)};
   }
 
   &:active {
     transform: ${({ $disabled }) => ($disabled ? "none" : "scale(0.96)")};
-    background: ${({ theme, $disabled }) =>
-      $disabled ? theme.colors.border + "30" : theme.colors.primary + "30"};
+    background: ${({ theme, $accent, $disabled }) =>
+      $disabled
+        ? face(theme, theme.colors.border, 55)
+        : face(theme, accentOf(theme, $accent), 26)};
   }
 `;
 
@@ -302,7 +358,6 @@ export function VirtualKeyboard({
               const label = getLabel(def, shifted);
               const width = getWidth(def);
               const active = isActive(def);
-              const special = SPECIAL_KEYS.has(key);
               const disabled =
                 numbersOnly &&
                 (isLetterKey(key) ||
@@ -316,14 +371,15 @@ export function VirtualKeyboard({
                   key={key}
                   $w={width}
                   $active={active || (key === "GLOBE" && cyrillic)}
-                  $special={special}
+                  $accent={KEY_ACCENTS[key]}
                   $disabled={disabled}
                   type="button"
                   tabIndex={-1}
                   onClick={() => handleClick(key, disabled)}
                 >
+                  {/* Icons inherit the key's accent through currentColor. */}
                   {key === "BACKSPACE" ? (
-                    <Delete size={22} />
+                    <Delete size={24} />
                   ) : key === "GLOBE" ? (
                     <Globe size={18} />
                   ) : (

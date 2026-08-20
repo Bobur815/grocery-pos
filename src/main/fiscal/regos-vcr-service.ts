@@ -30,6 +30,7 @@ import type {
 } from '../../shared/types/fiscal.types';
 import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
 import { productRequiresMarking } from '../../shared/utils/marking';
+import { isCashTender } from '../../shared/constants';
 import { isCodeOutOfCirculation } from '../marking/circulation-check';
 
 const MAX_ATTEMPTS = 5; // cap retries for hard (business) failures
@@ -428,8 +429,11 @@ class RegosVcrService {
 
   private buildPayments(sale: { paymentMethod: string; finalAmount: unknown }): VcrPayment[] {
     const value = Math.round(Number(sale.finalAmount) * 100);
-    // paymentMethod may be 'cash'/'card' (POS quick-pay) or upper-case elsewhere.
-    if ((sale.paymentMethod ?? '').toUpperCase() === 'CASH') return [{ type: 1, value }];
+    // paymentMethod may be 'cash'/'card'/'uzqr' (POS quick-pay) or upper-case elsewhere.
+    if (isCashTender(sale.paymentMethod)) return [{ type: 1, value }];
+    // UzQR books exactly like a bank card — REGOS treats it as a cashless card payment
+    // (type 2 / card_type 2). It carries no `payment_id` because the POS does not drive
+    // the VCR Payment.Create flow; see tasks/UZQR_INTEGRATION_TODO.md if that changes.
     return [{ type: 2, value, card_type: 2 }];
   }
 

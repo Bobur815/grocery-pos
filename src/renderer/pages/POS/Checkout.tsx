@@ -9,6 +9,8 @@ import { Modal } from "../../components/common/Modal";
 import { Button } from "../../components/common/Button";
 import { NumberPad } from "../../components/common/NumberPad";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
+import type { SaleTender } from "@shared/constants";
+import { UzQrLogo } from "./UzQrLogo";
 
 function parseSaleError(
   err: unknown,
@@ -96,12 +98,12 @@ const SummaryRow = styled.div`
 
 const PaymentMethods = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: ${({ theme }) => theme.spacing.md};
 `;
 
 const PaymentButton = styled.button<{ $selected?: boolean }>`
-  padding: ${({ theme }) => theme.spacing.lg};
+  padding: ${({ theme }) => theme.spacing.lg} ${({ theme }) => theme.spacing.sm};
   border: 2px solid
     ${({ theme, $selected }) =>
       $selected ? theme.colors.primary : theme.colors.border};
@@ -113,11 +115,23 @@ const PaymentButton = styled.button<{ $selected?: boolean }>`
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: ${({ theme }) => theme.spacing.sm};
 
   &:hover {
     border-color: ${({ theme }) => theme.colors.primary};
   }
+`;
+
+/**
+ * The branded tile carries no text — the artwork is the label. The selected state has to
+ * read against a navy field, so it adds a ring outside the border instead of the pale
+ * primary wash the other two tiles use, which would be invisible here.
+ */
+const UzQrButton = styled(PaymentButton)`
+  padding: ${({ theme }) => theme.spacing.sm};
+  box-shadow: ${({ theme, $selected }) =>
+    $selected ? `0 0 0 3px ${theme.colors.primary}40` : "none"};
 `;
 
 const PaymentIcon = styled.span`
@@ -297,7 +311,7 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
     useCartStore();
   const { createSale, updateSale, isLoading } = useSales();
   const toast = useToast();
-  const [paymentMethod, setPaymentMethod] = useState<"cash" | "card">("cash");
+  const [paymentMethod, setPaymentMethod] = useState<SaleTender>("cash");
   // Opt-in fiscalization: when ticked, the receipt is sent to REGOS:VCR to be fiscalized.
   // Default OFF — the sale is saved un-fiscalized and can be fiscalized later from Sales History.
   const [fiscalize, setFiscalize] = useState(false);
@@ -443,6 +457,15 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
               <PaymentIcon>💳</PaymentIcon>
               <PaymentLabel>{t("pos.card")}</PaymentLabel>
             </PaymentButton>
+            <UzQrButton
+              $selected={paymentMethod === "uzqr"}
+              onClick={() => setPaymentMethod("uzqr")}
+              aria-label={t("pos.uzqr")}
+              title={t("pos.uzqr")}
+            >
+              <UzQrLogo $height={45} $fill />
+              <PaymentLabel>{t("pos.uzqr")}</PaymentLabel>
+            </UzQrButton>
           </PaymentMethods>
 
           <Actions>

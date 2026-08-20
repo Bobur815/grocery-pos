@@ -333,7 +333,12 @@ export const inventoryCounts = {
   },
   complete: async (
     id: string,
-    payload: { writeOffUncounted?: boolean } = {},
+    payload: {
+      /** Write off EVERY uncounted line. Ignored when writeOffItemIds is present. */
+      writeOffUncounted?: boolean;
+      /** Write off only these item ids — an empty array writes nothing off. */
+      writeOffItemIds?: string[];
+    } = {},
   ): Promise<InventoryCountSummary> => {
     const { data } = await axiosInstance.post(
       `/inventory-counts/${id}/complete`,

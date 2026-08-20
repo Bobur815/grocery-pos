@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import styled from 'styled-components';
+import styled, { type DefaultTheme } from 'styled-components';
 import { Button } from '../../components/common/Button';
 import { Pagination } from '../../components/common/Pagination';
 import { useSales } from '../../hooks/useSales';
 import { usePagination } from '../../hooks/usePagination';
 import { formatCurrency as formatCurrencyBase } from '@shared/utils';
+import { UZQR_BRAND_COLOR } from '@shared/constants';
 import { formatDateTime } from '../../utils/formatters';
 
 const Container = styled.div`
@@ -118,6 +119,15 @@ const Tr = styled.tr`
   }
 `;
 
+/** Green = drawer, house blue = bank card, navy = the UzQR brand. */
+function tenderColor(theme: DefaultTheme, method: string) {
+  if (method === 'uzqr') return UZQR_BRAND_COLOR;
+  return method === 'cash' ? theme.colors.success : theme.colors.primary;
+}
+
+/** Emoji cue beside the tender label. */
+const TENDER_ICONS: Record<string, string> = { cash: '💵', card: '💳', uzqr: '🔳' };
+
 const PaymentBadge = styled.span<{ $method: string }>`
   display: inline-flex;
   align-items: center;
@@ -125,10 +135,8 @@ const PaymentBadge = styled.span<{ $method: string }>`
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 12px;
-  background-color: ${({ theme, $method }) =>
-    $method === 'cash' ? theme.colors.success + '20' : theme.colors.primary + '20'};
-  color: ${({ theme, $method }) =>
-    $method === 'cash' ? theme.colors.success : theme.colors.primary};
+  background-color: ${({ theme, $method }) => tenderColor(theme, $method) + '20'};
+  color: ${({ theme, $method }) => tenderColor(theme, $method)};
   font-weight: 500;
 `;
 
@@ -188,6 +196,7 @@ export function MonthlyReport() {
   const totalRevenue = sales.reduce((sum, s) => sum + Number(s.finalAmount), 0);
   const cashCount = sales.filter((s) => s.paymentMethod === 'cash').length;
   const cardCount = sales.filter((s) => s.paymentMethod === 'card').length;
+  const uzqrCount = sales.filter((s) => s.paymentMethod === 'uzqr').length;
   const totalItemsSold = sales.reduce((sum, s) => sum + s.items.length, 0);
   const avgTransaction = sales.length > 0 ? totalRevenue / sales.length : 0;
 
@@ -273,6 +282,15 @@ export function MonthlyReport() {
               <StatValue>{cardCount}</StatValue>
               <StatSubtext>{t('reports.transactions')}</StatSubtext>
             </StatCard>
+
+            {/* Only worth a tile once the store actually takes UzQR. */}
+            {uzqrCount > 0 && (
+              <StatCard>
+                <StatLabel>{t('reports.uzqrPayments')}</StatLabel>
+                <StatValue>{uzqrCount}</StatValue>
+                <StatSubtext>{t('reports.transactions')}</StatSubtext>
+              </StatCard>
+            )}
           </StatsGrid>
 
           <TableCard>
@@ -303,7 +321,7 @@ export function MonthlyReport() {
                       <Td style={{ textAlign: 'center' }}>{sale.items.length}</Td>
                       <Td>
                         <PaymentBadge $method={sale.paymentMethod}>
-                          {sale.paymentMethod === 'cash' ? '💵' : '💳'}{' '}
+                          {TENDER_ICONS[sale.paymentMethod] ?? '💳'}{' '}
                           {t(`pos.${sale.paymentMethod}`)}
                         </PaymentBadge>
                       </Td>

@@ -3,6 +3,13 @@ import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { Modal } from "../../components/common/Modal";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
+
+/** Emoji cue beside the tender label. */
+const TENDER_ICONS: Record<string, string> = {
+  cash: "💵",
+  card: "💳",
+  uzqr: "🔳",
+};
 import { formatDateTime } from "../../utils/formatters";
 import type { FiscalSalePreview } from "@shared/types/fiscal.types";
 import { Copy, Check, ExternalLink } from "lucide-react";
@@ -298,7 +305,7 @@ export function ReceiptDetailsModal({ saleId, onClose }: Props) {
               <Field>
                 <FieldLabel>{t("reports.payment")}</FieldLabel>
                 <FieldValue>
-                  {data.paymentMethod === "cash" ? "💵 " : "💳 "}
+                  {TENDER_ICONS[data.paymentMethod] ?? "💳"}{" "}
                   {t(`pos.${data.paymentMethod}`)}
                 </FieldValue>
               </Field>

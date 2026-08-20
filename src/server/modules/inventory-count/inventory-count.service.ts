@@ -45,17 +45,32 @@ type PlannableItem = Pick<
 >;
 
 /**
+ * Which uncounted lines to write off: `true` = every eligible one, `false` = none, or an
+ * explicit set of item ids.
+ *
+ * The set exists because "uncounted" and "gone" are not the same thing. Stock can be
+ * missing from the shelf at count time and still arrive later — goods in transit, a
+ * delivery booked but not yet unpacked, an item held back for a customer. Zeroing those
+ * loses real stock, so the operator picks the lines that are genuinely gone.
+ */
+export type WriteOffSelection = boolean | ReadonlySet<string>;
+
+/**
  * Decide what completion will write, with no database involved — which is what makes it
  * testable. Counted lines and written-off lines produce the same shape, so downstream SQL
  * treats them identically.
  *
- * Uncounted lines are included only when `writeOffUncounted` is set, and only when they
+ * Uncounted lines are included only when `writeOff` selects them, and only when they
  * actually hold stock: writing 0 over 0 changes nothing but would still bump `updated_at`
  * on potentially thousands of rows and make every terminal re-pull them.
+ *
+ * Selection is an intersection, never a widening: an id that isn't an eligible uncounted
+ * line of THIS document is ignored, so a stale or hand-crafted id list can't reach a line
+ * the document doesn't own or overwrite one the cashier actually counted.
  */
 export function planCompletion(
   items: PlannableItem[],
-  writeOffUncounted: boolean,
+  writeOff: WriteOffSelection,
 ): CompletionPlan {
   let totalDifference = new Prisma.Decimal(0);
   let totalValueDiff = new Prisma.Decimal(0);
@@ -83,9 +98,15 @@ export function planCompletion(
   };
 
   const counted = items.filter((i) => i.counted && i.countedQty !== null);
-  const toWriteOff = writeOffUncounted
-    ? items.filter((i) => !i.counted && new Prisma.Decimal(i.expectedQty).gt(0))
-    : [];
+  const eligible = items.filter(
+    (i) => !i.counted && new Prisma.Decimal(i.expectedQty).gt(0),
+  );
+  const toWriteOff =
+    writeOff === false
+      ? []
+      : writeOff === true
+        ? eligible
+        : eligible.filter((i) => writeOff.has(i.id));
 
   const rows = [
     ...counted.map((item) => buildRow(item, new Prisma.Decimal(item.countedQty!), false)),
@@ -288,15 +309,18 @@ export class InventoryCountService {
    * second time for sales that already happened before the count (see SalesService).
    *
    * By default uncounted lines are left completely untouched — never silently zeroed.
-   * When `writeOffUncounted` is set they are instead treated as "not physically present":
+   * When `writeOff` selects them they are instead treated as "not physically present":
    * stock 0, `difference = -expectedQty`, flagged `writtenOff`. They travel the SAME code
    * path as counted lines, so the arithmetic, the watermark and immutability are identical.
+   *
+   * `writeOff` is either "all eligible" (`true`) or an explicit set of item ids — stock
+   * that is merely missing today may still arrive tomorrow, so the operator chooses.
    */
   async complete(
     storeId: string,
     id: string,
     user: AuthUser,
-    writeOffUncounted = false,
+    writeOff: WriteOffSelection = false,
   ) {
     const count = await this.prisma.inventoryCount.findUnique({
       where: { id },
@@ -307,7 +331,7 @@ export class InventoryCountService {
       throw new BadRequestException('Count cannot be completed');
     }
 
-    const plan = planCompletion(count.items, writeOffUncounted);
+    const plan = planCompletion(count.items, writeOff);
     // Load-bearing guard: without it, "create a count, count nothing, tick write-off"
     // would zero the document's entire scope in one click.
     if (plan.countedItems === 0) throw new BadRequestException('Nothing counted yet');

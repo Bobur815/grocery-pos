@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import styled from "styled-components";
+import styled, { type DefaultTheme } from "styled-components";
 import { useSales } from "../../hooks/useSales";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
+import { UZQR_BRAND_COLOR, type SaleTender } from "@shared/constants";
 import { formatDateTime } from "../../utils/formatters";
 import { Modal } from "@components/common/Modal";
 import { Button } from "@renderer/components/common/Button";
@@ -156,6 +157,19 @@ const Tr = styled.tr`
   }
 `;
 
+/** Green = drawer, house blue = bank card, navy = the UzQR brand. */
+function tenderColor(theme: DefaultTheme, method: string) {
+  if (method === "uzqr") return UZQR_BRAND_COLOR;
+  return method === "cash" ? theme.colors.success : theme.colors.primary;
+}
+
+/** Emoji cue beside the tender label. */
+const TENDER_ICONS: Record<string, string> = {
+  cash: "💵",
+  card: "💳",
+  uzqr: "🔳",
+};
+
 const PaymentBadge = styled.span<{ $method: string }>`
   display: inline-flex;
   align-items: center;
@@ -163,12 +177,8 @@ const PaymentBadge = styled.span<{ $method: string }>`
   font-size: 12px;
   padding: 2px 8px;
   border-radius: 12px;
-  background-color: ${({ theme, $method }) =>
-    $method === "cash"
-      ? theme.colors.success + "20"
-      : theme.colors.primary + "20"};
-  color: ${({ theme, $method }) =>
-    $method === "cash" ? theme.colors.success : theme.colors.primary};
+  background-color: ${({ theme, $method }) => tenderColor(theme, $method) + "20"};
+  color: ${({ theme, $method }) => tenderColor(theme, $method)};
   font-weight: 500;
 `;
 
@@ -242,7 +252,7 @@ export function DailySummary() {
   const todayStr = new Date().toISOString().split("T")[0];
   const [startDate, setStartDate] = useState(todayStr);
   const [endDate, setEndDate] = useState(todayStr);
-  const [paymentFilter, setPaymentFilter] = useState<"all" | "cash" | "card">(
+  const [paymentFilter, setPaymentFilter] = useState<"all" | SaleTender>(
     "all",
   );
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -294,6 +304,9 @@ export function DailySummary() {
     const cardSales = filteredSales.filter(
       (s) => s.paymentMethod === "card",
     ).length;
+    const uzqrSales = filteredSales.filter(
+      (s) => s.paymentMethod === "uzqr",
+    ).length;
     const totalCost = filteredSales.reduce(
       (sum, s) => sum + (s.totalCost ?? 0),
       0,
@@ -306,6 +319,7 @@ export function DailySummary() {
       totalItems,
       cashSales,
       cardSales,
+      uzqrSales,
       avgMargin,
     };
   }, [filteredSales]);
@@ -348,12 +362,13 @@ export function DailySummary() {
           <FilterSelect
             value={paymentFilter}
             onChange={(e) =>
-              setPaymentFilter(e.target.value as "all" | "cash" | "card")
+              setPaymentFilter(e.target.value as "all" | SaleTender)
             }
           >
             <option value="all">{t("reports.allPayments")}</option>
             <option value="cash">{t("pos.cash")}</option>
             <option value="card">{t("pos.card")}</option>
+            <option value="uzqr">{t("pos.uzqr")}</option>
           </FilterSelect>
         </FilterGroup>
         <Button variant="secondary" size="medium" onClick={handleReset}>
@@ -394,6 +409,15 @@ export function DailySummary() {
             <StatValue>{summary.cashSales}</StatValue>
             <StatSubtext>{t("reports.transactions")}</StatSubtext>
           </StatCard>
+
+          {/* Only worth a tile once the store actually takes UzQR. */}
+          {summary.uzqrSales > 0 && (
+            <StatCard>
+              <StatLabel>{t("reports.uzqrPayments")}</StatLabel>
+              <StatValue>{summary.uzqrSales}</StatValue>
+              <StatSubtext>{t("reports.transactions")}</StatSubtext>
+            </StatCard>
+          )}
 
           <StatCard>
             <StatLabel>{t("reports.cardPayments")}</StatLabel>
@@ -440,7 +464,7 @@ export function DailySummary() {
                   <Td style={{ textAlign: "center" }}>{sale.items.length}</Td>
                   <Td>
                     <PaymentBadge $method={sale.paymentMethod}>
-                      {sale.paymentMethod === "cash" ? "💵" : "💳"}{" "}
+                      {TENDER_ICONS[sale.paymentMethod] ?? "💳"}{" "}
                       {t(`pos.${sale.paymentMethod}`)}
                     </PaymentBadge>
                   </Td>

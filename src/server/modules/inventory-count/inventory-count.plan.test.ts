@@ -141,6 +141,51 @@ describe('planCompletion', () => {
     });
   });
 
+  // Stock missing from the shelf today may still be in transit and arrive tomorrow, so
+  // the operator picks which uncounted lines are genuinely gone.
+  describe('with a selected subset of write-off lines', () => {
+    it('writes off only the selected lines and leaves the rest untouched', () => {
+      const gone = line({ expectedQty: 4, cost: 1000 });
+      const inTransit = line({ expectedQty: 7, cost: 2000 });
+      const counted = line({ counted: true, countedQty: 3, expectedQty: 3, cost: 500 });
+
+      const plan = planCompletion([gone, inTransit, counted], new Set([gone.id]));
+
+      expect(byId(plan, gone.id)).toMatchObject({ countedQty: '0', writtenOff: true });
+      // The line expected to arrive later must produce no stock write at all.
+      expect(byId(plan, inTransit.id)).toBeUndefined();
+      expect(plan.writtenOffItems).toBe(1);
+      expect(plan.writeOffValue.toString()).toBe('-4000');
+    });
+
+    it('treats an empty selection as no write-off', () => {
+      const gone = line({ expectedQty: 4, cost: 1000 });
+      const counted = line({ counted: true, countedQty: 3, expectedQty: 3, cost: 500 });
+
+      const plan = planCompletion([gone, counted], new Set<string>());
+
+      expect(plan.rows).toHaveLength(1);
+      expect(plan.writtenOffItems).toBe(0);
+      expect(plan.writeOffValue.toString()).toBe('0');
+    });
+
+    it('ignores ids that are not eligible uncounted lines of this document', () => {
+      const counted = line({ counted: true, countedQty: 2, expectedQty: 5, cost: 100 });
+      const noStock = line({ expectedQty: 0, cost: 100 });
+
+      // A counted line, a zero-stock line and an id from another document: selecting them
+      // must not widen the write-off beyond what the eligibility rule already allows.
+      const plan = planCompletion(
+        [counted, noStock],
+        new Set([counted.id, noStock.id, 'item-from-another-count']),
+      );
+
+      expect(plan.writtenOffItems).toBe(0);
+      // The counted line still applies as a COUNT, not as a write-off.
+      expect(byId(plan, counted.id)).toMatchObject({ countedQty: '2', writtenOff: false });
+    });
+  });
+
   it('reports zero counted lines so the caller can refuse to complete', () => {
     // The "nothing counted" guard is what stops a write-off from zeroing an entire
     // scope in one click, so it must hold even when write-off is requested.

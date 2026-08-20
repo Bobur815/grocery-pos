@@ -273,6 +273,53 @@ const SummaryItem = styled.div`
   }
 `;
 
+/* The write-off total doubles as the entry point into the written-off lines, so it is a
+   real button — reachable by keyboard, not a div with an onClick. */
+const SummaryButton = styled(SummaryItem).attrs({ as: "button", type: "button" })<{
+  $active: boolean;
+}>`
+  align-items: flex-start;
+  text-align: left;
+  padding: ${({ theme }) => theme.spacing.xs};
+  margin: -${({ theme }) => theme.spacing.xs};
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid
+    ${({ theme, $active }) => ($active ? theme.colors.warning : "transparent")};
+  border-radius: ${({ theme }) => theme.borderRadius};
+  background-color: ${({ theme, $active }) =>
+    $active ? `${theme.colors.warning}14` : "transparent"};
+
+  &:hover {
+    border-color: ${({ theme }) => theme.colors.warning};
+  }
+`;
+
+/* Explains the filtered view when only the written-off lines are on screen. */
+const WriteOffBanner = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.sm};
+  border-radius: ${({ theme }) => theme.borderRadius};
+  background-color: ${({ theme }) => theme.colors.warning}20;
+  color: ${({ theme }) => theme.colors.text};
+  font-size: 13px;
+`;
+
+const ClearFilter = styled.button`
+  min-height: 44px;
+  padding: 0 ${({ theme }) => theme.spacing.sm};
+  border: none;
+  background: none;
+  font-size: 13px;
+  font-weight: 500;
+  color: ${({ theme }) => theme.colors.primary};
+  cursor: pointer;
+`;
+
 /** Live difference for a line the user is still editing. */
 function lineDifference(item: InventoryCountItem): number | null {
   if (item.countedQty === null) return null;
@@ -291,6 +338,7 @@ export function InventoryCountDetail() {
   const [blindCount, setBlindCount] = useState(false);
   const [itemSearch, setItemSearch] = useState("");
   const [onlyUncounted, setOnlyUncounted] = useState(false);
+  const [onlyWrittenOff, setOnlyWrittenOff] = useState(false);
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [showScanner, setShowScanner] = useState(false);
   const [scannedItem, setScannedItem] = useState<InventoryCountItem | null>(null);
@@ -419,6 +467,7 @@ export function InventoryCountDetail() {
     const query = itemSearch.trim().toLowerCase();
     return count.items.filter((item) => {
       if (onlyUncounted && item.counted) return false;
+      if (onlyWrittenOff && !item.writtenOff) return false;
       if (!query) return true;
       return (
         item.productName.toLowerCase().includes(query) ||
@@ -426,11 +475,11 @@ export function InventoryCountDetail() {
         item.barcode.includes(query)
       );
     });
-  }, [count, itemSearch, onlyUncounted]);
+  }, [count, itemSearch, onlyUncounted, onlyWrittenOff]);
 
   useEffect(() => {
     setMobileCount(MOBILE_PAGE_SIZE);
-  }, [itemSearch, onlyUncounted]);
+  }, [itemSearch, onlyUncounted, onlyWrittenOff]);
 
   // Infinite scroll on mobile — a full-store count can be thousands of lines.
   useEffect(() => {
@@ -467,14 +516,28 @@ export function InventoryCountDetail() {
     );
   }, [count]);
 
-  const handleComplete = async (writeOffUncounted: boolean) => {
+  /**
+   * Written-off lines are uncounted by definition, so the two filters overlap; showing one
+   * clears the other (and the search) rather than leaving a confusing partial view.
+   */
+  const showWrittenOff = (next: boolean) => {
+    setOnlyWrittenOff(next);
+    if (next) {
+      setOnlyUncounted(false);
+      setItemSearch("");
+    }
+  };
+
+  const handleComplete = async (writeOffItemIds: string[]) => {
     if (!id || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await inventoryCounts.complete(id, { writeOffUncounted });
+      // Always send the explicit list: the modal has already resolved which lines the
+      // operator kept, and an empty array correctly means "write nothing off".
+      await inventoryCounts.complete(id, { writeOffItemIds });
       toast.success(
         t(
-          writeOffUncounted
+          writeOffItemIds.length > 0
             ? "inventoryCount.detail.writeOff.done"
             : "inventoryCount.detail.completed",
         ),
@@ -691,7 +754,11 @@ export function InventoryCountDetail() {
             </strong>
           </SummaryItem>
           {count.wroteOffUncounted && (
-            <SummaryItem>
+            <SummaryButton
+              $active={onlyWrittenOff}
+              aria-pressed={onlyWrittenOff}
+              onClick={() => showWrittenOff(!onlyWrittenOff)}
+            >
               {t("inventoryCount.detail.writeOff.summary")}
               <strong>
                 {count.writtenOffItems} ·{" "}
@@ -700,7 +767,7 @@ export function InventoryCountDetail() {
                   i18n.language as "ru" | "uz",
                 )}
               </strong>
-            </SummaryItem>
+            </SummaryButton>
           )}
           {count.completedAt && (
             <SummaryItem>
@@ -748,10 +815,25 @@ export function InventoryCountDetail() {
           <input
             type="checkbox"
             checked={onlyUncounted}
-            onChange={(e) => setOnlyUncounted(e.target.checked)}
+            onChange={(e) => {
+              setOnlyUncounted(e.target.checked);
+              if (e.target.checked) setOnlyWrittenOff(false);
+            }}
           />
           {t("inventoryCount.detail.onlyUncounted")}
         </Toggle>
+        {count.wroteOffUncounted && (
+          <Toggle>
+            <input
+              type="checkbox"
+              checked={onlyWrittenOff}
+              onChange={(e) => showWrittenOff(e.target.checked)}
+            />
+            {t("inventoryCount.detail.writeOff.onlyWrittenOff", {
+              n: count.writtenOffItems,
+            })}
+          </Toggle>
+        )}
         <Toggle title={t("inventoryCount.detail.blindCountHint")}>
           <input
             type="checkbox"
@@ -761,6 +843,21 @@ export function InventoryCountDetail() {
           {t("inventoryCount.detail.blindCount")}
         </Toggle>
       </Filters>
+
+      {onlyWrittenOff && (
+        <WriteOffBanner>
+          {t("inventoryCount.detail.writeOff.listTitle", {
+            n: count.writtenOffItems,
+            value: formatCurrency(
+              Number(count.writeOffValue),
+              i18n.language as "ru" | "uz",
+            ),
+          })}
+          <ClearFilter type="button" onClick={() => showWrittenOff(false)}>
+            {t("inventoryCount.detail.writeOff.showAll")}
+          </ClearFilter>
+        </WriteOffBanner>
+      )}
 
       <MobileCardList>
         {visibleItems.slice(0, mobileCount).map((item) => (

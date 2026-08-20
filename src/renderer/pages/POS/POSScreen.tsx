@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import styled from "styled-components";
+import styled, { type DefaultTheme } from "styled-components";
 import { Cart } from "./Cart";
+import { UzQrLogo } from "./UzQrLogo";
 import { Catalog } from "./Catalog";
 import { BulkWeighModal } from "../../components/BulkWeighModal";
 import { Checkout } from "./Checkout";
@@ -23,6 +24,7 @@ import {
 } from "lucide-react";
 import { Button } from "../../components/common/Button";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
+import { UZQR_BRAND_COLOR, type SaleTender } from "@shared/constants";
 import { Product } from "@shared/types";
 import { parseBarcode } from "../../../shared/utils/barcode-parser";
 import { parseWeightBarcode } from "../../../shared/utils/weightBarcode";
@@ -263,18 +265,22 @@ const InputRow = styled.div`
 
 const QuickPayRow = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: ${({ theme }) => theme.spacing.xs};
 `;
 
-const QuickPayButton = styled.button<{ $variant: "cash" | "card" }>`
+/** Cash is the till (green), card the house colour, UzQR its own brand navy. */
+function quickPayColor(theme: DefaultTheme, variant: SaleTender) {
+  if (variant === "cash") return theme.colors.success;
+  if (variant === "uzqr") return UZQR_BRAND_COLOR;
+  return theme.colors.primary;
+}
+
+const QuickPayButton = styled.button<{ $variant: SaleTender }>`
   height: 44px;
   border-radius: ${({ theme }) => theme.borderRadius};
-  border: 1px solid
-    ${({ theme, $variant }) =>
-      $variant === "cash" ? theme.colors.success : theme.colors.primary};
-  background-color: ${({ theme, $variant }) =>
-    $variant === "cash" ? theme.colors.success : theme.colors.primary};
+  border: 1px solid ${({ theme, $variant }) => quickPayColor(theme, $variant)};
+  background-color: ${({ theme, $variant }) => quickPayColor(theme, $variant)};
   color: white;
   font-size: 13px;
   font-weight: 600;
@@ -917,7 +923,7 @@ export function POSScreen() {
   ]);
 
   const handleQuickPay = useCallback(
-    async (method: "cash" | "card") => {
+    async (method: SaleTender) => {
       if (items.length === 0 || payingRef.current) return;
       if (!(await checkSmena())) {
         setShowSmenaModal(true);
@@ -1075,6 +1081,11 @@ export function POSScreen() {
         if (items.length > 0) {
           handleCheckoutClick();
         }
+      }
+      // F9 - quick pay UzQR
+      else if (e.key === "F9") {
+        e.preventDefault();
+        handleQuickPay("uzqr");
       }
       // F11 - quick pay cash
       else if (e.key === "F11") {
@@ -1347,6 +1358,19 @@ export function POSScreen() {
                 <CreditCard size={18} />
                 {t("pos.card")}
                 <ShortcutHint>(F12)</ShortcutHint>
+              </QuickPayButton>
+              <QuickPayButton
+                $variant="uzqr"
+                onClick={() => handleQuickPay("uzqr")}
+                disabled={items.length === 0 || isPayingLoading}
+                aria-label={t("pos.uzqr")}
+                title={t("pos.uzqr")}
+              >
+                {/* The wordmark replaces icon + text: the button is already navy, and
+                    three tenders in this row leave no width for a label. */}
+                <UzQrLogo $height={20} />
+                {t("pos.uzqr")}
+                <ShortcutHint>(F9)</ShortcutHint>
               </QuickPayButton>
             </QuickPayRow>
         </InputColumn>

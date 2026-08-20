@@ -6,6 +6,7 @@ import { openCashDrawer } from '../printer/thermal-printer';
 import { printZXReport } from '../printer/smena-report-printer';
 import { regosVcrService } from '../fiscal/regos-vcr-service';
 import type { SmenaStats, SmenaFiscalStats } from '../../shared/types/smena.types';
+import { isCashTender } from '../../shared/constants';
 
 function ipcSafe<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
@@ -57,7 +58,10 @@ async function computeSmenaStats(smenaId: string): Promise<SmenaStats> {
     const cnt = Number(row.cnt);
     const total = Number(row.total);
     const disc = Number(row.discounts);
-    if (row.payment_method === 'cash') {
+    // Cash is the only tender that lands in the drawer; card AND UzQR both settle to the
+    // bank, so they share the cashless bucket. Keyed on "is it cash" rather than listing
+    // tenders, so a future tender can never be counted as money in the till by accident.
+    if (isCashTender(row.payment_method)) {
       cashSalesCount += cnt;
       cashSalesAmount += total;
     } else {

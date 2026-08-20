@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { Sale } from '@shared/types/sale.types';
+import type { SaleTender } from '@shared/constants';
 
 interface CreateSaleData {
   items: Array<{
@@ -9,7 +10,7 @@ interface CreateSaleData {
     quantity: number;
     unitPrice: number;
   }>;
-  paymentMethod: 'cash' | 'card';
+  paymentMethod: SaleTender;
   discountAmount?: number;
   // Scanned mandatory-marking (Asl-Belgisi) codes, by line barcode — used for fiscalization
   markingCodes?: Array<{ barcode: string; label: string }>;

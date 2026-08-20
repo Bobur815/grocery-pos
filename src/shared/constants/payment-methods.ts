@@ -1,3 +1,33 @@
+// ==================== SALE TENDERS (what the POS actually stores) ====================
+// `sales.payment_method` is a free-form String in both schemas and the POS writes these
+// LOWER-CASE values. The upper-case PAYMENT_METHODS block below is a separate, older
+// vocabulary used elsewhere — the two have always been distinct, so don't merge them.
+
+export const SALE_TENDERS = ["cash", "card", "uzqr"] as const;
+
+export type SaleTender = (typeof SALE_TENDERS)[number];
+
+/**
+ * Only cash lands in the drawer. UzQR settles to the merchant's bank account exactly like
+ * a card, so every drawer/X-Z/cashless split must treat it as card-side.
+ *
+ * Written as "is it cash" rather than "is it card" on purpose: legacy rows hold values
+ * like `mixed`, and an unknown tender must never be counted as money in the till.
+ */
+export function isCashTender(method: string | null | undefined): boolean {
+  return (method ?? "").toLowerCase() === "cash";
+}
+
+/** i18n keys for the POS tender labels, so no screen hardcodes "Карта" / "UzQR". */
+export const SALE_TENDER_I18N_KEYS: Record<SaleTender, string> = {
+  cash: "pos.cash",
+  card: "pos.card",
+  uzqr: "pos.uzqr",
+};
+
+/** Brand navy sampled from the UzQR logo — the button field must match the artwork. */
+export const UZQR_BRAND_COLOR = "#0d2a73";
+
 // ==================== SALE PAYMENT METHODS ====================
 // Used for POS checkout (CASH, CARD, MIXED)
 

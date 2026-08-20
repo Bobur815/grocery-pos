@@ -109,7 +109,12 @@ export class InventoryCountController {
     @Body() dto: CompleteCountDto,
     @CurrentUser() user: User,
   ) {
-    return this.inventoryCountService.complete(storeId, id, user, dto.writeOffUncounted ?? false);
+    // An explicit list wins even when empty — "I picked nothing" must not fall back to
+    // the boolean and write off the whole document.
+    const writeOff = dto.writeOffItemIds
+      ? new Set(dto.writeOffItemIds)
+      : (dto.writeOffUncounted ?? false);
+    return this.inventoryCountService.complete(storeId, id, user, writeOff);
   }
 
   @Post(':id/cancel')
