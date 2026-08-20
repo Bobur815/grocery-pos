@@ -9,7 +9,7 @@ import { Modal } from "../../components/common/Modal";
 import { Button } from "../../components/common/Button";
 import { NumberPad } from "../../components/common/NumberPad";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
-import type { SaleTender } from "@shared/constants";
+import { UZQR_BRAND_COLOR, type SaleTender } from "@shared/constants";
 import { UzQrLogo } from "./UzQrLogo";
 
 function parseSaleError(
@@ -132,6 +132,7 @@ const UzQrButton = styled(PaymentButton)`
   padding: ${({ theme }) => theme.spacing.sm};
   box-shadow: ${({ theme, $selected }) =>
     $selected ? `0 0 0 3px ${theme.colors.primary}40` : "none"};
+  background-color: ${UZQR_BRAND_COLOR};
 `;
 
 const PaymentIcon = styled.span`
@@ -464,7 +465,7 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
               title={t("pos.uzqr")}
             >
               <UzQrLogo $height={45} $fill />
-              <PaymentLabel>{t("pos.uzqr")}</PaymentLabel>
+              <PaymentLabel style={{ color: "white" }}>{t("pos.uzqr")}</PaymentLabel>
             </UzQrButton>
           </PaymentMethods>
 
