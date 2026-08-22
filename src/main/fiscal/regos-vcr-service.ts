@@ -30,6 +30,7 @@ import type {
 } from '../../shared/types/fiscal.types';
 import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
 import { productRequiresMarking } from '../../shared/utils/marking';
+import { toPieces } from '../../shared/utils/pack';
 import { isCashTender } from '../../shared/constants';
 import { isCodeOutOfCirculation } from '../marking/circulation-check';
 
@@ -361,7 +362,15 @@ class RegosVcrService {
         barcode: String(item.barcode),
         icps: product?.mxik ?? '',
         amount,
-        quantity: Math.round(Number(item.quantity) * 1000),
+        // REGOS is told the PHYSICAL piece count, not the number of boxes. Its implied unit
+        // price is amount/quantity, and package_code registers the product in its SMALLEST
+        // packaging unit (pickSingleUnitPackage in shared/utils/mxik-packages), i.e. one piece.
+        // Sending 1 for a box would make the implied unit price the box price and disagree with
+        // the registered package. amount stays the true line total, so 2 boxes of 5 @ 45 000
+        // report quantity 10 000 (10 pcs) / amount 9 000 000 → 9 000 per piece.
+        quantity: Math.round(
+          toPieces(Number(item.quantity), Number(item.piecesPerUnit ?? 1)) * 1000,
+        ),
         vat_value: vat,
         discount,
         unit_name: product?.unit ?? undefined,

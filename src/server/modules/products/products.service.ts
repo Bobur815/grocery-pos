@@ -69,8 +69,15 @@ export class ProductsService {
   }
 
   async findByBarcode(storeId: string, barcode: string) {
-    return this.prisma.product.findUnique({
+    const byPiece = await this.prisma.product.findUnique({
       where: { storeId_barcode: { storeId, barcode } },
+      include: { category: true, supplier: true },
+    });
+    if (byPiece) return byPiece;
+    // A boxed product may also carry a second code printed on the pack. The piece barcode always
+    // wins, so a code that is one product's piece barcode is never hijacked by another's box.
+    return this.prisma.product.findFirst({
+      where: { storeId, boxBarcode: barcode },
       include: { category: true, supplier: true },
     });
   }
@@ -191,6 +198,9 @@ export class ProductsService {
         bulkQuantity: createProductDto.bulkQuantity ?? 0,
         minSaleQty: createProductDto.minSaleQty ?? 0,
         maxSaleQty: createProductDto.maxSaleQty ?? 0,
+        piecesPerBox: createProductDto.piecesPerBox ?? null,
+        boxPrice: createProductDto.boxPrice ?? null,
+        boxBarcode: createProductDto.boxBarcode || null,
         storeProductCode: nextCode,
       },
       include: { category: true },
@@ -315,8 +325,9 @@ export class ProductsService {
         (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
       ),
     );
+    // In PIECES — a box line's quantity counts boxes, so multiply it back out.
     const totalUnitsSold = saleItems.reduce(
-      (sum, item) => sum + Number(item.quantity),
+      (sum, item) => sum + Number(item.quantity) * (item.piecesPerUnit ?? 1),
       0,
     );
     const totalRevenue = saleItems.reduce(
@@ -325,7 +336,7 @@ export class ProductsService {
     );
     const costPrice = Number(product.cost ?? 0);
     const totalCost = saleItems.reduce(
-      (sum, item) => sum + Number(item.quantity) * costPrice,
+      (sum, item) => sum + Number(item.quantity) * (item.piecesPerUnit ?? 1) * costPrice,
       0,
     );
     const profit = totalRevenue - totalCost;
@@ -376,6 +387,9 @@ export class ProductsService {
       bulkQuantity?: number;
       minSaleQty?: number;
       maxSaleQty?: number;
+      piecesPerBox?: number | null;
+      boxPrice?: number | null;
+      boxBarcode?: string | null;
     }>,
   ) {
     let created = 0,
@@ -414,6 +428,9 @@ export class ProductsService {
               bulkQuantity: p.bulkQuantity ?? 0,
               minSaleQty: p.minSaleQty ?? 0,
               maxSaleQty: p.maxSaleQty ?? 0,
+              piecesPerBox: p.piecesPerBox ?? null,
+              boxPrice: p.boxPrice ?? null,
+              boxBarcode: p.boxBarcode || null,
               storeProductCode: await this.getNextStoreProductCode(storeId),
             },
           });

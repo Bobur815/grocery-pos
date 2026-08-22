@@ -160,7 +160,7 @@ export class AnalyticsService {
           COALESCE(c.name_ru, 'Без категории') AS "categoryRu",
           COALESCE(c.name_uz, 'Kategoriyasiz') AS "categoryUz",
           SUM(si.subtotal)::float AS revenue,
-          SUM(si.quantity)::float AS quantity
+          SUM(si.quantity * si.pieces_per_unit)::float AS quantity
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON si.product_id = p.id
@@ -186,7 +186,7 @@ export class AnalyticsService {
       this.prisma.$queryRaw<{ name: string; quantity: number; revenue: number }[]>`
         SELECT
           si.product_name AS name,
-          SUM(si.quantity)::float AS quantity,
+          SUM(si.quantity * si.pieces_per_unit)::float AS quantity,
           SUM(si.subtotal)::float AS revenue
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
@@ -214,7 +214,7 @@ export class AnalyticsService {
           COALESCE(c.name_ru, 'Без категории') AS "categoryRu",
           COALESCE(c.name_uz, 'Kategoriyasiz') AS "categoryUz",
           SUM(si.subtotal)::float AS revenue,
-          SUM(si.quantity * COALESCE(p.cost, 0))::float AS cost
+          SUM(si.quantity * si.pieces_per_unit * COALESCE(p.cost, 0))::float AS cost
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON si.product_id = p.id

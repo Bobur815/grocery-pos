@@ -97,6 +97,13 @@ model Product {
   minSaleQty    Decimal @default(0) @map("min_sale_qty")
   maxSaleQty    Decimal @default(0) @map("max_sale_qty")
 
+
+  // Multi-piece pack ("box"): a product sellable either per piece or as a sealed pack of N.
+  // piecesPerBox null/1 = not boxed. Stock is ALWAYS counted in pieces; a box sale decrements N.
+  piecesPerBox  Int?     @map("pieces_per_box")
+  boxPrice      Decimal? @map("box_price")
+  boxBarcode    String?  @unique @map("box_barcode")
+
   storeProductCode Int? @map("store_product_code")
 
   // REGOS:VCR package (unit) code from MXIK — required for fiscalizing marked goods
@@ -228,6 +235,10 @@ model SaleItem {
   quantity    Decimal
   unitPrice   Decimal @map("unit_price")
   subtotal    Decimal
+
+  // Pieces contained in one `quantity` unit: 1 for a piece line, N for a box line.
+  // Stock math and fiscal reporting multiply by this to get pieces.
+  piecesPerUnit Int @default(1) @map("pieces_per_unit")
 
   @@map("sale_items")
 }

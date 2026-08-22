@@ -45,6 +45,11 @@ export interface Product {
   minSaleQty?: number;
   maxSaleQty?: number;
   storeProductCode?: number | null;
+  // Multi-piece pack ("box"). piecesPerBox null/1 = not boxed. Stock is always counted in
+  // PIECES — see toPieces()/isBoxedProduct() in shared/utils/pack.
+  piecesPerBox?: number | null;
+  boxPrice?: number | null;
+  boxBarcode?: string | null;
 }
 
 export interface PreWeighedItem {
@@ -119,6 +124,11 @@ export interface ProductCreateInput {
   bulkQuantity?: number;
   minSaleQty?: number;
   maxSaleQty?: number;
+  // Multi-piece pack ("box"). piecesPerBox null/1 = not boxed. Stock is always counted in
+  // PIECES — see toPieces()/isBoxedProduct() in shared/utils/pack.
+  piecesPerBox?: number | null;
+  boxPrice?: number | null;
+  boxBarcode?: string | null;
 }
 
 export interface ProductUpdateInput {
@@ -148,6 +158,11 @@ export interface ProductUpdateInput {
   bulkQuantity?: number;
   minSaleQty?: number;
   maxSaleQty?: number;
+  // Multi-piece pack ("box"). piecesPerBox null/1 = not boxed. Stock is always counted in
+  // PIECES — see toPieces()/isBoxedProduct() in shared/utils/pack.
+  piecesPerBox?: number | null;
+  boxPrice?: number | null;
+  boxBarcode?: string | null;
 }
 
 export interface ProductSearchQuery {

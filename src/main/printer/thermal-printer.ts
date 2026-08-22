@@ -189,6 +189,7 @@ async function printReceipt(saleId: string): Promise<boolean> {
         unitPrice: unknown;
         subtotal: unknown;
         barcode: string;
+        piecesPerUnit?: number;
         product?: { mxik?: string | null };
       }) => ({
         productName: item.productName,
@@ -197,6 +198,7 @@ async function printReceipt(saleId: string): Promise<boolean> {
         subtotal: Number(item.subtotal),
         barcode: item.barcode,
         mxik: item.product?.mxik || undefined,
+        piecesPerUnit: item.piecesPerUnit ?? 1,
       }),
     ),
     totalAmount: Number(sale.totalAmount),

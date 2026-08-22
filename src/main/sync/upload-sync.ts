@@ -190,6 +190,9 @@ async function uploadProducts(
     bulkQuantity: p.bulkQuantity ? Number(p.bulkQuantity) : undefined,
     minSaleQty: p.minSaleQty ? Number(p.minSaleQty) : undefined,
     maxSaleQty: p.maxSaleQty ? Number(p.maxSaleQty) : undefined,
+    piecesPerBox: p.piecesPerBox ?? undefined,
+    boxPrice: p.boxPrice != null ? Number(p.boxPrice) : undefined,
+    boxBarcode: p.boxBarcode ?? undefined,
   }));
 
   const res = await apiPost("/products/sync-bulk", token, {

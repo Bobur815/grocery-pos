@@ -5,6 +5,7 @@ import { Cart } from "./Cart";
 import { UzQrLogo } from "./UzQrLogo";
 import { Catalog } from "./Catalog";
 import { BulkWeighModal } from "../../components/BulkWeighModal";
+import { SaleUnitModal } from "../../components/SaleUnitModal";
 import { Checkout } from "./Checkout";
 import { PosTabBar } from "./PosTabBar";
 import { useCartStore } from "../../store/cart-store";
@@ -30,6 +31,7 @@ import { parseBarcode } from "../../../shared/utils/barcode-parser";
 import { parseWeightBarcode } from "../../../shared/utils/weightBarcode";
 import { physicalKeyToChar } from "../../../shared/utils/keyboard-layout";
 import { productRequiresMarking } from "../../../shared/utils/marking";
+import { boxUnitPrice, isBoxedProduct, PIECE } from "../../../shared/utils/pack";
 import { Modal } from "@renderer/components/common/Modal";
 import { useSidebar } from "@renderer/context/SidebarContext";
 
@@ -428,6 +430,13 @@ export function POSScreen() {
 
   const [bulkWeighProduct, setBulkWeighProduct] = useState<Product | null>(null);
 
+  // A boxed product can be rung up either way, so the cashier is asked which before the line
+  // is created. Carries the typed quantity along — it is interpreted in whichever unit is picked.
+  const [saleUnitChoice, setSaleUnitChoice] = useState<{
+    product: Product;
+    qty: number;
+  } | null>(null);
+
   /** True when this product should be weighed on the scale rather than typed. */
   const needsScaleWeighing = useCallback(
     (product: Product) =>
@@ -435,8 +444,27 @@ export function POSScreen() {
     [],
   );
 
+  /**
+   * True when the cashier must choose between a single piece and a whole box.
+   *
+   * Marked goods are excluded: each physical piece carries its own DataMatrix and a fiscal
+   * position accepts only one label, so a box of N marked pieces cannot be fiscalized as one
+   * line. Weighed products are excluded because the scale already owns their quantity.
+   */
+  const needsSaleUnitChoice = useCallback(
+    (product: Product) =>
+      isBoxedProduct(product) &&
+      product.productType !== "BULK_WEIGHTED" &&
+      !productRequiresMarking(product),
+    [],
+  );
+
+  /**
+   * @param piecesPerUnit pieces contained in one `qty` unit — PIECE (1) for a normal line,
+   *   product.piecesPerBox when the cashier chose to sell whole boxes.
+   */
   const addProductToCart = useCallback(
-    (product: Product, qty: number) => {
+    (product: Product, qty: number, piecesPerUnit: number = PIECE) => {
       if (!product.isActive) {
         const productName =
           i18n.language === "uz" ? product.nameUz : product.nameRu;
@@ -446,6 +474,23 @@ export function POSScreen() {
 
       const productName =
         i18n.language === "uz" ? product.nameUz : product.nameRu;
+
+      // Box line. Deliberately skips the pending-price split below: pendingPrice is a PIECE
+      // price, and splitting a sealed box across two price tiers has no meaning. `stock` is
+      // converted to boxes so the cart's own clamp keeps working in the unit being sold.
+      if (piecesPerUnit > PIECE) {
+        addItem({
+          productId: product.id,
+          productName,
+          barcode: product.barcode,
+          unitPrice: boxUnitPrice(product),
+          quantity: qty,
+          stock: Math.floor(product.stock / piecesPerUnit),
+          unit: product.unit,
+          piecesPerUnit,
+        });
+        return;
+      }
 
       const hasPending =
         product.pendingPrice != null &&
@@ -563,6 +608,19 @@ export function POSScreen() {
         }
 
         const qty = parseFloat(quantity) || 1;
+
+        // Boxed product: ask piece-or-box before creating the line. Checked BEFORE the stock
+        // guard, which is expressed in pieces and would reject a box the modal can still offer.
+        if (needsSaleUnitChoice(product)) {
+          setId("");
+          writeBarcode("", true);
+          setQuantity("1");
+          setInputMode("barcode");
+          setError("");
+          setSaleUnitChoice({ product, qty });
+          return;
+        }
+
         if (qty > product.stock) {
           setError(
             t("errors.insufficientStock", {
@@ -600,6 +658,7 @@ export function POSScreen() {
     getById,
     addProductToCart,
     needsScaleWeighing,
+    needsSaleUnitChoice,
     t,
     i18n.language,
     writeBarcode,
@@ -787,7 +846,13 @@ export function POSScreen() {
           // Quantity field's default of 1 would spuriously fail this for a product with
           // under 1 unit left. The marking checks below still apply, and the weight is
           // validated in BulkWeighModal.
-          if (qty > product.stock && !needsScaleWeighing(product)) {
+          // Boxed products are exempt too: this guard counts PIECES, but the cashier may be
+          // about to buy boxes — SaleUnitModal does the piece-accurate check per unit.
+          if (
+            qty > product.stock &&
+            !needsScaleWeighing(product) &&
+            !needsSaleUnitChoice(product)
+          ) {
             setError(
               t("errors.insufficientStock", {
                 name: i18n.language === "uz" ? product.nameUz : product.nameRu,
@@ -890,6 +955,21 @@ export function POSScreen() {
             setBulkWeighProduct(product);
             return;
           }
+
+          // Boxed product. Scanning the code printed on the PACK is already an unambiguous
+          // "sell me a box", so it skips the prompt; the piece barcode (or a catalog pick)
+          // still asks. product.boxBarcode is what the lookup matched on, so this compares
+          // the exact same string the DB did.
+          if (needsSaleUnitChoice(product)) {
+            resetInputs();
+            if (product.boxBarcode && product.boxBarcode === barcodeValue) {
+              addProductToCart(product, qty, product.piecesPerBox ?? PIECE);
+            } else {
+              setSaleUnitChoice({ product, qty });
+            }
+            return;
+          }
+
           addProductToCart(product, qty);
           resetInputs();
         }
@@ -912,6 +992,7 @@ export function POSScreen() {
     searchByBarcode,
     addProductToCart,
     needsScaleWeighing,
+    needsSaleUnitChoice,
     addItem,
     removeByMarkingCode,
     items,
@@ -940,6 +1021,7 @@ export function POSScreen() {
             barcode: item.barcode,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            piecesPerUnit: item.piecesPerUnit,
             preWeighedItemId: item.preWeighedItemId,
           })),
           paymentMethod: method,
@@ -1002,6 +1084,12 @@ export function POSScreen() {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if checkout or smena modal is open
       if (showCheckout || showSmenaModal) return;
+
+      // SaleUnitModal owns the keyboard while it is open: its 1 / 2 / Escape would otherwise
+      // ALSO be swallowed here — the digits appended to the barcode buffer and Escape clearing
+      // the screen behind the modal. (BulkWeighModal doesn't need this because it keeps a real
+      // <input> focused, which the tag check below already skips.)
+      if (saleUnitChoice) return;
 
       // Let native inputs handle their own keyboard events
       const tag = (e.target as HTMLElement)?.tagName;
@@ -1109,6 +1197,7 @@ export function POSScreen() {
     quantity,
     showCheckout,
     showSmenaModal,
+    saleUnitChoice,
     handleBarcodeSubmit,
     handleQuickPay,
     writeBarcode,
@@ -1121,6 +1210,20 @@ export function POSScreen() {
       setBulkWeighProduct(null);
     },
     [bulkWeighProduct, addProductToCart],
+  );
+
+  const handleSaleUnitSelect = useCallback(
+    (unit: "piece" | "box") => {
+      if (!saleUnitChoice) return;
+      const { product, qty } = saleUnitChoice;
+      setSaleUnitChoice(null);
+      addProductToCart(
+        product,
+        qty,
+        unit === "box" ? (product.piecesPerBox ?? PIECE) : PIECE,
+      );
+    },
+    [saleUnitChoice, addProductToCart],
   );
 
   const handleBulkWeighPrintAndScan = useCallback(
@@ -1195,6 +1298,15 @@ export function POSScreen() {
         return;
       }
       const qty = parseFloat(quantity) || 1;
+
+      // Boxed product: ask piece-or-box. Before the stock guard, which counts pieces.
+      if (needsSaleUnitChoice(product)) {
+        setQuantity("1");
+        setError("");
+        setSaleUnitChoice({ product, qty });
+        return;
+      }
+
       if (qty > product.stock) {
         setError(
           t("errors.insufficientStock", {
@@ -1209,7 +1321,14 @@ export function POSScreen() {
       setQuantity("1");
       setError("");
     },
-    [quantity, t, i18n.language, addProductToCart, needsScaleWeighing],
+    [
+      quantity,
+      t,
+      i18n.language,
+      addProductToCart,
+      needsScaleWeighing,
+      needsSaleUnitChoice,
+    ],
   );
 
   const handleCheckoutComplete = () => {
@@ -1416,6 +1535,15 @@ export function POSScreen() {
             onAddToCart={handleBulkWeighAddNow}
             onPrintAndScan={handleBulkWeighPrintAndScan}
             onCancel={() => setBulkWeighProduct(null)}
+          />
+        )}
+
+        {saleUnitChoice && (
+          <SaleUnitModal
+            product={saleUnitChoice.product}
+            quantity={saleUnitChoice.qty}
+            onSelect={handleSaleUnitSelect}
+            onCancel={() => setSaleUnitChoice(null)}
           />
         )}
       </Container>

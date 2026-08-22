@@ -7,6 +7,7 @@ import { regosVcrService } from '../fiscal/regos-vcr-service';
 import { savePendingMarkingCodes } from './marking-codes-handlers';
 import { format } from 'date-fns';
 import { randomUUID } from 'node:crypto';
+import { toPieces } from '../../shared/utils/pack';
 import type { Sale, SaleItem as PrismaSaleItem } from '../../generated/prisma-sqlite';
 
 function ipcSafe<T>(value: T): T {
@@ -23,8 +24,13 @@ export function setupSalesHandlers(): void {
     const prisma = getPrismaClient();
     const config = getAppConfig();
 
-    // Check stock availability for all items
-    for (const item of data.items as Array<{ productId: number | string; quantity: number }>) {
+    // Check stock availability for all items. Stock is counted in PIECES while a line's
+    // quantity is in SALE units, so a box line must be converted before comparing.
+    for (const item of data.items as Array<{
+      productId: number | string;
+      quantity: number;
+      piecesPerUnit?: number;
+    }>) {
       const product = await prisma.product.findUnique({
         where: { id: Number(item.productId) },
         select: { id: true, nameRu: true, stock: true, active: true },
@@ -38,12 +44,13 @@ export function setupSalesHandlers(): void {
         throw new Error(JSON.stringify({ code: 'PRODUCT_INACTIVE', name: product.nameRu }));
       }
 
-      if (Number(product.stock) < item.quantity) {
+      const piecesNeeded = toPieces(item.quantity, item.piecesPerUnit);
+      if (Number(product.stock) < piecesNeeded) {
         throw new Error(JSON.stringify({
           code: 'INSUFFICIENT_STOCK',
           name: product.nameRu,
           available: Number(product.stock),
-          requested: item.quantity,
+          requested: piecesNeeded,
         }));
       }
     }
@@ -65,6 +72,7 @@ export function setupSalesHandlers(): void {
       barcode: string;
       quantity: number;
       unitPrice: number;
+      piecesPerUnit?: number;
       preWeighedItemId?: string;
     }) => {
       const subtotal = item.quantity * item.unitPrice;
@@ -76,6 +84,7 @@ export function setupSalesHandlers(): void {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         subtotal,
+        piecesPerUnit: item.piecesPerUnit ?? 1,
         // Keep preWeighedItemId for post-sale update (not stored in DB SaleItem)
         preWeighedItemId: item.preWeighedItemId,
       };
@@ -111,7 +120,7 @@ export function setupSalesHandlers(): void {
       await prisma.product.update({
         where: { id: item.productId },
         data: {
-          stock: { decrement: item.quantity },
+          stock: { decrement: toPieces(item.quantity, item.piecesPerUnit) },
         },
       });
 
@@ -253,7 +262,7 @@ export function setupSalesHandlers(): void {
     const salesWithMargin = (sales as Array<Sale & { items: Array<PrismaSaleItem & { product: { cost: unknown } | null }> }>).map((sale) => {
       const totalCost = sale.items.reduce((sum, item) => {
         const cost = item.product?.cost ? Number(item.product.cost) : 0;
-        return sum + cost * Number(item.quantity);
+        return sum + cost * Number(item.quantity) * (item.piecesPerUnit ?? 1);
       }, 0);
       const finalAmount = Number(sale.finalAmount);
       const margin = finalAmount > 0 ? ((finalAmount - totalCost) / finalAmount) * 100 : 0;
@@ -309,16 +318,22 @@ export function setupSalesHandlers(): void {
       throw new Error('Unauthorized');
     }
 
-    // Restore stock from old items
+    // Restore stock from old items (in pieces — a box line held piecesPerUnit of them)
     for (const oldItem of existingSale.items) {
       await prisma.product.update({
         where: { id: oldItem.productId },
-        data: { stock: { increment: oldItem.quantity } },
+        data: {
+          stock: { increment: toPieces(Number(oldItem.quantity), oldItem.piecesPerUnit) },
+        },
       });
     }
 
     // Check stock availability for new items (after restoring old stock)
-    for (const item of data.items as Array<{ productId: number | string; quantity: number }>) {
+    for (const item of data.items as Array<{
+      productId: number | string;
+      quantity: number;
+      piecesPerUnit?: number;
+    }>) {
       const product = await prisma.product.findUnique({
         where: { id: Number(item.productId) },
         select: { id: true, nameRu: true, stock: true, active: true },
@@ -332,12 +347,13 @@ export function setupSalesHandlers(): void {
         throw new Error(JSON.stringify({ code: 'PRODUCT_INACTIVE', name: product.nameRu }));
       }
 
-      if (Number(product.stock) < item.quantity) {
+      const piecesNeeded = toPieces(item.quantity, item.piecesPerUnit);
+      if (Number(product.stock) < piecesNeeded) {
         throw new Error(JSON.stringify({
           code: 'INSUFFICIENT_STOCK',
           name: product.nameRu,
           available: Number(product.stock),
-          requested: item.quantity,
+          requested: piecesNeeded,
         }));
       }
     }
@@ -350,6 +366,7 @@ export function setupSalesHandlers(): void {
       barcode: string;
       quantity: number;
       unitPrice: number;
+      piecesPerUnit?: number;
     }) => {
       const subtotal = item.quantity * item.unitPrice;
       totalAmount += subtotal;
@@ -360,6 +377,7 @@ export function setupSalesHandlers(): void {
         quantity: item.quantity,
         unitPrice: item.unitPrice,
         subtotal,
+        piecesPerUnit: item.piecesPerUnit ?? 1,
       };
     });
 
@@ -388,7 +406,7 @@ export function setupSalesHandlers(): void {
     for (const item of newItems) {
       await prisma.product.update({
         where: { id: item.productId },
-        data: { stock: { decrement: item.quantity } },
+        data: { stock: { decrement: toPieces(item.quantity, item.piecesPerUnit) } },
       });
 
       const updatedProduct = await prisma.product.findUnique({
@@ -436,11 +454,13 @@ export function setupSalesHandlers(): void {
       throw new Error('Unauthorized');
     }
 
-    // Restore stock for all items
+    // Restore stock for all items (in pieces — a box line held piecesPerUnit of them)
     for (const item of sale.items) {
       await prisma.product.update({
         where: { id: item.productId },
-        data: { stock: { increment: item.quantity } },
+        data: {
+          stock: { increment: toPieces(Number(item.quantity), item.piecesPerUnit) },
+        },
       });
     }
 
@@ -580,7 +600,7 @@ ipcMain.handle('analytics:getData', async (_event, filters: {
       SELECT COALESCE(c.name_ru, 'Без категории') as categoryRu,
              COALESCE(c.name_uz, 'Kategoriyasiz') as categoryUz,
              CAST(SUM(si.subtotal) AS REAL) as revenue,
-             CAST(SUM(si.quantity) AS REAL) as quantity
+             CAST(SUM(si.quantity * si.pieces_per_unit) AS REAL) as quantity
       FROM sale_items si
       JOIN sales s ON si.sale_id = s.id
       JOIN products p ON si.product_id = p.id
@@ -603,7 +623,7 @@ ipcMain.handle('analytics:getData', async (_event, filters: {
 
     prisma.$queryRawUnsafe(`
       SELECT si.product_name as name,
-             CAST(SUM(si.quantity) AS REAL) as quantity,
+             CAST(SUM(si.quantity * si.pieces_per_unit) AS REAL) as quantity,
              CAST(SUM(si.subtotal) AS REAL) as revenue
       FROM sale_items si
       JOIN sales s ON si.sale_id = s.id
@@ -627,7 +647,7 @@ ipcMain.handle('analytics:getData', async (_event, filters: {
       SELECT COALESCE(c.name_ru, 'Без категории') as categoryRu,
              COALESCE(c.name_uz, 'Kategoriyasiz') as categoryUz,
              CAST(SUM(si.subtotal) AS REAL) as revenue,
-             CAST(SUM(si.quantity * COALESCE(p.cost, 0)) AS REAL) as cost
+             CAST(SUM(si.quantity * si.pieces_per_unit * COALESCE(p.cost, 0)) AS REAL) as cost
       FROM sale_items si
       JOIN sales s ON si.sale_id = s.id
       JOIN products p ON si.product_id = p.id

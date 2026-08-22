@@ -328,3 +328,134 @@ set the operator was looking at. The boolean stays on the DTO for compatibility.
 completion has run against Postgres. On staging, the case to prove is the reported one:
 two uncounted products, deselect one, complete → the deselected product's stock must be
 **unchanged**, and it must come back `writtenOff = false` with no row written for it.
+
+---
+
+# Boxed products — sell per piece or per whole box (2026-08-22)
+
+Goods that arrive in multi-piece packs (hair dye ×2, razor packs ×2–10) are sold both ways.
+The catalog had one price and one barcode per product, so staff either kept a duplicate
+"box" product (two stock rows that drift apart) or rang up N pieces by hand (losing the
+pack discount). Now a product carries an optional pack, and the cashier is asked which unit
+before the line is created.
+
+## The one invariant
+
+**Stock is always counted in PIECES.** A cart line / `SaleItem` keeps `quantity` in SALE
+units with the matching `unitPrice`, plus `piecesPerUnit` (1 = piece, N = box). Everything
+that touches stock, cost, or a physical count multiplies through `toPieces()`.
+
+```
+2 boxes of 5 @ 45 000 → quantity 2, unitPrice 45 000, piecesPerUnit 5, subtotal 90 000
+   stock            −10 pieces
+   fiscal quantity   10 000 (10 pcs ×1000), amount 9 000 000 → 9 000/piece ✓
+```
+
+Storing pieces and dividing the box price was rejected: `boxPrice / piecesPerBox` does not
+divide evenly in tiyin, so subtotals would drift off what the customer actually paid and
+REGOS' `amount ≈ Σ payments` check (±50) would eventually fail.
+
+## Done
+
+- [x] `src/shared/utils/pack.ts` — `PIECE`, `isBoxedProduct`, `toPieces`, `boxUnitPrice`.
+      11 unit tests; `toPieces` falls back to 1 for null/0/negative/NaN so a bad payload can
+      never zero out or reverse a stock decrement.
+- [x] Schema both sides: `products.pieces_per_box / box_price / box_barcode`,
+      `sale_items.pieces_per_unit INT NOT NULL DEFAULT 1`. PG migration
+      `20260822000001_add_product_box_pack` + **the raw-SQL path in `sqlite-client.ts`**
+      (migration 26), which is what actually maintains terminal DBs.
+- [x] Full sync plumbing: shared types, both product DTOs, `products.service` create/
+      syncBulk/findByBarcode, `products-sync.ts` (both create AND update lists),
+      `serializeProduct`, `upload-sync`, sale sync + `sync-sale.dto`.
+- [x] `SaleUnitModal` + gates in all three add paths (scan / product-id / catalog).
+- [x] Stock conversion at all six sites in `sales-handlers.ts`, plus the server's own
+      decrement in `sales.service.ts`.
+- [x] Fiscal `buildPositions` reports pieces; cart badge, quantity label, printed receipt.
+- [x] Web admin form: pack size, box price (auto-suggested, overridable), box barcode.
+
+## Four things worth knowing
+
+**Box mode is refused for marked goods.** Each physical piece carries its own DataMatrix and
+a fiscal position accepts at most one `label`, so a box of 5 marked pieces cannot be
+fiscalized as one line. `needsSaleUnitChoice` excludes them, and the web form hides the pack
+fields when `isMarked` is set.
+
+**Fiscal quantity is PIECES, not boxes.** `package_code` is auto-set to the *smallest* tasnif
+package (`pickSingleUnitPackage`), i.e. the product is registered as sold per piece. REGOS
+re-derives the unit price as `amount / quantity`, so sending 1 for a box would imply the box
+price and contradict the registered package. Sending 1 would only be right if `package_code`
+were switched to a `…=N шт` package.
+
+**The hotkeys are F1/F2, deliberately not 1/2.** A scanner emits digits and a trailing Enter.
+With bare digits and a focused button, a stray scan while the modal was open would silently
+pick a unit and put the wrong money in the cart. Scanners cannot emit function keys. The
+modal also parks focus in a hidden `ScanSink` so a mid-modal scan is swallowed, and
+POSScreen's global keypad handler now early-returns while the modal is open (it previously
+bailed only for the checkout/smena modals).
+
+**Every "units sold" and cost-of-goods figure was converted too.** `SUM(si.quantity)` would
+have counted a box as one unit and `SUM(si.quantity * p.cost)` would have charged one piece's
+cost for a whole box — overstating margin. Seven sites now multiply by `pieces_per_unit`
+(4 SQL, 3 JS) across terminal reports and server analytics. Safe for all history because the
+column is `NOT NULL DEFAULT 1`.
+
+**Verified:** 63/63 tests; `tsc --noEmit` clean on both projects; `nest build`, `src/web`
+build, and `electron-vite build` all green. Migration 26 replayed on a throwaway SQLite DB
+of the old shape — existing rows get NULL pack fields, historical `sale_items` backfill to
+`pieces_per_unit = 1`, and the box-barcode unique index accepts many NULLs but rejects
+duplicates. Report SQL checked against a fixture: a 2×5 box line plus a 3-piece line yields
+13 pieces / 78 000 cost.
+
+**Not verified:** no live run. Not exercised: the modal on a real terminal, a real scan of a
+box barcode, a REGOS `ValidateSale` with a box line, and pull-sync of the three new columns
+from the VPS. See the plan's verification section.
+
+**Note:** `products:getTopSelling` still ranks by `_sum: { quantity }` (Prisma `groupBy`
+cannot multiply). A box counts as 1 there — it only affects catalog ordering, no figure is
+shown to anyone.
+
+---
+
+# ProductForm split into 3 tabs (2026-08-22)
+
+Both product forms had grown to one ~25-field scroll. Split into **General / Tax / Photo** in
+`src/renderer/pages/Products/ProductForm.tsx` and `src/web/src/pages/Products/ProductForm.tsx`.
+
+## Layout
+
+**General** — the five required fields in sequence, nothing else visible:
+barcode (+generate) | category (+manage) → nameUz | nameRu → price.
+Everything optional sits behind a collapsed **"Дополнительные поля"** fold: cost, stock,
+minStock, unit, productType, supplier, internalCode (conditional), the box-pack row (web),
+production/expiry dates, discount, promotion.
+
+**Tax** — MXIK (+catalog picker), VAT rate, package code, and on web the Asl-Belgisi marking
+select. MXIK is required but lives here because it *is* the tax classification code.
+
+**Photo** — dashed placeholder with a lucide `ImageIcon` and a "Скоро / Tez orada" message.
+
+## The one non-obvious problem
+
+**Hiding a `required` input breaks native validation.** Only the active tab is mounted, so the
+browser can only validate what is on screen — a missing MXIK on the Tax tab would sail through
+submit unnoticed. (Keeping all tabs mounted and hidden with CSS is worse: Chrome throws
+"An invalid form control is not focusable" and the form silently refuses to submit at all.)
+
+Fixed with `firstInvalidTab()`, checked at the top of `handleSubmit`: it returns the tab
+holding the first missing required field, the form switches to it and toasts
+`products.fillRequired`. The `required` attributes stay so the active tab still gets native
+validation.
+
+Also: every `Tab` and the `FoldToggle` carry `type="button"` — inside a `<form>` a bare
+`<button>` defaults to submit, so switching tabs would have saved the product.
+
+## Verified
+
+`tsc --noEmit` clean on both projects (it fully parses JSX and resolves every identifier),
+`electron-vite build` + `src/web` build green, 63/63 tests, ru/uz `products` key parity 99/99.
+Field-level check: the set of `formData.*` bindings is identical to HEAD in both files — no
+field lost in the move — and each label appears exactly once in the form (the extra hits are
+the separate "product exists"/arrival modal).
+
+**Not verified:** no visual run. The tab bar, fold, and placeholder have not been seen in a
+running app; login credentials would be needed to reach the form.

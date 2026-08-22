@@ -94,6 +94,9 @@ export async function syncProducts(): Promise<
         isMarked: p.isMarked ?? null,
         productType: p.productType ?? "REGULAR",
         internalCode: p.internalCode ?? null,
+        piecesPerBox: p.piecesPerBox ?? null,
+        boxPrice: p.boxPrice ?? null,
+        boxBarcode: p.boxBarcode ?? null,
         storeProductCode: p.storeProductCode ?? null,
         createdAt: new Date(p.createdAt),
         updatedAt: new Date(p.updatedAt),
@@ -130,6 +133,24 @@ export async function syncProducts(): Promise<
         }
       }
 
+      // Same for boxBarcode: it is UNIQUE locally, so a box code reassigned to another
+      // product on the VPS would otherwise collide with its previous local owner.
+      if (product.boxBarcode) {
+        const conflicting = await prisma.product.findFirst({
+          where: {
+            boxBarcode: String(product.boxBarcode),
+            NOT: { barcode: product.barcode },
+          },
+          select: { id: true },
+        });
+        if (conflicting) {
+          await prisma.product.update({
+            where: { id: conflicting.id },
+            data: { boxBarcode: null },
+          });
+        }
+      }
+
       // Check if a product with the same barcode already exists locally
       const existing = await prisma.product.findUnique({
         where: { barcode: product.barcode },
@@ -161,6 +182,9 @@ export async function syncProducts(): Promise<
               isMarked: product.isMarked ?? null,
               productType: product.productType ?? "REGULAR",
               internalCode: product.internalCode ?? null,
+              piecesPerBox: product.piecesPerBox ?? null,
+              boxPrice: product.boxPrice ?? null,
+              boxBarcode: product.boxBarcode ?? null,
               storeProductCode: product.storeProductCode ?? null,
               updatedAt: new Date(product.updatedAt),
             },

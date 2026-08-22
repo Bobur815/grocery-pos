@@ -148,6 +148,13 @@ model Product {
   minSaleQty    Decimal @default(0) @db.Decimal(10, 3) @map("min_sale_qty")
   maxSaleQty    Decimal @default(0) @db.Decimal(10, 3) @map("max_sale_qty")
 
+
+  // Multi-piece pack ("box"): a product sellable either per piece or as a sealed pack of N.
+  // piecesPerBox null/1 = not boxed. Stock is ALWAYS counted in pieces; a box sale decrements N.
+  piecesPerBox  Int?     @map("pieces_per_box")
+  boxPrice      Decimal? @db.Decimal(10, 2) @map("box_price")
+  boxBarcode    String?  @map("box_barcode")
+
   storeProductCode Int? @map("store_product_code")
 
   // Set when a stocktake (InventoryCount) last wrote this product's stock absolutely.
@@ -165,6 +172,7 @@ model Product {
   @@unique([storeId, barcode]) // Same barcode can exist in different stores
   @@unique([storeId, internalCode]) // internalCode unique per store
   @@unique([storeId, storeProductCode]) // Per-store sequential product code
+  @@unique([storeId, boxBarcode]) // Box barcode unique per store
   @@index([storeId])
   @@index([storeId, mxik]) // Fast MXIK lookup per store
   @@map("products")
@@ -216,6 +224,10 @@ model SaleItem {
   quantity    Decimal @db.Decimal(10, 3) // 1.5 kg, etc
   unitPrice   Decimal @map("unit_price") @db.Decimal(10, 2)
   subtotal    Decimal @db.Decimal(10, 2)
+
+  // Pieces contained in one `quantity` unit: 1 for a piece line, N for a box line.
+  // Stock math and fiscal reporting multiply by this to get pieces.
+  piecesPerUnit Int @default(1) @map("pieces_per_unit")
 
   @@map("sale_items")
 }

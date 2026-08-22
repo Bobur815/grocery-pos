@@ -153,4 +153,23 @@ export class UpdateProductDto {
   @Min(0)
   @Type(() => Number)
   maxSaleQty?: number;
+
+  @ApiPropertyOptional({ example: 5, description: 'Pieces in one box. Null or 1 = not boxed (sold only per piece)' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  piecesPerBox?: number | null;
+
+  @ApiPropertyOptional({ example: 45000, description: 'Price of one whole box. Null → price x piecesPerBox' })
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  boxPrice?: number | null;
+
+  @ApiPropertyOptional({ example: '4780001234574', description: 'Optional barcode printed on the box; scanning it sells a whole box' })
+  @IsOptional()
+  @IsString()
+  boxBarcode?: string | null;
 }

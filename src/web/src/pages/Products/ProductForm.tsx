@@ -23,7 +23,15 @@ import {
   SUPPLIER_PAYMENT_METHOD_I18N_KEYS,
 } from "@shared/constants/payment-methods";
 import { convertUzbekText } from "@shared/utils/transliterator";
-import { RefreshCw, Settings, Search } from "lucide-react";
+import {
+  RefreshCw,
+  Settings,
+  Search,
+  ChevronDown,
+  ChevronRight,
+  ImageIcon,
+  Camera,
+} from "lucide-react";
 import { SupplierManagementModal } from "../Suppliers/SupplierManagementModal";
 import { CategoryManagementModal } from "./CategoryManagementModal";
 import {
@@ -239,6 +247,88 @@ const PickerItemMeta = styled.div`
   margin-top: 2px;
 `;
 
+const TabRow = styled.div`
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid ${({ theme }) => theme.colors.border};
+  overflow-x: auto;
+`;
+
+const Tab = styled.button<{ $active: boolean }>`
+  padding: 10px 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid
+    ${({ $active, theme }) => ($active ? theme.colors.primary : "transparent")};
+  margin-bottom: -2px;
+  font-size: 14px;
+  font-weight: ${({ $active }) => ($active ? 600 : 400)};
+  color: ${({ $active, theme }) =>
+    $active ? theme.colors.primary : theme.colors.textSecondary};
+  cursor: pointer;
+  white-space: nowrap;
+`;
+
+/** Keeps the modal from resizing as the user moves between tabs. */
+const TabPanel = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.md};
+  min-height: 300px;
+`;
+
+const FoldToggle = styled.button`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.xs};
+  padding: ${({ theme }) => theme.spacing.sm} 0;
+  background: none;
+  border: none;
+  border-top: 1px solid ${({ theme }) => theme.colors.border};
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
+const FoldBody = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: ${({ theme }) => theme.spacing.md};
+`;
+
+const PhotoPlaceholder = styled.div`
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  padding: ${({ theme }) => theme.spacing.lg};
+  min-height: 280px;
+  border: 2px dashed ${({ theme }) => theme.colors.border};
+  border-radius: ${({ theme }) => theme.borderRadius};
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const PhotoTitle = styled.div`
+  font-size: 15px;
+  font-weight: 600;
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const PhotoHint = styled.div`
+  font-size: 13px;
+  text-align: center;
+  max-width: 340px;
+`;
+
+type FormTab = "general" | "tax" | "photo";
+
 const UNIT_OPTIONS: ProductUnit[] = ["шт", "кг", "л", "м"];
 
 interface ProductFormProps {
@@ -320,7 +410,17 @@ export function ProductForm({
       ? ("BULK_WEIGHTED" as ProductType)
       : ("REGULAR" as ProductType),
     internalCode: initialData?.internalCode || "",
+    // Multi-piece pack ("box"). Empty piecesPerBox = not boxed; the POS then never asks the
+    // cashier piece-or-box and the product behaves exactly as before.
+    piecesPerBox: "",
+    boxPrice: "",
+    boxBarcode: "",
   });
+  const [tab, setTab] = useState<FormTab>("general");
+  // Everything that is not required starts collapsed: the common case is scanning a barcode,
+  // typing a name and a price, and saving.
+  const [showMore, setShowMore] = useState(false);
+
   const [existingProduct, setExistingProduct] = useState<Product | null>(null);
   const [mxikPackages, setMxikPackages] = useState<MxikPackage[]>([]);
   const [showArrivalModal, setShowArrivalModal] = useState(false);
@@ -339,6 +439,9 @@ export function ProductForm({
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showCategoryModal, setShowCategoryModal] = useState(false);
   const [showQrScanner, setShowQrScanner] = useState(false);
+  // Separate from showQrScanner: that one feeds the MXIK/Asl-Belgisi lookup, this one just
+  // drops a plain retail barcode into the boxBarcode field.
+  const [showBoxBarcodeScanner, setShowBoxBarcodeScanner] = useState(false);
   const [isLookingUpAslBelgisi, setIsLookingUpAslBelgisi] = useState(false);
   const [showMxikPicker, setShowMxikPicker] = useState(false);
   const [mxikPickerQuery, setMxikPickerQuery] = useState("");
@@ -574,6 +677,25 @@ export function ProductForm({
         checkBarcode(value);
       }, 800);
     }
+  };
+
+  const handleBoxBarcodeScan = (code: string) => {
+    setShowBoxBarcodeScanner(false);
+    const scanned = code.trim();
+    if (!scanned) return;
+    // The box code must be its own: reusing the product's piece barcode would make every
+    // scan at the till resolve to a box, and the POS could never sell a single piece.
+    if (scanned === formData.barcode.trim()) {
+      toast.error(
+        t(
+          "products.boxBarcodeSameAsPiece",
+          "Это штрих-код самого товара — у коробки должен быть свой код",
+        ),
+      );
+      return;
+    }
+    handleChange("boxBarcode", scanned);
+    toast.success(t("products.boxBarcodeScanned", "Штрих-код коробки отсканирован"));
   };
 
   const handleQrScan = async (qrData: string) => {
@@ -835,6 +957,10 @@ export function ProductForm({
         vatRate: product.vatRate != null ? String(product.vatRate) : "",
         productType: product.productType || "REGULAR",
         internalCode: product.internalCode || "",
+        piecesPerBox:
+          product.piecesPerBox != null ? String(product.piecesPerBox) : "",
+        boxPrice: product.boxPrice != null ? String(product.boxPrice) : "",
+        boxBarcode: product.boxBarcode || "",
       });
 
       if (openArrival) {
@@ -857,8 +983,36 @@ export function ProductForm({
     }
   };
 
+  /**
+   * The tab holding the first missing required field, or null when the form is complete.
+   *
+   * Only the active tab is mounted, so the browser can only validate the fields currently on
+   * screen — a missing MXIK on the Tax tab would let a submit through unnoticed. Checked here
+   * so the form can jump to the tab that needs attention instead of failing silently.
+   */
+  const firstInvalidTab = (): FormTab | null => {
+    if (
+      !formData.barcode.trim() ||
+      !formData.nameUz.trim() ||
+      !formData.nameRu.trim() ||
+      !String(formData.price).trim() ||
+      !formData.categoryId
+    ) {
+      return "general";
+    }
+    if (!formData.mxik.trim()) return "tax";
+    return null;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const invalidTab = firstInvalidTab();
+    if (invalidTab) {
+      setTab(invalidTab);
+      toast.error(t("products.fillRequired", "Заполните обязательные поля"));
+      return;
+    }
 
     // When editing, omit `stock` — stock is managed by inventory arrivals and
     // sales only. Including it here would overwrite any changes that occurred
@@ -887,6 +1041,14 @@ export function ProductForm({
       vatRate: formData.vatRate === "" ? null : parseFloat(formData.vatRate),
       productType: formData.productType,
       internalCode: formData.internalCode || undefined,
+      // A pack of 1 is not a pack — normalise it to null so isBoxedProduct() stays false and
+      // the POS keeps ringing this product up straight through.
+      piecesPerBox:
+        parseInt(formData.piecesPerBox, 10) > 1
+          ? parseInt(formData.piecesPerBox, 10)
+          : null,
+      boxPrice: formData.boxPrice ? parseFloat(formData.boxPrice) : null,
+      boxBarcode: formData.boxBarcode || null,
     };
 
     let success = false;
@@ -906,13 +1068,34 @@ export function ProductForm({
   };
 
   const handleChange = (field: string, value: string | boolean | null) => {
-    setFormData((prev) => ({
-      ...prev,
-      [field]: value,
-      ...(field === "productType" && value === "BULK_WEIGHTED"
-        ? { unit: "кг" }
-        : {}),
-    }));
+    setFormData((prev) => {
+      const next = {
+        ...prev,
+        [field]: value,
+        ...(field === "productType" && value === "BULK_WEIGHTED"
+          ? { unit: "кг" as ProductUnit }
+          : {}),
+      };
+
+      // Suggest the undiscounted box price whenever the piece price or the pack size changes,
+      // but never overwrite a figure the admin typed themselves — that is where the bulk
+      // discount lives. An empty boxPrice means "not set yet", so it is safe to fill.
+      if (field === "price" || field === "piecesPerBox") {
+        const pieces = parseInt(String(next.piecesPerBox), 10);
+        const price = parseFloat(String(next.price));
+        const suggestedBefore =
+          parseFloat(String(prev.price)) * parseInt(String(prev.piecesPerBox), 10);
+        const untouched =
+          prev.boxPrice === "" ||
+          (Number.isFinite(suggestedBefore) &&
+            parseFloat(String(prev.boxPrice)) === suggestedBefore);
+        if (untouched && pieces > 1 && Number.isFinite(price)) {
+          next.boxPrice = String(price * pieces);
+        }
+      }
+
+      return next;
+    });
   };
 
   const handleNameUzChange = (value: string) => {
@@ -950,384 +1133,550 @@ export function ProductForm({
       {!openArrival && (
         <Modal title={title} onClose={onClose} width="750px">
           <Form onSubmit={handleSubmit}>
-            <Row>
-              <FormGroup>
-                <Label>
-                  {t("products.mxik")} <Req>*</Req>
-                </Label>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <Input
-                    value={formData.mxik}
-                    placeholder="00000000000000000"
-                    onChange={(e) => handleChange("mxik", e.target.value)}
-                    required
-                    style={{ flex: 1 }}
-                  />
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="small"
-                    onClick={() => setShowMxikPicker(true)}
-                    title={t("products.searchMxik")}
-                    style={{ flexShrink: 0 }}
-                  >
-                    <Search size={16} />
-                  </Button>
-                </div>
-              </FormGroup>
-              {mxikPackages.length > 0 && (
-                <FormGroup>
-                  <Label>
-                    {t("products.packageCode", "Код упаковки (МХИК)")}
-                  </Label>
-                  <Select
-                    value={formData.packageCode}
-                    onChange={(e) =>
-                      handleChange("packageCode", e.target.value)
-                    }
-                  >
-                    {mxikPackages.map((p) => (
-                      <option key={p.code} value={p.code}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </Select>
-                </FormGroup>
-              )}
-              <FormGroup>
-                <Label>{t("products.vatRate", "Ставка НДС, %")}</Label>
-                <Select
-                  value={formData.vatRate}
-                  onChange={(e) => handleChange("vatRate", e.target.value)}
-                  title={t(
-                    "products.vatRateHint",
-                    "Пусто — использовать ставку по умолчанию",
-                  )}
-                >
-                  <option value="">
-                    {t("products.vatRateHint", "По умолчанию")}
-                  </option>
-                  <option value="0">0.00%</option>
-                  <option value="6">6.00%</option>
-                  <option value="12">12.00%</option>
-                </Select>
-              </FormGroup>
-              <FormGroup>
-                <Label>
-                  {t("products.marking", "Маркировка (Asl-Belgisi)")}
-                </Label>
-                <Select
-                  value={
-                    formData.isMarked === null
-                      ? ""
-                      : formData.isMarked
-                        ? "1"
-                        : "0"
-                  }
-                  onChange={(e) =>
-                    handleChange(
-                      "isMarked",
-                      e.target.value === "" ? null : e.target.value === "1",
-                    )
-                  }
-                  title={t(
-                    "products.markingHint",
-                    "Авто — POS определит по группе МХИК; иначе задаёт обязательную маркировку (продажа только по QR)",
-                  )}
-                >
-                  <option value="">
-                    {t("products.markingAuto", "Авто (по группе МХИК)")}
-                  </option>
-                  <option value="1">
-                    {t("products.markingYes", "Маркируется (только QR)")}
-                  </option>
-                  <option value="0">
-                    {t("products.markingNo", "Не маркируется")}
-                  </option>
-                </Select>
-              </FormGroup>
-              <FormGroup>
-                <Label>
-                  {t("products.barcode")} <Req>*</Req>
-                </Label>
-                <div
-                  style={{ display: "flex", flexDirection: "row", gap: "8px" }}
-                >
-                  <Input
-                    value={formData.barcode}
-                    autoFocus
-                    onChange={(e) => handleBarcodeChange(e.target.value)}
-                    disabled={isEdit}
-                    required
-                    style={{ flex: 1 }}
-                  />
-                  {!isEdit && (
-                    <>
+            <TabRow>
+              <Tab
+                type="button"
+                $active={tab === "general"}
+                onClick={() => setTab("general")}
+              >
+                {t("products.tabGeneral", "Основное")}
+              </Tab>
+              <Tab
+                type="button"
+                $active={tab === "tax"}
+                onClick={() => setTab("tax")}
+              >
+                {t("products.tabTax", "Налоги")}
+              </Tab>
+              <Tab
+                type="button"
+                $active={tab === "photo"}
+                onClick={() => setTab("photo")}
+              >
+                {t("products.tabPhoto", "Фото")}
+              </Tab>
+            </TabRow>
+
+            {tab === "general" && (
+              <TabPanel>
+                <Row>
+                  <FormGroup>
+                    <Label>
+                      {t("products.barcode")} <Req>*</Req>
+                    </Label>
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "row",
+                        gap: "8px",
+                      }}
+                    >
+                      <Input
+                        value={formData.barcode}
+                        autoFocus
+                        onChange={(e) => handleBarcodeChange(e.target.value)}
+                        disabled={isEdit}
+                        required
+                        style={{ flex: 1 }}
+                      />
+                      {!isEdit && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="small"
+                          onClick={handleGenerateBarcode}
+                          title={t("products.generateBarcode")}
+                          style={{ flexShrink: 0 }}
+                        >
+                          <RefreshCw size={16} />
+                        </Button>
+                      )}
+                    </div>
+                    {mcVerification?.isValid && (
+                      <div
+                        style={{
+                          marginTop: 6,
+                          padding: "6px 10px",
+                          background: "#4caf5015",
+                          border: "1px solid #4caf5060",
+                          borderRadius: 4,
+                          fontSize: 12,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 8,
+                        }}
+                      >
+                        <span style={{ color: "#4caf50", fontWeight: 600 }}>
+                          ✓ {t("products.verifiedByAslBelgisi")}
+                        </span>
+                        {mcVerification.issuerName && (
+                          <span style={{ color: "#666" }}>
+                            {t("products.issuer")}: {mcVerification.issuerName}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </FormGroup>
+                  <FormGroup>
+                    <Label>
+                      {t("products.category")} <Req>*</Req>
+                    </Label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <Select
+                        value={formData.categoryId}
+                        onChange={(e) =>
+                          handleChange("categoryId", e.target.value)
+                        }
+                        required
+                        style={{ flex: 1 }}
+                      >
+                        <option value="">{t("products.selectCategory")}</option>
+                        {categories.map((cat) => (
+                          <option key={cat.id} value={cat.id}>
+                            {i18n.language === "uz" ? cat.nameUz : cat.nameRu}
+                          </option>
+                        ))}
+                      </Select>
                       <Button
                         type="button"
                         variant="secondary"
                         size="small"
-                        onClick={handleGenerateBarcode}
-                        title={t("products.generateBarcode")}
+                        onClick={() => setShowCategoryModal(true)}
                         style={{ flexShrink: 0 }}
                       >
-                        <RefreshCw size={16} />
+                        <Settings size={16} />
                       </Button>
-                    </>
-                  )}
-                </div>
-                {mcVerification?.isValid && (
-                  <div
-                    style={{
-                      marginTop: 6,
-                      padding: "6px 10px",
-                      background: "#4caf5015",
-                      border: "1px solid #4caf5060",
-                      borderRadius: 4,
-                      fontSize: 12,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 8,
-                    }}
-                  >
-                    <span style={{ color: "#4caf50", fontWeight: 600 }}>
-                      ✓ {t("products.verifiedByAslBelgisi")}
-                    </span>
-                    {mcVerification.issuerName && (
-                      <span style={{ color: "#666" }}>
-                        {t("products.issuer")}: {mcVerification.issuerName}
-                      </span>
-                    )}
-                  </div>
-                )}
-              </FormGroup>
-            </Row>
+                    </div>
+                  </FormGroup>
+                </Row>
 
-            <Row>
-              <Input
-                label={
-                  <>
-                    {t("products.nameUz")} <Req>*</Req>
-                  </>
-                }
-                value={formData.nameUz}
-                onChange={(e) => handleNameUzChange(e.target.value)}
-                required
-              />
-              <Input
-                label={
-                  <>
-                    {t("products.nameRu")} <Req>*</Req>
-                  </>
-                }
-                value={formData.nameRu}
-                onChange={(e) => handleNameRuChange(e.target.value)}
-                required
-              />
-            </Row>
-
-            <Row>
-              <Input
-                label={
-                  <>
-                    {t("products.price")}
-                    {formProfitMargin !== null
-                      ? ` (${formProfitMargin}%)`
-                      : ""}{" "}
-                    <Req>*</Req>
-                  </>
-                }
-                type="number"
-                value={formData.price}
-                onChange={(e) => handleChange("price", e.target.value)}
-                required
-                onFocus={(e) => e.target.select()}
-              />
-              <Input
-                label={t("products.cost")}
-                type="number"
-                value={formData.cost}
-                onChange={(e) => handleChange("cost", e.target.value)}
-                onFocus={(e) => e.target.select()}
-              />
-            </Row>
-
-            <Row>
-              <Input
-                label={t("products.stock")}
-                type="number"
-                disabled={isEdit}
-                step={
-                  formData.productType === "BULK_WEIGHTED" ||
-                  formData.productType === "PREPACKAGED"
-                    ? "0.001"
-                    : "1"
-                }
-                value={formData.stock}
-                onChange={(e) => handleChange("stock", e.target.value)}
-                onFocus={(e) => e.target.select()}
-              />
-              <Input
-                label={t("products.minStock")}
-                type="number"
-                value={formData.minStock}
-                onChange={(e) => handleChange("minStock", e.target.value)}
-                onFocus={(e) => e.target.select()}
-              />
-            </Row>
-
-            <ThreeColRow>
-              <FormGroup>
-                <Label>{t("products.productType")}</Label>
-                <Select
-                  value={formData.productType}
-                  onChange={(e) =>
-                    handleChange("productType", e.target.value as ProductType)
-                  }
-                >
-                  <option value="REGULAR">
-                    {t("products.productTypeRegular")}
-                  </option>
-                  <option value="BULK_WEIGHTED">
-                    {t("products.productTypeBulkWeighted")}
-                  </option>
-                  <option value="PREPACKAGED">
-                    {t("products.productTypePrepackaged")}
-                  </option>
-                </Select>
-              </FormGroup>
-              <FormGroup>
-                <Label>{t("products.unit")}</Label>
-                <Select
-                  value={formData.unit}
-                  onChange={(e) => handleChange("unit", e.target.value)}
-                >
-                  {UNIT_OPTIONS.map((unit) => (
-                    <option key={unit} value={unit}>
-                      {getUnitLabel(unit)}
-                    </option>
-                  ))}
-                </Select>
-              </FormGroup>
-              <FormGroup>
-                <Label>
-                  {t("products.category")} <Req>*</Req>
-                </Label>
-                <div style={{ display: "flex", gap: "8px" }}>
-                  <Select
-                    value={formData.categoryId}
-                    onChange={(e) => handleChange("categoryId", e.target.value)}
+                <Row>
+                  <Input
+                    label={
+                      <>
+                        {t("products.nameUz")} <Req>*</Req>
+                      </>
+                    }
+                    value={formData.nameUz}
+                    onChange={(e) => handleNameUzChange(e.target.value)}
                     required
-                    style={{ flex: 1 }}
-                  >
-                    <option value="">{t("products.selectCategory")}</option>
-                    {categories.map((cat) => (
-                      <option key={cat.id} value={cat.id}>
-                        {i18n.language === "uz" ? cat.nameUz : cat.nameRu}
-                      </option>
-                    ))}
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="small"
-                    onClick={() => setShowCategoryModal(true)}
-                    style={{ flexShrink: 0 }}
-                  >
-                    <Settings size={16} />
-                  </Button>
-                </div>
-              </FormGroup>
-            </ThreeColRow>
+                  />
+                  <Input
+                    label={
+                      <>
+                        {t("products.nameRu")} <Req>*</Req>
+                      </>
+                    }
+                    value={formData.nameRu}
+                    onChange={(e) => handleNameRuChange(e.target.value)}
+                    required
+                  />
+                </Row>
 
-            {formData.productType !== "REGULAR" && (
-              <Row>
-                <Input
-                  label={t("products.internalCode")}
-                  value={formData.internalCode}
-                  readOnly
-                  style={{
-                    background: "var(--color-surface)",
-                    cursor: "default",
-                  }}
-                  onChange={() => {}}
-                />
-                <div />
-              </Row>
+                <Row>
+                  <Input
+                    label={
+                      <>
+                        {t("products.price")}
+                        {formProfitMargin !== null
+                          ? ` (${formProfitMargin}%)`
+                          : ""}{" "}
+                        <Req>*</Req>
+                      </>
+                    }
+                    type="number"
+                    value={formData.price}
+                    onChange={(e) => handleChange("price", e.target.value)}
+                    required
+                    onFocus={(e) => e.target.select()}
+                  />
+                  <div />
+                </Row>
+
+                <FoldToggle type="button" onClick={() => setShowMore((v) => !v)}>
+                  {showMore ? (
+                    <ChevronDown size={16} />
+                  ) : (
+                    <ChevronRight size={16} />
+                  )}
+                  {t("products.moreFields", "Дополнительные поля")}
+                </FoldToggle>
+
+                {showMore && (
+                  <FoldBody>
+                    <Row>
+                      <Input
+                        label={t("products.cost")}
+                        type="number"
+                        value={formData.cost}
+                        onChange={(e) => handleChange("cost", e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <Input
+                        label={t("products.stock")}
+                        type="number"
+                        disabled={isEdit}
+                        step={
+                          formData.productType === "BULK_WEIGHTED" ||
+                          formData.productType === "PREPACKAGED"
+                            ? "0.001"
+                            : "1"
+                        }
+                        value={formData.stock}
+                        onChange={(e) => handleChange("stock", e.target.value)}
+                        onFocus={(e) => e.target.select()}
+                      />
+                    </Row>
+
+                    <Row>
+                      <Input
+                        label={t("products.minStock")}
+                        type="number"
+                        value={formData.minStock}
+                        onChange={(e) =>
+                          handleChange("minStock", e.target.value)
+                        }
+                        onFocus={(e) => e.target.select()}
+                      />
+                      <FormGroup>
+                        <Label>{t("products.unit")}</Label>
+                        <Select
+                          value={formData.unit}
+                          onChange={(e) => handleChange("unit", e.target.value)}
+                        >
+                          {UNIT_OPTIONS.map((unit) => (
+                            <option key={unit} value={unit}>
+                              {getUnitLabel(unit)}
+                            </option>
+                          ))}
+                        </Select>
+                      </FormGroup>
+                    </Row>
+
+                    <Row>
+                      <FormGroup>
+                        <Label>{t("products.productType")}</Label>
+                        <Select
+                          value={formData.productType}
+                          onChange={(e) =>
+                            handleChange(
+                              "productType",
+                              e.target.value as ProductType,
+                            )
+                          }
+                        >
+                          <option value="REGULAR">
+                            {t("products.productTypeRegular")}
+                          </option>
+                          <option value="BULK_WEIGHTED">
+                            {t("products.productTypeBulkWeighted")}
+                          </option>
+                          <option value="PREPACKAGED">
+                            {t("products.productTypePrepackaged")}
+                          </option>
+                        </Select>
+                      </FormGroup>
+                      <FormGroup>
+                        <Label>{t("filters.supplier")}</Label>
+                        <div style={{ display: "flex", gap: "8px" }}>
+                          <Select
+                            value={formData.supplierId}
+                            onChange={(e) =>
+                              handleChange("supplierId", e.target.value)
+                            }
+                            style={{ flex: 1 }}
+                          >
+                            <option value="">{t("products.noSupplier")}</option>
+                            {suppliers.map((sup) => (
+                              <option key={sup.id} value={sup.id}>
+                                {i18n.language === "uz"
+                                  ? sup.nameUz
+                                  : sup.nameRu}
+                              </option>
+                            ))}
+                          </Select>
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="small"
+                            onClick={() => setShowSupplierModal(true)}
+                            style={{ flexShrink: 0 }}
+                          >
+                            <Settings size={16} />
+                          </Button>
+                        </div>
+                      </FormGroup>
+                    </Row>
+
+                    {formData.productType !== "REGULAR" && (
+                      <Row>
+                        <Input
+                          label={t("products.internalCode")}
+                          value={formData.internalCode}
+                          readOnly
+                          style={{
+                            background: "var(--color-surface)",
+                            cursor: "default",
+                          }}
+                          onChange={() => {}}
+                        />
+                        <div />
+                      </Row>
+                    )}
+
+                    {/* Multi-piece pack. Hidden for weighed goods (the scale owns their
+                        quantity) and for marked goods (each piece needs its own DataMatrix,
+                        so a box cannot be fiscalized as one position) — the POS applies the
+                        same two exclusions. */}
+                    {formData.productType === "REGULAR" &&
+                      formData.isMarked !== true && (
+                        <ThreeColRow>
+                          <Input
+                            label={t("products.piecesPerBox", "Штук в коробке")}
+                            type="number"
+                            min="1"
+                            step="1"
+                            placeholder={t(
+                              "products.piecesPerBoxHint",
+                              "не в коробке",
+                            )}
+                            value={formData.piecesPerBox}
+                            onChange={(e) =>
+                              handleChange("piecesPerBox", e.target.value)
+                            }
+                            onFocus={(e) => e.target.select()}
+                            title={t(
+                              "products.piecesPerBoxTitle",
+                              "Больше 1 — кассир при продаже выберет: штука или коробка. Остаток всегда считается в штуках.",
+                            )}
+                          />
+                          <Input
+                            label={t("products.boxPrice", "Цена коробки")}
+                            type="number"
+                            disabled={!(parseInt(formData.piecesPerBox, 10) > 1)}
+                            value={formData.boxPrice}
+                            onChange={(e) =>
+                              handleChange("boxPrice", e.target.value)
+                            }
+                            onFocus={(e) => e.target.select()}
+                            title={t(
+                              "products.boxPriceTitle",
+                              "По умолчанию цена штуки × количество. Можно снизить для оптовой скидки.",
+                            )}
+                          />
+                          <FormGroup>
+                            <Label>
+                              {t("products.boxBarcode", "Штрих-код коробки")}
+                            </Label>
+                            <div style={{ display: "flex", gap: "8px" }}>
+                              <Input
+                                disabled={
+                                  !(parseInt(formData.piecesPerBox, 10) > 1)
+                                }
+                                value={formData.boxBarcode}
+                                onChange={(e) =>
+                                  handleChange("boxBarcode", e.target.value)
+                                }
+                                title={t(
+                                  "products.boxBarcodeTitle",
+                                  "Необязательно. Если отсканирован этот код — коробка добавляется сразу, без вопроса.",
+                                )}
+                                style={{ flex: 1 }}
+                              />
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="small"
+                                disabled={
+                                  !(parseInt(formData.piecesPerBox, 10) > 1)
+                                }
+                                onClick={() => setShowBoxBarcodeScanner(true)}
+                                title={t(
+                                  "products.scanBoxBarcode",
+                                  "Сканировать штрих-код коробки камерой",
+                                )}
+                                style={{ flexShrink: 0 }}
+                              >
+                                <Camera size={16} />
+                              </Button>
+                            </div>
+                          </FormGroup>
+                        </ThreeColRow>
+                      )}
+
+                    <Row>
+                      <DateInput
+                        label={t("products.productionDate")}
+                        value={formData.productionDate}
+                        onChange={(val) => handleChange("productionDate", val)}
+                      />
+                      <DateInput
+                        label={t("products.expiryDate")}
+                        value={formData.expiryDate}
+                        onChange={(val) => handleChange("expiryDate", val)}
+                      />
+                    </Row>
+
+                    <Row>
+                      <Input
+                        label={t("filters.discount")}
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={formData.discountPercent}
+                        onChange={(e) =>
+                          handleChange("discountPercent", e.target.value)
+                        }
+                      />
+                      <FormGroup>
+                        <Label>{t("filters.isOnPromotion")}</Label>
+                        <label
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            marginTop: "4px",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.isOnPromotion}
+                            onChange={(e) =>
+                              handleChange("isOnPromotion", e.target.checked)
+                            }
+                          />
+                          {t("filters.onPromotion")}
+                        </label>
+                      </FormGroup>
+                    </Row>
+                  </FoldBody>
+                )}
+              </TabPanel>
             )}
 
-            <FormGroup>
-              <Label>{t("filters.supplier")}</Label>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <Select
-                  value={formData.supplierId}
-                  onChange={(e) => handleChange("supplierId", e.target.value)}
-                  style={{ flex: 1 }}
-                >
-                  <option value="">{t("products.noSupplier")}</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {i18n.language === "uz" ? s.nameUz : s.nameRu}
-                    </option>
-                  ))}
-                </Select>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="small"
-                  onClick={() => setShowSupplierModal(true)}
-                  style={{ flexShrink: 0 }}
-                >
-                  <Settings size={16} />
-                </Button>
-              </div>
-            </FormGroup>
+            {tab === "tax" && (
+              <TabPanel>
+                <Row>
+                  <FormGroup>
+                    <Label>
+                      {t("products.mxik")} <Req>*</Req>
+                    </Label>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <Input
+                        value={formData.mxik}
+                        placeholder="00000000000000000"
+                        onChange={(e) => handleChange("mxik", e.target.value)}
+                        required
+                        style={{ flex: 1 }}
+                      />
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="small"
+                        onClick={() => setShowMxikPicker(true)}
+                        title={t("products.searchMxik")}
+                        style={{ flexShrink: 0 }}
+                      >
+                        <Search size={16} />
+                      </Button>
+                    </div>
+                  </FormGroup>
+                  <FormGroup>
+                    <Label>{t("products.vatRate", "Ставка НДС, %")}</Label>
+                    <Select
+                      value={formData.vatRate}
+                      onChange={(e) => handleChange("vatRate", e.target.value)}
+                      title={t(
+                        "products.vatRateHint",
+                        "Пусто — использовать ставку по умолчанию",
+                      )}
+                    >
+                      <option value="">
+                        {t("products.vatRateHint", "По умолчанию")}
+                      </option>
+                      <option value="0">0.00%</option>
+                      <option value="6">6.00%</option>
+                      <option value="12">12.00%</option>
+                    </Select>
+                  </FormGroup>
+                </Row>
 
-            <Row>
-              <DateInput
-                label={t("products.productionDate")}
-                value={formData.productionDate}
-                onChange={(val) => handleChange("productionDate", val)}
-              />
-              <DateInput
-                label={t("products.expiryDate")}
-                value={formData.expiryDate}
-                onChange={(val) => handleChange("expiryDate", val)}
-              />
-            </Row>
+                <Row>
+                  <FormGroup>
+                    <Label>
+                      {t("products.marking", "Маркировка (Asl-Belgisi)")}
+                    </Label>
+                    <Select
+                      value={
+                        formData.isMarked === null
+                          ? ""
+                          : formData.isMarked
+                            ? "1"
+                            : "0"
+                      }
+                      onChange={(e) =>
+                        handleChange(
+                          "isMarked",
+                          e.target.value === "" ? null : e.target.value === "1",
+                        )
+                      }
+                      title={t(
+                        "products.markingHint",
+                        "Авто — POS определит по группе МХИК; иначе задаёт обязательную маркировку (продажа только по QR)",
+                      )}
+                    >
+                      <option value="">
+                        {t("products.markingAuto", "Авто (по группе МХИК)")}
+                      </option>
+                      <option value="1">
+                        {t("products.markingYes", "Маркируется (только QR)")}
+                      </option>
+                      <option value="0">
+                        {t("products.markingNo", "Не маркируется")}
+                      </option>
+                    </Select>
+                  </FormGroup>
+                  {mxikPackages.length > 0 ? (
+                    <FormGroup>
+                      <Label>
+                        {t("products.packageCode", "Код упаковки (МХИК)")}
+                      </Label>
+                      <Select
+                        value={formData.packageCode}
+                        onChange={(e) =>
+                          handleChange("packageCode", e.target.value)
+                        }
+                      >
+                        {mxikPackages.map((pkg) => (
+                          <option key={pkg.code} value={pkg.code}>
+                            {pkg.name}
+                          </option>
+                        ))}
+                      </Select>
+                    </FormGroup>
+                  ) : (
+                    <div />
+                  )}
+                </Row>
+              </TabPanel>
+            )}
 
-            <Row>
-              <Input
-                label={t("filters.discount")}
-                type="number"
-                min="0"
-                max="100"
-                value={formData.discountPercent}
-                onChange={(e) =>
-                  handleChange("discountPercent", e.target.value)
-                }
-              />
-              <FormGroup>
-                <Label>{t("filters.isOnPromotion")}</Label>
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    marginTop: "4px",
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={formData.isOnPromotion}
-                    onChange={(e) =>
-                      handleChange("isOnPromotion", e.target.checked)
-                    }
-                  />
-                  {t("filters.onPromotion")}
-                </label>
-              </FormGroup>
-            </Row>
+            {tab === "photo" && (
+              <TabPanel>
+                <PhotoPlaceholder>
+                  <ImageIcon size={56} strokeWidth={1.25} />
+                  <PhotoTitle>
+                    {t("products.photoComingSoon", "Скоро")}
+                  </PhotoTitle>
+                  <PhotoHint>
+                    {t(
+                      "products.photoComingSoonHint",
+                      "Загрузка фотографий товара появится в одном из следующих обновлений.",
+                    )}
+                  </PhotoHint>
+                </PhotoPlaceholder>
+              </TabPanel>
+            )}
 
             <Actions>
               <Button type="button" variant="secondary" onClick={onClose}>
@@ -1347,6 +1696,17 @@ export function ProductForm({
           onClose={() => setShowQrScanner(false)}
           formats={["qr_code", "data_matrix", "ean_13", "ean_8", "code_128"]}
           title={t("products.scanQrCode")}
+        />
+      )}
+
+      {/* Linear formats only — the code printed on a carton is a retail EAN/UPC, and
+          allowing QR/DataMatrix here would let a marking code land in boxBarcode. */}
+      {showBoxBarcodeScanner && (
+        <BarcodeScannerModal
+          onScan={handleBoxBarcodeScan}
+          onClose={() => setShowBoxBarcodeScanner(false)}
+          formats={["ean_13", "ean_8", "code_128", "code_39", "upc_a", "upc_e"]}
+          title={t("products.scanBoxBarcode", "Штрих-код коробки")}
         />
       )}
 

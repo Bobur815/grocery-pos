@@ -6,6 +6,7 @@ import {
   ValidateNested,
   IsOptional,
   IsDateString,
+  Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -45,6 +46,13 @@ export class SyncSaleItemDto {
   @IsString()
   @IsNotEmpty()
   subtotal!: string;
+
+  @ApiPropertyOptional({ example: 5, description: 'Pieces in one sold quantity unit (1 = piece, N = box). Absent on older terminals → 1' })
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  piecesPerUnit?: number;
 }
 
 export class SyncSaleDto {

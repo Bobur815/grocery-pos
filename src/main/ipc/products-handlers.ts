@@ -72,6 +72,11 @@ function serializeProduct(product: any): Product | null {
     minSaleQty: toNumber(product.minSaleQty),
     maxSaleQty: toNumber(product.maxSaleQty),
     storeProductCode: product.storeProductCode != null ? Number(product.storeProductCode) : null,
+    // Multi-piece pack ("box")
+    piecesPerBox:
+      product.piecesPerBox != null ? Number(product.piecesPerBox) : null,
+    boxPrice: product.boxPrice != null ? toNumber(product.boxPrice) : null,
+    boxBarcode: product.boxBarcode || null,
   };
 
   if (product.category) {
@@ -267,10 +272,18 @@ export function setupProductsHandlers(): void {
 
   ipcMain.handle("products:getByBarcode", async (_event, barcode: string) => {
     const prisma = getPrismaClient();
-    const product = await prisma.product.findUnique({
-      where: { barcode, active: true },
-      include: { category: true, supplier: true },
-    });
+    // The piece barcode always wins, so a code that is one product's piece barcode can never be
+    // hijacked by another product's box barcode. Callers tell the two apart by comparing the
+    // scanned code with the returned product's boxBarcode (see POSScreen.handleBarcodeSubmit).
+    const product =
+      (await prisma.product.findFirst({
+        where: { barcode, active: true },
+        include: { category: true, supplier: true },
+      })) ??
+      (await prisma.product.findFirst({
+        where: { boxBarcode: barcode, active: true },
+        include: { category: true, supplier: true },
+      }));
     return ipcSafe(serializeProduct(product));
   });
 
@@ -284,6 +297,7 @@ export function setupProductsHandlers(): void {
       { nameRu: { contains: searchQuery } },
       { nameUz: { contains: searchQuery } },
       { internalCode: { contains: searchQuery } },
+      { boxBarcode: { contains: searchQuery } },
     ];
 
     if (!isNaN(numericId) && Number.isInteger(numericId) && numericId > 0) {
@@ -384,6 +398,9 @@ export function setupProductsHandlers(): void {
         isMarked: data.isMarked ?? null,
         productType: data.productType || "REGULAR",
         internalCode: data.internalCode || null,
+        piecesPerBox: data.piecesPerBox ?? null,
+        boxPrice: data.boxPrice ?? null,
+        boxBarcode: data.boxBarcode || null,
         storeProductCode,
         active: true,
       },
@@ -467,6 +484,15 @@ export function setupProductsHandlers(): void {
       }
       if (data.internalCode !== undefined) {
         updateData.internalCode = data.internalCode || null;
+      }
+      if (data.piecesPerBox !== undefined) {
+        updateData.piecesPerBox = data.piecesPerBox ?? null;
+      }
+      if (data.boxPrice !== undefined) {
+        updateData.boxPrice = data.boxPrice ?? null;
+      }
+      if (data.boxBarcode !== undefined) {
+        updateData.boxBarcode = data.boxBarcode || null;
       }
 
       const product = await prisma.product.update({

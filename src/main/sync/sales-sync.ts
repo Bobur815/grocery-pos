@@ -83,6 +83,7 @@ export async function syncSales(): Promise<SalesSyncResult> {
             quantity: item.quantity.toString(),
             unitPrice: item.unitPrice.toString(),
             subtotal: item.subtotal.toString(),
+            piecesPerUnit: item.piecesPerUnit ?? 1,
           })),
         }),
       });

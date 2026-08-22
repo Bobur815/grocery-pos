@@ -111,6 +111,7 @@ export class SalesService {
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             subtotal: item.subtotal,
+            piecesPerUnit: item.piecesPerUnit ?? 1,
           })),
         },
       },
@@ -130,7 +131,10 @@ export class SalesService {
         console.warn(`[sale-sync] No VPS product found for barcode=${item.barcode} — stock NOT decremented for this item`);
         continue;
       }
-      const decrement = parseFloat(item.quantity);
+      // Stock is counted in PIECES but a line's quantity is in SALE units, so a box line
+      // (piecesPerUnit = N) must be multiplied out. Terminals older than the box feature
+      // omit the field entirely and fall back to 1 — i.e. unchanged behaviour.
+      const decrement = parseFloat(item.quantity) * (item.piecesPerUnit ?? 1);
 
       try {
         // Atomic decrement — GREATEST(0, stock - N) prevents going negative,

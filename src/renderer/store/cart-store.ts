@@ -10,6 +10,10 @@ export interface CartItem {
   unit?: string;
   preWeighedItemId?: string; // Set when item came from pre-weighed inventory; never merge
   markingCode?: string;      // Set when item is a group 022 unique QR scan; never merge
+  // Pieces in one `quantity` unit: undefined/1 = a single piece, N = a box of N.
+  // `quantity` and `unitPrice` are always in SALE units; stock is always in PIECES, so
+  // `stock` here is pre-divided by this multiplier (see POSScreen.addProductToCart).
+  piecesPerUnit?: number;
 }
 
 interface TabCart {
@@ -44,9 +48,9 @@ interface CartState {
   // Cart operations (operate on active tab)
   // Returns false when a group-022 unique QR was rejected as a duplicate (already in cart); true otherwise.
   addItem: (item: Omit<CartItem, 'quantity'> & { quantity?: number }) => boolean;
-  removeItem: (productId: number, unitPrice?: number) => void;
+  removeItem: (productId: number, unitPrice?: number, piecesPerUnit?: number) => void;
   removeByMarkingCode: (markingCode: string) => void;
-  updateQuantity: (productId: number, quantity: number, unitPrice?: number) => void;
+  updateQuantity: (productId: number, quantity: number, unitPrice?: number, piecesPerUnit?: number) => void;
   setDiscount: (discount: number) => void;
   setTaxRate: (rate: number) => void;
   clearCart: () => void;
@@ -153,7 +157,13 @@ export const useCartStore = create<CartState>((set, get) => ({
     const canMerge = !item.preWeighedItemId && !item.markingCode;
     const existingIndex = canMerge
       ? cart.items.findIndex(
-          (i) => i.productId === item.productId && i.unitPrice === item.unitPrice && !i.preWeighedItemId && !i.markingCode
+          (i) =>
+            i.productId === item.productId &&
+            i.unitPrice === item.unitPrice &&
+            // A box line and a piece line of the same product are different goods sold at
+            // different prices — merging them would mis-decrement stock by the multiplier.
+            (i.piecesPerUnit ?? 1) === (item.piecesPerUnit ?? 1) &&
+            !i.preWeighedItemId && !i.markingCode
         )
       : -1;
 
@@ -178,12 +188,16 @@ export const useCartStore = create<CartState>((set, get) => ({
     return true;
   },
 
-  removeItem: (productId, unitPrice?) => {
+  removeItem: (productId, unitPrice?, piecesPerUnit?) => {
     const state = get();
     const cart = activeCart(state);
     const newItems = cart.items.filter((i) =>
       unitPrice !== undefined
-        ? !(i.productId === productId && i.unitPrice === unitPrice)
+        ? !(
+            i.productId === productId &&
+            i.unitPrice === unitPrice &&
+            (piecesPerUnit === undefined || (i.piecesPerUnit ?? 1) === piecesPerUnit)
+          )
         : i.productId !== productId
     );
     const totals = calculateTotals(newItems, cart.taxRate, cart.discount);
@@ -206,14 +220,16 @@ export const useCartStore = create<CartState>((set, get) => ({
     set({ tabs: newTabs, items: newItems, ...totals });
   },
 
-  updateQuantity: (productId, quantity, unitPrice?) => {
+  updateQuantity: (productId, quantity, unitPrice?, piecesPerUnit?) => {
     const state = get();
     const cart = activeCart(state);
     const rounded = Math.round(quantity * 100) / 100;
 
     const matches = (i: CartItem) =>
       unitPrice !== undefined
-        ? i.productId === productId && i.unitPrice === unitPrice
+        ? i.productId === productId &&
+          i.unitPrice === unitPrice &&
+          (piecesPerUnit === undefined || (i.piecesPerUnit ?? 1) === piecesPerUnit)
         : i.productId === productId;
 
     if (rounded <= 0) {

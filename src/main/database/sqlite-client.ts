@@ -177,6 +177,9 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       bulk_quantity REAL DEFAULT 0,
       min_sale_qty REAL DEFAULT 0,
       max_sale_qty REAL DEFAULT 0,
+      pieces_per_box INTEGER,
+      box_price REAL,
+      box_barcode TEXT UNIQUE,
       active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -212,6 +215,7 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       quantity REAL NOT NULL,
       unit_price REAL NOT NULL,
       subtotal REAL NOT NULL,
+      pieces_per_unit INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES products(id)
     )
@@ -616,6 +620,23 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
   // group heuristic. Backfilled on the VPS (scripts/backfill-is-marked.ts) and synced down.
   if (!(await columnExists(prisma, 'products', 'is_marked'))) {
     await prisma.$executeRaw`ALTER TABLE products ADD COLUMN is_marked INTEGER`;
+  }
+
+  // Migration 26: multi-piece pack ("box") — sell a product per piece or as a sealed pack of N.
+  // Stock stays counted in PIECES; a box sale decrements pieces_per_box. Null/1 pieces_per_box
+  // (every pre-existing row) means "not boxed", so behaviour is unchanged until an admin sets it.
+  if (!(await columnExists(prisma, 'products', 'pieces_per_box'))) {
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN pieces_per_box INTEGER`;
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN box_price REAL`;
+    // SQLite can't add a UNIQUE column via ALTER TABLE — create the index separately.
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN box_barcode TEXT`;
+    await prisma.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS products_box_barcode_key ON products(box_barcode)`;
+  }
+
+  // pieces_per_unit records how many pieces one sold `quantity` unit held (1 = piece, N = box),
+  // so stock restores correctly on receipt edit/delete and the fiscal quantity converts to pieces.
+  if (!(await columnExists(prisma, 'sale_items', 'pieces_per_unit'))) {
+    await prisma.$executeRaw`ALTER TABLE sale_items ADD COLUMN pieces_per_unit INTEGER NOT NULL DEFAULT 1`;
   }
 }
 

@@ -178,7 +178,7 @@ function setupCategoriesHandlers(): void {
     const prisma = getPrismaClient();
     const rows = (await prisma.$queryRawUnsafe(
       `SELECT c.id as id, c.name_ru as nameRu, c.name_uz as nameUz,
-              CAST(SUM(si.quantity) AS REAL) as quantity
+              CAST(SUM(si.quantity * si.pieces_per_unit) AS REAL) as quantity
        FROM sale_items si
        JOIN products p ON si.product_id = p.id
        JOIN categories c ON p.category_id = c.id
