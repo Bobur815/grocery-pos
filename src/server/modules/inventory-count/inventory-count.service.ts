@@ -2,6 +2,11 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { Prisma, InventoryCountStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateInventoryCountDto } from './dto/create-inventory-count.dto';
+import {
+  MovementSource,
+  StockMovementService,
+  type MovementInput,
+} from '../stock-movement/stock-movement.service';
 
 /** Subset of the authenticated user this module needs. `request.user` has no `name` — only nameRu/nameUz. */
 type AuthUser = { id: string; nameRu: string };
@@ -125,7 +130,10 @@ export function planCompletion(
 
 @Injectable()
 export class InventoryCountService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private stockMovements: StockMovementService,
+  ) {}
 
   /**
    * Open a new count document. Every line snapshots the product's CURRENT stock as
@@ -368,6 +376,48 @@ export class InventoryCountService {
             )}) AS v(id, diff, qty, written_off)
             WHERE i.id = v.id
           `;
+        }
+
+        // Ledger rows for the whole document, written inside the same transaction as the
+        // stock writes above. This is the ONLY place that produces an absolute anchor:
+        // completion is the only absolute stock write in the system, so `balanceAfter` here
+        // is what reconciliation recomputes forward from instead of summing from the
+        // beginning of time (which would never match, because of the stock_counted_at
+        // watermark suppressing pre-count sale decrements).
+        //
+        // Logging the delta AND setting the absolute is deliberate: absolute-set alone erases
+        // the variance evidence, delta alone leaves the book wrong.
+        if (this.stockMovements.enabled && rows.length > 0) {
+          // Sale price is not on the count item (only cost is), so fetch it for the retail
+          // valuation. One query for the document, not one per line.
+          const priceById = new Map(
+            (
+              await tx.product.findMany({
+                where: { id: { in: rows.map((r) => r.productId) } },
+                select: { id: true, price: true },
+              })
+            ).map((pr) => [pr.id, pr.price]),
+          );
+          const costByItemId = new Map(count.items.map((i) => [i.id, i.cost]));
+          const occurredAt = new Date();
+
+          await this.stockMovements.emit(
+            tx,
+            rows.map<MovementInput>((r) => ({
+              storeId,
+              productId: r.productId,
+              type: r.writtenOff ? 'STOCKTAKE_WRITE_OFF' : 'STOCKTAKE_ADJUSTMENT',
+              quantity: r.difference,
+              balanceAfter: r.countedQty,
+              unitCost: costByItemId.get(r.itemId) ?? null,
+              unitPrice: priceById.get(r.productId) ?? null,
+              sourceType: MovementSource.COUNT,
+              sourceId: id,
+              actorId: user.id,
+              actorName: user.nameRu,
+              occurredAt,
+            })),
+          );
         }
 
         return tx.inventoryCount.update({

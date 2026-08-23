@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  MovementSource,
+  StockMovementService,
+} from '../stock-movement/stock-movement.service';
 import { ProductsService } from '../products/products.service';
 import { CreateArrivalDto } from './dto/create-arrival.dto';
 import { UpdateArrivalDto } from './dto/update-arrival.dto';
@@ -16,6 +20,7 @@ export class InventoryService {
   constructor(
     private prisma: PrismaService,
     private productsService: ProductsService,
+    private stockMovements: StockMovementService,
   ) {}
 
   async getArrivals(storeId: string, filters?: ArrivalFilters) {
@@ -104,6 +109,25 @@ export class InventoryService {
       data: productUpdate,
     });
 
+    // Snapshot the cost this delivery actually came in at, and the price it will be sold at
+    // after any priceMode change above — that ordering matters, because valuing a variance
+    // at a stale price is exactly the re-pricing trap the ledger exists to avoid.
+    await this.stockMovements.emitStandalone([
+      {
+        storeId,
+        productId: createArrivalDto.productId,
+        type: 'ARRIVAL',
+        quantity: createArrivalDto.quantity, // signed: a delivery adds stock
+        unitCost: cost,
+        unitPrice: (productUpdate.price as number | undefined) ?? product.price,
+        sourceType: MovementSource.ARRIVAL,
+        sourceId: arrival.id,
+        note: createArrivalDto.notes || null,
+        actorId: userId,
+        occurredAt: arrival.createdAt,
+      },
+    ]);
+
     if (createArrivalDto.supplierId && createArrivalDto.paymentMethod) {
       const paymentMethod = createArrivalDto.paymentMethod as SupplierPaymentMethod;
       const isDebt = DEBT_PAYMENT_METHODS.includes(paymentMethod);
@@ -190,6 +214,22 @@ export class InventoryService {
           where: { id: arrival.productId },
           data: { stock: { increment: qtyDelta } },
         });
+
+        // Inside the caller's transaction. Typed ARRIVAL_ADJUSTMENT rather than ARRIVAL so a
+        // correction to a delivery never inflates "goods received" in the period report.
+        await this.stockMovements.emit(tx, [
+          {
+            storeId,
+            productId: arrival.productId,
+            type: 'ARRIVAL_ADJUSTMENT',
+            quantity: qtyDelta, // already signed
+            unitCost: newCost,
+            sourceType: MovementSource.ARRIVAL,
+            sourceId: id,
+            note: 'Arrival quantity corrected',
+            occurredAt: new Date(),
+          },
+        ]);
       }
 
       // Update the linked PURCHASE supplier transaction if it exists
@@ -270,6 +310,26 @@ export class InventoryService {
             where: { id: product.id },
             data: { stock: { increment: a.quantity }, cost: a.cost },
           });
+
+          await this.stockMovements.emit(tx, [
+            {
+              storeId,
+              productId: product.id,
+              type: 'ARRIVAL',
+              quantity: a.quantity,
+              unitCost: a.cost,
+              unitPrice: product.price,
+              sourceType: MovementSource.ARRIVAL,
+              // Terminal-supplied arrival id (the same one written above), which makes the
+              // dedup key stable across sync retries of the same backlog.
+              sourceId: a.id,
+              note: a.notes || null,
+              actorId: a.createdBy,
+              // The uploaded arrival carries its own timestamp — an offline terminal may be
+              // replaying a backlog, and the period report must bucket by when it happened.
+              occurredAt: new Date(a.createdAt),
+            },
+          ]);
         });
         created++;
       } catch {

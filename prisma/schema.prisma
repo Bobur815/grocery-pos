@@ -46,6 +46,7 @@ model Store {
   soldMarkingCodes     SoldMarkingCode[]
   pendingMarkingCodes  PendingMarkingCode[]
   inventoryCounts      InventoryCount[]
+  stockMovements       StockMovement[]
 
   @@map("stores")
 }
@@ -168,6 +169,7 @@ model Product {
   sales               SaleItem[]
   inventoryMovements  InventoryArrival[]
   inventoryCountItems InventoryCountItem[]
+  stockMovements      StockMovement[]
 
   @@unique([storeId, barcode]) // Same barcode can exist in different stores
   @@unique([storeId, internalCode]) // internalCode unique per store
@@ -545,4 +547,79 @@ model MxikCatalog {
   @@index([classCode])
   @@index([internationalCode])
   @@map("mxik_catalog")
+}
+
+// ==================== STOCK MOVEMENT LEDGER ====================
+
+/// Append-only ledger of everything that changes on-hand quantity.
+///
+/// Exists because `Product.stock` is a single mutable number written by seven different code
+/// paths: once a sale is deleted or a stocktake overwrites stock, the evidence of what happened
+/// is gone and a period can no longer be reconstructed. Reconciliation reads this, never the
+/// source tables.
+enum StockMovementType {
+  OPENING              // period / new-store opening balance
+  ARRIVAL              // InventoryArrival created
+  ARRIVAL_ADJUSTMENT   // arrival edited — the quantity delta
+  SALE                 // SaleItem sold; cash, card, uzqr and future nasiya alike
+  SALE_REVERSAL        // sale deleted (there is no customer-return feature yet)
+  SUPPLIER_RETURN      // SupplierTransaction type = RETURN
+  STOCKTAKE_WRITE_OFF  // uncounted line the operator marked as genuinely gone
+  STOCKTAKE_ADJUSTMENT // counted − book, written on stocktake completion
+  WRITE_OFF_DAMAGE     // reserved — no writer yet
+  WRITE_OFF_EXPIRY     // reserved — no writer yet
+  MANUAL_ADJUSTMENT    // reserved
+  REVALUATION          // price change only, quantity unchanged
+}
+
+model StockMovement {
+  id        String            @id @default(cuid())
+  storeId   String            @map("store_id")
+  productId Int               @map("product_id")
+  type      StockMovementType
+
+  /// SIGNED: positive adds to stock, negative removes. REVALUATION rows are 0.
+  quantity Decimal @db.Decimal(14, 3)
+
+  /// Cost and sale price AT EVENT TIME. Variance is valued from these, never from today's
+  /// Product.price — that is what makes the figures immune to a mid-period re-pricing.
+  unitCost  Decimal? @map("unit_cost") @db.Decimal(10, 2)
+  unitPrice Decimal? @map("unit_price") @db.Decimal(10, 2)
+
+  /// Absolute stock level after this event. Set ONLY by stocktake rows, which are the only
+  /// absolute writes in the system. Reconciliation recomputes forward from the most recent
+  /// non-null balanceAfter rather than summing from the beginning of time.
+  balanceAfter Decimal? @map("balance_after") @db.Decimal(14, 3)
+
+  /// False when the event happened but stock was deliberately NOT moved — the stockCountedAt
+  /// watermark case, where a sale predating a stocktake is already baked into the counted
+  /// figure. The row stays visible for audit without being counted twice.
+  appliedToStock Boolean @default(true) @map("applied_to_stock")
+
+  /// What produced this row: 'ARRIVAL' | 'SALE' | 'COUNT' | 'SUPPLIER_TX' | 'OPENING'.
+  sourceType String? @map("source_type")
+  sourceId   String? @map("source_id")
+  reasonCode String? @map("reason_code")
+  note       String? @db.Text
+
+  actorId   String? @map("actor_id")
+  actorName String? @map("actor_name")
+
+  /// When the event actually happened. Distinct from createdAt because an offline terminal can
+  /// upload a week-old sale, and the goods equation must bucket it by event time.
+  occurredAt DateTime @map("occurred_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  store   Store   @relation(fields: [storeId], references: [id])
+  product Product @relation(fields: [productId], references: [id])
+
+  /// Idempotency, and it is load-bearing. Sale sync retries (it already answers "Already synced"
+  /// on a duplicate receipt), the arrival import loop swallows errors, and the OPENING seed may
+  /// be re-run. Without this a single retry silently doubles a movement and manufactures a
+  /// variance that looks exactly like theft. Writers use createMany({ skipDuplicates: true }).
+  @@unique([sourceType, sourceId, productId, type])
+  @@index([storeId, productId, occurredAt])
+  @@index([storeId, occurredAt])
+  @@index([storeId, type, occurredAt])
+  @@map("stock_movements")
 }

@@ -1,9 +1,15 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import { toPieces } from '../../../shared/utils/pack';
 import { ProductsService } from '../products/products.service';
 import { SyncSaleDto } from './dto/sync-sale.dto';
 import { Sale, SaleItem } from '@prisma/client';
 import { SaleFilters, SaleWhereInput, SaleUser } from './types/sale.types';
+import {
+  MovementSource,
+  StockMovementService,
+  type MovementInput,
+} from '../stock-movement/stock-movement.service';
 
 type SaleWithItems = Sale & { items: SaleItem[] };
 
@@ -12,6 +18,7 @@ export class SalesService {
   constructor(
     private prisma: PrismaService,
     private productsService: ProductsService,
+    private stockMovements: StockMovementService,
   ) {}
 
   async findAll(storeId: string, filters?: SaleFilters) {
@@ -69,10 +76,13 @@ export class SalesService {
     const barcodes = [...new Set(syncSaleDto.items.map((i) => i.barcode))];
     const serverProducts = await this.prisma.product.findMany({
       where: { storeId, barcode: { in: barcodes } },
-      select: { id: true, barcode: true },
+      // cost is carried for the ledger's snapshot — variance must be valued at what the goods
+      // cost when they moved, not at whatever Product.cost happens to be months later.
+      select: { id: true, barcode: true, cost: true },
     });
     console.log(`[sale-sync] NEW receipt=${syncSaleDto.receiptNumber} storeId=${storeId} barcodes=${JSON.stringify(barcodes)} found=${serverProducts.length}`);
     const productIdByBarcode = new Map(serverProducts.map((p) => [p.barcode, p.id]));
+    const costByBarcode = new Map(serverProducts.map((p) => [p.barcode, p.cost]));
 
     // Resolve the VPS cashierId by phone so the sale is attributed to the correct
     // VPS user (terminal user IDs may differ from VPS user IDs if the user was
@@ -124,6 +134,7 @@ export class SalesService {
     // Wrapped in try-catch per item so a failed update never causes a 500 response —
     // a 500 would leave the local sale un-synced and cause infinite DUPLICATE retries.
     const saleCreatedAt = new Date(syncSaleDto.createdAt);
+    const movements: MovementInput[] = [];
 
     for (const item of syncSaleDto.items) {
       const serverId = productIdByBarcode.get(item.barcode);
@@ -134,7 +145,7 @@ export class SalesService {
       // Stock is counted in PIECES but a line's quantity is in SALE units, so a box line
       // (piecesPerUnit = N) must be multiplied out. Terminals older than the box feature
       // omit the field entirely and fall back to 1 — i.e. unchanged behaviour.
-      const decrement = parseFloat(item.quantity) * (item.piecesPerUnit ?? 1);
+      const decrement = toPieces(parseFloat(item.quantity), item.piecesPerUnit);
 
       try {
         // Atomic decrement — GREATEST(0, stock - N) prevents going negative,
@@ -160,10 +171,41 @@ export class SalesService {
         } else {
           console.log(`[sale-sync] Stock decremented: product id=${serverId} barcode=${item.barcode} -${decrement} (atomic)`);
         }
+
+        movements.push({
+          storeId,
+          productId: serverId,
+          type: 'SALE',
+          quantity: -decrement, // signed: a sale removes stock, in PIECES
+          unitCost: costByBarcode.get(item.barcode) ?? null,
+          unitPrice: item.unitPrice,
+          // `affected === 0` means the stock_counted_at watermark suppressed the decrement:
+          // the sale predates the last stocktake and is already baked into the counted figure.
+          // The movement is still real and stays in the ledger for audit, but must not be
+          // summed again or every counted store would show a permanent phantom shortage.
+          appliedToStock: affected !== 0,
+          sourceType: MovementSource.SALE,
+          // Keyed on the SALE ITEM, not the sale. One sale can hold two lines for the same
+          // product — a pending-price split, or a box line beside a piece line — and keying on
+          // the sale id would make them collide and silently drop the second under
+          // skipDuplicates.
+          sourceId: item.id,
+          actorId: resolvedCashierId,
+          actorName: syncSaleDto.cashierName,
+          // Event time, not receipt time: an offline terminal can upload a week-old sale and
+          // the goods equation must bucket it by when it actually happened.
+          occurredAt: saleCreatedAt,
+        });
       } catch (stockErr) {
         console.error(`[sale-sync] STOCK UPDATE FAILED for product id=${serverId} barcode=${item.barcode}:`, stockErr instanceof Error ? stockErr.message : stockErr);
       }
     }
+
+    // One batched append after the loop. The stock updates above are individually atomic but
+    // not wrapped in a transaction (that is pre-existing behaviour on a hot sync path and not
+    // something to change here), so a crash between them and this write would leave a gap —
+    // which is precisely what the perpetual-vs-recomputed cross-check exists to surface.
+    await this.stockMovements.emitStandalone(movements);
 
     return { id: sale.id, synced: true };
   }
@@ -183,24 +225,59 @@ export class SalesService {
       throw new ForbiddenException('Can only delete your own sales');
     }
 
-    // Restore product stock for each item
+    const reversals: MovementInput[] = [];
+
+    // Restore product stock for each item.
+    //
+    // Stock is counted in PIECES while a line's quantity is in SALE units, so a box line has to
+    // be multiplied back out — exactly as syncSale does when it decrements. Without this,
+    // selling one box of 5 removed 5 units and deleting that sale returned only 1, quietly
+    // losing 4 units of book stock on every deleted box line. Confirmed against the VPS.
     for (const item of sale.items) {
       if (!item.productId) continue;
       try {
-        const product = await this.prisma.product.findUnique({
-          where: { id: item.productId },
-          select: { stock: true },
-        });
-        if (!product) continue;
-        const restoredStock = Number(product.stock) + Number(item.quantity);
-        await this.prisma.product.update({
-          where: { id: item.productId },
-          data: { stock: restoredStock },
+        const restored = toPieces(Number(item.quantity), item.piecesPerUnit);
+
+        // Atomic, matching syncSale. The old read-then-write raced any concurrent sale sync
+        // touching the same product: both read the same stock, both wrote an absolute value,
+        // and one update was silently lost.
+        //
+        // `updated_at = NOW()` is mandatory: raw SQL bypasses Prisma's @updatedAt, and terminals
+        // pull product changes through an `updatedAfter` cursor. Without it the restored stock
+        // would sit correct on the VPS and never reach the POS. The store_id guard keeps a
+        // crafted id from touching another store's product.
+        const affected = await this.prisma.$executeRaw`
+          UPDATE products
+          SET stock = stock + ${restored}::numeric,
+              updated_at = NOW()
+          WHERE id = ${item.productId} AND store_id = ${storeId}
+        `;
+        if (affected === 0) continue;
+
+        reversals.push({
+          storeId,
+          productId: item.productId,
+          type: 'SALE_REVERSAL',
+          // In PIECES, mirroring the restore above — the ledger must describe the stock write
+          // that actually happened.
+          quantity: restored,
+          unitPrice: item.unitPrice,
+          sourceType: MovementSource.SALE,
+          // Same reasoning as the SALE row: keyed on the line, not the sale. The type differs,
+          // so this cannot collide with the original SALE movement for the same line.
+          sourceId: item.id,
+          note: `Sale ${sale.receiptNumber} deleted`,
+          actorId: user?.id ?? null,
+          occurredAt: new Date(),
         });
       } catch (err) {
         console.error(`[sale-delete] Failed to restore stock for productId=${item.productId}:`, err instanceof Error ? err.message : err);
       }
     }
+
+    // Emitted BEFORE the row is removed: the sale is hard-deleted, so this movement becomes
+    // the only surviving record that those goods went out and came back.
+    await this.stockMovements.emitStandalone(reversals);
 
     await this.prisma.sale.delete({ where: { id } });
     return { deleted: true };
@@ -211,16 +288,20 @@ export class SalesService {
     // The backfill incorrectly assumed VPS stock was never decremented, but
     // syncBulk was already uploading terminal local stock (post-sale values),
     // so the backfill double-decremented. This undoes that.
+    //
+    // One-shot repair for a historical incident; it should never need running again, and
+    // running it twice would double-add. The piecesPerUnit conversion is applied anyway so the
+    // arithmetic stays consistent with every other stock path — a box line sold 5 pieces, not 1.
     const items = await this.prisma.saleItem.findMany({
       where: { sale: { storeId } },
-      select: { productId: true, quantity: true },
+      select: { productId: true, quantity: true, piecesPerUnit: true },
     });
 
     const totalSoldById = new Map<number, number>();
     for (const item of items) {
       if (!item.productId) continue;
       const prev = totalSoldById.get(item.productId) ?? 0;
-      totalSoldById.set(item.productId, prev + Number(item.quantity));
+      totalSoldById.set(item.productId, prev + toPieces(Number(item.quantity), item.piecesPerUnit));
     }
 
     let updated = 0;

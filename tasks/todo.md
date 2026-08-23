@@ -459,3 +459,87 @@ the separate "product exists"/arrival modal).
 
 **Not verified:** no visual run. The tab bar, fold, and placeholder have not been seen in a
 running app; login credentials would be needed to reach the form.
+
+---
+
+# Stock & Money Reconciliation + Movement Ledger (2026-08-22)
+
+Per `RECONCILIATION_SETUP.md`. Answers *"a month passed — does everything reconcile to zero?"*
+Backend + read-only web UI. Additive only; nothing on the terminal changed.
+
+## Findings that changed the design
+
+**The brief describes the stocktake write-off incorrectly.** It is not "products not included in
+the selected stocktake" — every in-scope product *is* a line. It targets lines **inside** the
+document that were never counted (`!counted && expectedQty > 0`), is opt-in (`writeOff` defaults
+to `false`), accepts an explicit id set, intersects rather than widens, and is guarded by
+`countedItems === 0 → throw`. It is also **already auditable** — `InventoryCountItem` keeps
+`expectedQty`, `countedQty`, `difference`, `writtenOff`, `cost`. Behaviour left untouched; the
+ledger row is written alongside it.
+
+**The `stockCountedAt` watermark is the load-bearing constraint, and the brief never mentions it.**
+`sales.service.ts:148` skips the decrement when a sale predates the last count. So
+`Σ movements from OPENING` can *never* equal `Product.stock` on any store that has counted.
+Solved with `balanceAfter` (an absolute anchor, written only by stocktakes) plus `appliedToStock`
+(the row stays auditable but is not summed). The engine recomputes forward from the latest anchor
+instead of from the beginning of time.
+
+**Money reconciliation has no "actual collected" side.** `Smena`/`SmenaMovement` hold
+`initialCash`/`finalCash` and exist **only in SQLite** — no PG model, no endpoint, no sync path.
+Shipped Stage A (tender breakdown) with `actuallyCollected: null` and an explicit `limitation`
+code so the UI says "not available" rather than implying a perfect reconciliation. Stage B
+(sync shifts up) is a separate follow-up; the response shape already has the slots.
+
+**`finalAmount` is already net of discount**, so the brief's `Expected = sales − nasiya −
+discounts` double-subtracts. Discounts are reported, never subtracted again.
+
+## Built
+
+- [x] `StockMovement` + `StockMovementType` (PG only). Hand-written migration verified against
+      `prisma migrate diff` output — identical column types, index names and FK actions.
+- [x] `StockMovementService` — flag-gated (`RECONCILIATION_LEDGER_ENABLED`, default off),
+      `createMany({ skipDuplicates: true })`, emission failures logged not thrown.
+- [x] All **seven** emission points: arrival create / edit / bulk-import, sale sync, sale delete,
+      stocktake completion (both counted and written-off lines), supplier return.
+- [x] `reconciliation.math.ts` — pure, DB-free, **17 unit tests**.
+- [x] `ReconciliationService` (goods + `seedOpening`), `MoneyReconciliationService` (Stage A),
+      controller behind `JwtAuthGuard + StoreGuard + RolesGuard @Roles('ADMIN')`.
+- [x] `web/products/stock/reconciliation` page, RU/UZ (31 keys, parity checked).
+
+## Three details worth keeping
+
+**Sale movements are keyed on the sale ITEM, not the sale.** One sale can hold two lines for the
+same product — a pending-price split, or a box line beside a piece line. Keying on the sale id
+would make them collide and `skipDuplicates` would silently drop the second, under-reporting
+goods sold.
+
+**`sourceType`/`sourceId` are required in the emitter's TypeScript API** even though the columns
+are nullable. Postgres treats NULLs as distinct in a unique index, so a null source would never
+collide and the retry protection would silently not apply. Making the API demand both means a
+caller cannot accidentally opt out.
+
+**The cross-check runs to *now*, not to `periodEnd`.** "Does the ledger still describe today's
+stock?" is a different question from "what moved during the period", and only the first one
+detects a decrement that never fired.
+
+## Verified
+
+80/80 tests (17 new), `tsc --noEmit` clean on both projects, `nest build` + web build green.
+`inventory-count.plan.test.ts` still passes untouched.
+
+## NOT done — needs the user
+
+- [x] **§1.8 CONFIRMED AND FIXED (2026-08-23).** The user reproduced it against the VPS: selling
+  one box of 5 removed 5 units, deleting the synced sale returned only 1 — 4 units of book stock
+  lost per deleted box line, which would then propagate back to the terminal on the next product
+  pull. `deleteById` now multiplies through `toPieces()` and does a single atomic
+  `UPDATE ... SET stock = stock + N` with `updated_at = NOW()` (raw SQL bypasses Prisma's
+  `@updatedAt`, and terminals pull via an `updatedAfter` cursor) plus a `store_id` guard. The old
+  read-then-write also raced concurrent sale sync. `syncSale` and the one-shot
+  `unbackfillStock` repair now use the same `toPieces()` helper, so the paths cannot drift apart
+  again. The SALE_REVERSAL movement records the corrected piece figure.
+- **Verified `pg_dump` of `posgro`** before anything reaches production.
+- **Enable the flag** and seed `OPENING` (`POST /reconciliation/seed-opening`, idempotent) —
+  staging first.
+- No live run: the UI has not been opened, and no reconciliation has executed against a real
+  database.

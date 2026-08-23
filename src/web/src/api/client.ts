@@ -685,6 +685,81 @@ export const siteConfig = {
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
 
+// ─── Reconciliation ──────────────────────────────────────────────────────────
+
+/** Decimals cross the wire as strings; the UI formats them, it never does arithmetic on them. */
+export interface ReconciliationLine {
+  productId: number;
+  productName: string;
+  barcode: string;
+  unit: string;
+  bookQty: string;
+  countedQty: string | null;
+  /** book − counted. Positive = shortage, negative = surplus, null = not counted. */
+  varianceQty: string | null;
+  varianceCost: string | null;
+  varianceRetail: string | null;
+  anchorAt: string | null;
+  suppressedCount: number;
+}
+
+export interface ReconciliationCrossCheckRow {
+  productId: number;
+  productName: string;
+  barcode: string;
+  perpetual: string;
+  recomputed: string;
+  drift: string;
+}
+
+export interface GoodsReconciliation {
+  periodStart: string | null;
+  periodEnd: string;
+  countId: string | null;
+  lines: ReconciliationLine[];
+  totals: {
+    shortageQtyLines: number;
+    surplusQtyLines: number;
+    varianceCost: string;
+    varianceRetail: string;
+  };
+  crossCheck: { clean: boolean; rows: ReconciliationCrossCheckRow[] };
+  ledgerEnabled: boolean;
+}
+
+export interface MoneyReconciliation {
+  periodStart: string;
+  periodEnd: string;
+  byTender: { tender: string; amount: string; saleCount: number }[];
+  gross: string;
+  discounts: string;
+  netSales: string;
+  newDebts: string;
+  expectedCollected: string;
+  actuallyCollected: string | null;
+  cashVariance: string | null;
+  limitation: string | null;
+}
+
+export const reconciliation = {
+  goods: async (params?: {
+    from?: string;
+    to?: string;
+    countId?: string;
+  }): Promise<GoodsReconciliation> => {
+    const { data } = await axiosInstance.get("/reconciliation/goods", { params });
+    return data;
+  },
+  money: async (params: { from: string; to: string }): Promise<MoneyReconciliation> => {
+    const { data } = await axiosInstance.get("/reconciliation/money", { params });
+    return data;
+  },
+  seedOpening: async (): Promise<{ seeded: number; enabled: boolean }> => {
+    const { data } = await axiosInstance.post("/reconciliation/seed-opening");
+    return data;
+  },
+};
+
 export const analytics = {
   getData: async (filters: { startDate: string; endDate: string }) => {
     const { data } = await axiosInstance.get("/analytics/data", {
