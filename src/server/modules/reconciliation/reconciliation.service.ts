@@ -148,9 +148,26 @@ export class ReconciliationService {
     let shortageQtyLines = 0;
     let surplusQtyLines = 0;
 
+    // Variance is measured AT the stocktake, not at the end of the period. The count states
+    // what was physically on the shelf at one instant; the only meaningful question is what the
+    // book said at that same instant. Measuring at periodEnd would compare a count taken on the
+    // 20th against a book that has since absorbed ten more days of trading.
+    //
+    // `exclusiveEnd` stops the reconstruction just short of the count's own movements —
+    // otherwise it would anchor on the count being judged and the variance would always be
+    // zero (or exactly the sales that followed it).
+    const measureAt = count?.completedAt ?? periodEnd;
+    const exclusive = count != null;
+
     for (const p of products) {
       const rows = byProduct.get(p.id) ?? [];
-      const v = computeVariance(p.id, rows, countedByProduct.get(p.id) ?? null, periodEnd);
+      const v = computeVariance(
+        p.id,
+        rows,
+        countedByProduct.get(p.id) ?? null,
+        measureAt,
+        exclusive,
+      );
 
       // The cross-check runs to NOW, not to periodEnd: it asks "does the ledger still describe
       // today's stock?", which is a different question from "what moved during the period".

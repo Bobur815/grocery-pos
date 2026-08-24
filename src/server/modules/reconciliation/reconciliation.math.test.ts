@@ -183,3 +183,61 @@ describe('crossCheck', () => {
     expect(out[0].drift.toNumber()).toBe(3);
   });
 });
+
+// The composition the service actually performs. These are the tests that were missing when
+// goods() measured the book at periodEnd: every case below passed in isolation while the
+// assembled report was meaningless.
+describe('measuring a stocktake (exclusiveEnd)', () => {
+  const COUNT_AT = at('2026-03-01T09:00:00Z');
+
+  /** What the ledger looks like after: seed 100, sell 40, then count and find 55. */
+  const rowsWithCount = (countedTo: number): LedgerRow[] => [
+    row('OPENING', 100, '2026-01-01T00:00:00Z', { balanceAfter: D(100), unitCost: D(6000) }),
+    row('SALE', -40, '2026-02-01T00:00:00Z'),
+    // The count's own movement, written at completion with its resulting level.
+    row('STOCKTAKE_ADJUSTMENT', countedTo - 60, '2026-03-01T09:00:00Z', {
+      balanceAfter: D(countedTo),
+    }),
+  ];
+
+  it('reconstructs the book as it stood just before the count', () => {
+    const res = computeBookQty(rowsWithCount(55), COUNT_AT, true);
+    expect(res.bookQty.toNumber()).toBe(60); // 100 − 40, NOT the counted 55
+    expect(res.anchorAt).toEqual(at('2026-01-01T00:00:00Z')); // the OPENING, not the count
+  });
+
+  it('finds the real shortage instead of collapsing to zero', () => {
+    const v = computeVariance(1, rowsWithCount(55), D(55), COUNT_AT, true);
+    expect(v.varianceQty!.toNumber()).toBe(5); // 60 book − 55 counted
+    expect(v.varianceCost!.toNumber()).toBe(30000);
+  });
+
+  it('an inclusive bound would have hidden it — this is the regression', () => {
+    // Anchors on the count being judged, so book == counted and variance == 0 forever.
+    const wrong = computeVariance(1, rowsWithCount(55), D(55), COUNT_AT, false);
+    expect(wrong.varianceQty!.toNumber()).toBe(0);
+  });
+
+  it('sales made after the count do not leak into its variance', () => {
+    const rows = [
+      ...rowsWithCount(55),
+      row('SALE', -7, '2026-03-01T15:00:00Z'), // same day, after counting
+    ];
+    const v = computeVariance(1, rows, D(55), COUNT_AT, true);
+    expect(v.varianceQty!.toNumber()).toBe(5); // still 5, not 12
+  });
+
+  it('measures from the PREVIOUS count when there is one', () => {
+    const rows = [
+      row('OPENING', 100, '2026-01-01T00:00:00Z', { balanceAfter: D(100) }),
+      row('STOCKTAKE_ADJUSTMENT', -10, '2026-02-01T09:00:00Z', { balanceAfter: D(90) }),
+      row('SALE', -20, '2026-02-15T00:00:00Z'),
+      row('STOCKTAKE_ADJUSTMENT', -4, '2026-03-01T09:00:00Z', { balanceAfter: D(66) }),
+    ];
+    const res = computeBookQty(rows, COUNT_AT, true);
+    expect(res.bookQty.toNumber()).toBe(70); // 90 − 20
+    expect(res.anchorAt).toEqual(at('2026-02-01T09:00:00Z'));
+    // 70 book vs 66 counted → 4 missing between the two counts.
+    expect(computeVariance(1, rows, D(66), COUNT_AT, true).varianceQty!.toNumber()).toBe(4);
+  });
+});

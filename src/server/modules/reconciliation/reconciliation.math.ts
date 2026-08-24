@@ -33,11 +33,15 @@ const ZERO = new Prisma.Decimal(0);
  * subtract those sales a second time and report a permanent phantom shortage on every store
  * that has ever counted.
  */
-export function findAnchor(rows: readonly LedgerRow[], asOf: Date): LedgerRow | null {
+export function findAnchor(
+  rows: readonly LedgerRow[],
+  asOf: Date,
+  exclusiveEnd = false,
+): LedgerRow | null {
   let anchor: LedgerRow | null = null;
   for (const r of rows) {
     if (r.balanceAfter === null) continue;
-    if (r.occurredAt > asOf) continue;
+    if (exclusiveEnd ? r.occurredAt >= asOf : r.occurredAt > asOf) continue;
     if (!anchor || r.occurredAt >= anchor.occurredAt) anchor = r;
   }
   return anchor;
@@ -51,14 +55,25 @@ export function findAnchor(rows: readonly LedgerRow[], asOf: Date): LedgerRow | 
  * stocktake writes all of its rows with one timestamp, and its `balanceAfter` already states
  * the resulting level — re-adding anything stamped at that instant would double-count the
  * count itself.
+ *
+ * @param exclusiveEnd when true, `asOf` is a strict upper bound.
+ *
+ * Required when measuring a stocktake: completing a count writes its own `balanceAfter`, so an
+ * inclusive bound would anchor on the very count being judged and the variance would collapse
+ * to "whatever moved after it". Book has to be reconstructed from the PREVIOUS anchor forward,
+ * stopping just short of the count, and only then compared with what was physically counted.
  */
-export function computeBookQty(rows: readonly LedgerRow[], asOf: Date): BookResult {
-  const anchor = findAnchor(rows, asOf);
+export function computeBookQty(
+  rows: readonly LedgerRow[],
+  asOf: Date,
+  exclusiveEnd = false,
+): BookResult {
+  const anchor = findAnchor(rows, asOf, exclusiveEnd);
   let qty = anchor ? anchor.balanceAfter! : ZERO;
   let suppressedCount = 0;
 
   for (const r of rows) {
-    if (r.occurredAt > asOf) continue;
+    if (exclusiveEnd ? r.occurredAt >= asOf : r.occurredAt > asOf) continue;
     if (anchor && r.occurredAt <= anchor.occurredAt) continue;
     if (!r.appliedToStock) {
       suppressedCount++;
@@ -117,8 +132,9 @@ export function computeVariance(
   rows: readonly LedgerRow[],
   countedQty: Prisma.Decimal | null,
   asOf: Date,
+  exclusiveEnd = false,
 ): ProductVariance {
-  const { bookQty, anchorAt, suppressedCount } = computeBookQty(rows, asOf);
+  const { bookQty, anchorAt, suppressedCount } = computeBookQty(rows, asOf, exclusiveEnd);
   const varianceQty = countedQty === null ? null : bookQty.minus(countedQty);
   const cost = latestCost(rows, asOf);
   const price = latestPrice(rows, asOf);

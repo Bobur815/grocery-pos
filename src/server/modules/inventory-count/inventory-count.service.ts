@@ -347,6 +347,12 @@ export class InventoryCountService {
 
     // Set-based updates: a per-row await loop blows Prisma's 5s transaction timeout on a
     // full-store count. The explicit timeout covers very large stores anyway.
+    // ONE instant for the whole completion. Reconciliation measures a count exclusively at
+    // its `completedAt`, so if the movements carried even a millisecond-earlier timestamp they
+    // would fall inside that bound, the count would anchor on itself, and every variance would
+    // collapse to zero. Two separate `new Date()` calls are all it takes.
+    const completedAt = new Date();
+
     return this.prisma.$transaction(
       async (tx) => {
         for (const chunk of chunked(rows, COMPLETE_CHUNK_SIZE)) {
@@ -399,7 +405,7 @@ export class InventoryCountService {
             ).map((pr) => [pr.id, pr.price]),
           );
           const costByItemId = new Map(count.items.map((i) => [i.id, i.cost]));
-          const occurredAt = new Date();
+
 
           await this.stockMovements.emit(
             tx,
@@ -415,7 +421,7 @@ export class InventoryCountService {
               sourceId: id,
               actorId: user.id,
               actorName: user.nameRu,
-              occurredAt,
+              occurredAt: completedAt,
             })),
           );
         }
@@ -424,7 +430,7 @@ export class InventoryCountService {
           where: { id },
           data: {
             status: 'COMPLETED',
-            completedAt: new Date(),
+            completedAt,
             completedById: user.id,
             countedItems: plan.countedItems, // physically counted only — write-offs are separate
             totalDifference: plan.totalDifference,
