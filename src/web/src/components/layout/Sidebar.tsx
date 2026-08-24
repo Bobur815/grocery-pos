@@ -19,6 +19,7 @@ import {
   ScrollText,
   Image,
   CreditCard,
+  Scale,
   type LucideIcon,
 } from "lucide-react";
 import { useAuthStore } from "../../store/auth-store";
@@ -343,7 +344,10 @@ export function Sidebar() {
         { to: "/products/stock", icon: ClipboardList },
         // Stocktake is an admin-only route — showing it to a cashier would just bounce them.
         ...(isAdmin
-          ? [{ to: "/products/stock/inventarizatsiya", icon: ClipboardCheck }]
+          ? [
+              { to: "/products/stock/inventarizatsiya", icon: ClipboardCheck },
+              { to: "/products/stock/reconciliation", icon: Scale },
+            ]
           : []),
         { to: "/suppliers", icon: Truck },
         { to: "/reports/daily", icon: BarChart3 },
@@ -422,6 +426,11 @@ export function Sidebar() {
                     "/products/stock/inventarizatsiya",
                     ClipboardCheck,
                     t("nav.stocktake"),
+                  )}
+                  {renderNavItem(
+                    "/products/stock/reconciliation",
+                    Scale,
+                    t("nav.reconciliation"),
                   )}
                 </NavSection>
               )}

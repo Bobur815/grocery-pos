@@ -77,6 +77,7 @@
     "inventory": "Склад",
     "arrivals": "Приходы",
     "stocktake": "Инвентаризация",
+    "reconciliation": "Сверка",
     "users": "Пользователи",
     "settings": "Настройки",
     "userSettings": "Мои настройки",
