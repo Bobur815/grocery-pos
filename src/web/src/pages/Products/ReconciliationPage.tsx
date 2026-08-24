@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
-import { AlertTriangle, Bug, RefreshCw, Scale } from "lucide-react";
+import { AlertTriangle, Bug, PlayCircle, RefreshCw, Scale } from "lucide-react";
 import { Table } from "@components/common/Table";
 import { Button } from "@components/common/Button";
 import { DateInput } from "@components/common/DateInput";
 import { EmptyPlaceholder } from "@components/common/EmptyPlaceholder";
+import { ConfirmDialog } from "@components/common/ConfirmDialog";
 import { Spinner } from "@renderer/components/common/Spinner";
 import { useToast } from "@context/ToastContext";
 import { formatCurrency } from "@shared/utils";
@@ -127,6 +128,8 @@ export function ReconciliationPage() {
   const [goods, setGoods] = useState<GoodsReconciliation | null>(null);
   const [money, setMoney] = useState<MoneyReconciliation | null>(null);
   const [loading, setLoading] = useState(false);
+  const [confirmSeed, setConfirmSeed] = useState(false);
+  const [seeding, setSeeding] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -143,6 +146,40 @@ export function ReconciliationPage() {
       setLoading(false);
     }
   }, [from, to, t, toast]);
+
+  /**
+   * Writes one OPENING movement per product from today's stock, giving the ledger a starting
+   * point. Idempotent server-side — the movement table's unique source key turns a second run
+   * into a no-op rather than doubling everyone's opening balance.
+   */
+  const handleSeed = useCallback(async () => {
+    setConfirmSeed(false);
+    setSeeding(true);
+    try {
+      const res = await reconciliation.seedOpening();
+      if (!res.enabled) {
+        // The endpoint answers 200 either way; without the flag nothing was actually written,
+        // and silently reporting success would be a lie.
+        toast.warning(
+          t(
+            "reconciliation.seedNoLedger",
+            "Журнал выключен — ничего не записано. Включите RECONCILIATION_LEDGER_ENABLED.",
+          ),
+        );
+        return;
+      }
+      toast.success(
+        t("reconciliation.seeded", "Начальные остатки записаны: {{count}}", {
+          count: res.seeded,
+        }),
+      );
+      await load();
+    } catch {
+      toast.error(t("common.error"));
+    } finally {
+      setSeeding(false);
+    }
+  }, [load, t, toast]);
 
   useEffect(() => {
     void load();
@@ -180,7 +217,32 @@ export function ReconciliationPage() {
           <RefreshCw size={16} />
           {t("reconciliation.refresh", "Обновить")}
         </Button>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setConfirmSeed(true)}
+          disabled={seeding}
+        >
+          <PlayCircle size={16} />
+          {seeding
+            ? t("common.processing")
+            : t("reconciliation.seedOpening", "Записать начальные остатки")}
+        </Button>
       </Toolbar>
+
+      {confirmSeed && (
+        <ConfirmDialog
+          title={t("reconciliation.seedOpening", "Записать начальные остатки")}
+          message={t(
+            "reconciliation.seedConfirm",
+            "Для каждого товара будет записан начальный остаток по текущему складу. Повторный запуск ничего не удвоит.",
+          )}
+          confirmLabel={t("common.confirm")}
+          cancelLabel={t("common.cancel")}
+          onConfirm={handleSeed}
+          onCancel={() => setConfirmSeed(false)}
+        />
+      )}
 
       {loading && (
         <Centered>
