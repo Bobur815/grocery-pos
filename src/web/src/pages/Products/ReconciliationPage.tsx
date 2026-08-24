@@ -12,6 +12,12 @@ import { useToast } from "@context/ToastContext";
 import { formatCurrency } from "@shared/utils";
 import { formatDateTime } from "../../utils/formatters";
 import {
+  uztDaysAgoString,
+  uztEndOf,
+  uztStartOf,
+  uztTodayString,
+} from "../../utils/uzt-date";
+import {
   reconciliation,
   type GoodsReconciliation,
   type MoneyReconciliation,
@@ -117,14 +123,13 @@ const Centered = styled.div`
   padding: ${({ theme }) => theme.spacing.lg};
 `;
 
-const iso = (d: Date) => d.toISOString().slice(0, 10);
 
 export function ReconciliationPage() {
   const { t } = useTranslation();
   const toast = useToast();
 
-  const [from, setFrom] = useState(iso(new Date(Date.now() - 30 * 86_400_000)));
-  const [to, setTo] = useState(iso(new Date()));
+  const [from, setFrom] = useState(uztDaysAgoString(30));
+  const [to, setTo] = useState(uztTodayString());
   const [goods, setGoods] = useState<GoodsReconciliation | null>(null);
   const [money, setMoney] = useState<MoneyReconciliation | null>(null);
   const [loading, setLoading] = useState(false);
@@ -134,9 +139,16 @@ export function ReconciliationPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      // Send real instants, not bare "YYYY-MM-DD". The server parses a date-only string as
+      // UTC midnight, so passing today as the end cut the day off before it began — hiding
+      // today's stocktake, and every sale made after 05:00 Tashkent time.
+      const range = {
+        from: uztStartOf(from).toISOString(),
+        to: uztEndOf(to).toISOString(),
+      };
       const [g, m] = await Promise.all([
-        reconciliation.goods({ from, to }),
-        reconciliation.money({ from, to }),
+        reconciliation.goods(range),
+        reconciliation.money(range),
       ]);
       setGoods(g);
       setMoney(m);

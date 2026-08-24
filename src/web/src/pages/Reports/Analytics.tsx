@@ -16,6 +16,12 @@ import {
 import { Select } from "@components/common/Select";
 import { DateInput } from "@components/common/DateInput";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
+import {
+  parseUztDate,
+  uztDayEnd,
+  uztDayStart,
+  uztToday,
+} from "../../utils/uzt-date";
 import { analytics as analyticsApi } from "../../api/client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -54,32 +60,6 @@ interface AnalyticsData {
     cardSales: number;
     averageTransaction: number;
   };
-}
-
-// ── Tashkent (UTC+5) date helpers ────────────────────────────────────────────
-
-const UZT_OFFSET_MS = 5 * 60 * 60 * 1000;
-
-/** Current year/month/day in Tashkent time. */
-function uztToday(): { y: number; m: number; d: number } {
-  const t = new Date(Date.now() + UZT_OFFSET_MS);
-  return { y: t.getUTCFullYear(), m: t.getUTCMonth(), d: t.getUTCDate() };
-}
-
-/** 00:00:00.000 of a Tashkent calendar day expressed as a UTC Date. */
-function uztDayStart(y: number, m: number, d: number): Date {
-  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0) - UZT_OFFSET_MS);
-}
-
-/** 23:59:59.999 of a Tashkent calendar day expressed as a UTC Date. */
-function uztDayEnd(y: number, m: number, d: number): Date {
-  return new Date(Date.UTC(y, m, d, 23, 59, 59, 999) - UZT_OFFSET_MS);
-}
-
-/** Parse a YYYY-MM-DD string (from <input type="date">) as a Tashkent date. */
-function parseUztDate(s: string): { y: number; m: number; d: number } {
-  const [y, m, d] = s.split("-").map(Number);
-  return { y, m: m - 1, d };
 }
 
 // ── Date range helpers ────────────────────────────────────────────────────────

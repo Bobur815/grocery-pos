@@ -1,5 +1,6 @@
 {
   "common": {
+    "confirm": "Tasdiqlash",
     "store":"Do'kon",
     "storeId":"Do'kon ID",
     "noResults":"Hech narsa topilmadi",
@@ -236,7 +237,7 @@
     "refresh": "Yangilash",
     "anchoredAt": "Inventarizatsiyadan boshlab",
     "seedOpening": "Boshlang'ich qoldiqlarni yozish",
-    "seedConfirm": "Har bir mahsulot uchun joriy ombor bo'yicha boshlang'ich qoldiq yoziladi. Qayta ishga tushirish hech narsani ikkilantirmaydi.",
+    "seedConfirm": "Har bir mahsulot uchun joriy ombor bo'yicha boshlang'ich qoldiq yoziladi. Qayta ishga tushirish hech narsani ikki marta yozmaydi.",
     "seeded": "Boshlang'ich qoldiqlar yozildi: {{count}}",
     "seedNoLedger": "Jurnal o'chirilgan — hech narsa yozilmadi. RECONCILIATION_LEDGER_ENABLED ni yoqing.",
     "shortages": "Kamomad (pozitsiya)",
@@ -253,7 +254,7 @@
     "noCount": "Davr uchun yakunlangan inventarizatsiya yo'q — solishtirish uchun ma'lumot yo'q. Faqat hisobdagi qoldiq ko'rsatilgan.",
     "ledgerDisabled": "Harakatlar jurnali o'chirilgan (RECONCILIATION_LEDGER_ENABLED). Yangi harakatlar yozilmayapti, shuning uchun hisob to'liq bo'lmaydi.",
     "crossCheckFailed": "Hisob va jurnal o'rtasida farq",
-    "crossCheckHint": "Bu dastur yoki sinxronizatsiya xatosi, kamomad EMAS. Bu qatorlar bo'yicha aybdor qidirmang.",
+    "crossCheckHint": "Bu dastur yoki sinxronizatsiya xatosi, kamomad EMAS.",
     "crossCheckTitle": "Texnik farq (kamomad emas)",
     "perpetual": "Joriy qoldiq",
     "recomputed": "Jurnal bo'yicha",
