@@ -23,6 +23,7 @@ import { AslBelgisiModule } from './modules/aslbelgisi/aslbelgisi.module';
 import { MarkingCodesModule } from './modules/marking-codes/marking-codes.module';
 import { StockMovementModule } from './modules/stock-movement/stock-movement.module';
 import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
+import { SmenaModule } from './modules/smena/smena.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { ReconciliationModule } from './modules/reconciliation/reconciliation.mo
     PrismaModule,
     StockMovementModule,
     ReconciliationModule,
+    SmenaModule,
     AuthModule,
     UsersModule,
     ProductsModule,

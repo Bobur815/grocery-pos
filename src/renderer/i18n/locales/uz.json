@@ -1,9 +1,9 @@
 {
   "common": {
     "confirm": "Tasdiqlash",
-    "store":"Do'kon",
-    "storeId":"Do'kon ID",
-    "noResults":"Hech narsa topilmadi",
+    "store": "Do'kon",
+    "storeId": "Do'kon ID",
+    "noResults": "Hech narsa topilmadi",
     "save": "Saqlash",
     "cancel": "Bekor qilish",
     "delete": "O'chirish",
@@ -251,7 +251,9 @@
     "atCost": "Tannarxda",
     "allClear": "Hammasi mos keldi",
     "allClearHint": "Sanalgan barcha pozitsiyalarda hisobdagi qoldiq amaldagi bilan mos keldi.",
-    "noCount": "Davr uchun yakunlangan inventarizatsiya yo'q — solishtirish uchun ma'lumot yo'q. Faqat hisobdagi qoldiq ko'rsatilgan.",
+    "noCount": "Yakunlangan inventarizatsiya yo'q — solishtirish uchun ma'lumot yo'q. Farqlar hisoblanmadi; faqat hisobdagi qoldiq ko'rsatilgan.",
+    "noCountShort": "Solishtirish uchun ma'lumot yo'q",
+    "noCountHint": "Pozitsiyalar bo'yicha farqlarni ko'rish uchun inventarizatsiyani yakunlang.",
     "ledgerDisabled": "Harakatlar jurnali o'chirilgan (RECONCILIATION_LEDGER_ENABLED). Yangi harakatlar yozilmayapti, shuning uchun hisob to'liq bo'lmaydi.",
     "crossCheckFailed": "Hisob va jurnal o'rtasida farq",
     "crossCheckHint": "Bu dastur yoki sinxronizatsiya xatosi, kamomad EMAS.",
@@ -260,12 +262,16 @@
     "recomputed": "Jurnal bo'yicha",
     "drift": "Chetlanish",
     "moneyTitle": "Pul — to'lov turlari bo'yicha",
-    "noShiftData": "Smena ma'lumotlari (kassadagi naqd pul) hozircha serverga sinxronlanmaydi, shuning uchun kassa farqi hisoblanmaydi. Faqat to'lov turlari bo'yicha tushum ko'rsatilgan.",
+    "noShiftData": "Davr uchun serverda yopilgan smenalar yo'q, shuning uchun kassa farqi hisoblanmadi. Faqat to'lov turlari bo'yicha tushum ko'rsatilgan.",
     "tender": "To'lov turi",
     "saleCount": "Cheklar",
     "amount": "Summa",
     "netSales": "Jami savdo",
-    "discounts": "Chegirmalar (ma'lumot uchun)"
+    "discounts": "Chegirmalar (ma'lumot uchun)",
+    "expectedCash": "Kassada bo'lishi kerak",
+    "actualCash": "Kassada amalda",
+    "cashVariance": "Kassa bo'yicha farq",
+    "shiftCount": "Hisobga olingan smenalar"
   },
   "products": {
     "title": "Mahsulotlar",
@@ -521,9 +527,9 @@
     "totalAvailable": "Mavjud birliklar",
     "totalValue": "Jami qiymati",
     "soldToday": "Bugun sotilgan",
-    "kg":"kg",
-    "g":"g",
-    "sum":"so'm"
+    "kg": "kg",
+    "g": "g",
+    "sum": "so'm"
   },
   "scaleSettings": {
     "title": "Tarozilar va yorliqlar",
@@ -660,7 +666,15 @@
       "rawBody": "So'rov tanasi (JSON-RPC)",
       "copy": "Nusxa olish",
       "copied": "Nusxalandi"
-    }
+    },
+    "productRankings": "Mahsulotlar reytingi",
+    "rankByQuantity": "Soni bo'yicha",
+    "rankByRevenue": "Tushum bo'yicha",
+    "rankByProfit": "Foyda bo'yicha",
+    "bestSellers": "Eng yaxshi 10 ta",
+    "worstSellers": "Eng yomon 10 ta",
+    "rankScope": "{{total}} ta faol mahsulotdan. Umuman sotilmagan: {{neverSold}} ta.",
+    "rankNoCost": "Tannarxi yo'q — foydada hisobga olinmaydi: {{count}} ta."
   },
   "users": {
     "title": "Foydalanuvchilar",
@@ -683,8 +697,8 @@
     "noUsers": "Foydalanuvchilar topilmadi",
     "activate": "Faollashtirish",
     "deactivate": "O'chirish",
-    "deactivateConfirm":"Bu foydalanuvchini o'chirasizmi? Bu foydalanuvchi sistemaga kira olmaydi, ammo uning ma'lumotlari saqlanadi.",
-    "activateConfirm":"Bu foydalanuvchini faollashtirmoqchimisiz? Bu foydalanuvchi sistemaga kira oladi.",
+    "deactivateConfirm": "Bu foydalanuvchini o'chirasizmi? Bu foydalanuvchi sistemaga kira olmaydi, ammo uning ma'lumotlari saqlanadi.",
+    "activateConfirm": "Bu foydalanuvchini faollashtirmoqchimisiz? Bu foydalanuvchi sistemaga kira oladi.",
     "passwordRequired": "Parol talab qilinadi",
     "leaveBlankToKeep": "Joriy parolni saqlash uchun bo'sh qoldiring"
   },
@@ -866,7 +880,7 @@
     "meter": "Metr"
   },
   "priceTags": {
-    "el_unit":"Birlik",
+    "el_unit": "Birlik",
     "title": "Narx yorliqlari",
     "settingsDescription": "Narx yorliqlari shablonlari va chop etish",
     "createTemplate": "Shablon yaratish",
@@ -902,8 +916,8 @@
     "back": "Orqaga"
   },
   "suppliers": {
-    "status":"Holat",
-    "add":"Qo'shish",
+    "status": "Holat",
+    "add": "Qo'shish",
     "title": "Yetkazib beruvchilar",
     "supplier": "Yetkazib beruvchi",
     "nameRu": "Nomi (RU)",
@@ -1012,7 +1026,7 @@
     "drawerOpened": "Tortma ochildi",
     "drawerFailed": "Tortmani ochib bo'lmadi"
   },
-  "scanner":{
+  "scanner": {
     "title": "Shtrix-kod skaneri",
     "description": "Mahsulot qo'shish uchun shtrix-kodni skanerlang",
     "scanning": "Skanerlanmoqda...",
@@ -1025,8 +1039,8 @@
     "enterManually": "Qo'lda kiritish"
   },
   "receiptScan": {
-    "scanCharged":"Skaner narxi",
-    "balance":"Balans",
+    "scanCharged": "Skaner narxi",
+    "balance": "Balans",
     "supplierNotFound": "Chekdagi yetkazib beruvchi topilmadi",
     "scanReceipt": "Chekni skanerlash",
     "uploadImage": "Faylni yuklash",
@@ -1095,8 +1109,8 @@
     "pricePerMonth": "so'm/oy"
   },
   "smena": {
-    "viewDetails":"Batafsil",
-    "actions":"Harakatlar",
+    "viewDetails": "Batafsil",
+    "actions": "Harakatlar",
     "title": "Smena",
     "currentShift": "Joriy smena",
     "history": "Tarix",

@@ -1,5 +1,6 @@
 import { BrowserWindow } from 'electron';
 import { syncSales, SalesSyncResult } from './sales-sync';
+import { syncSmenas } from './smena-sync';
 import { syncProducts, syncCategories, syncSuppliers, syncUsers, syncSettings } from './products-sync';
 import { getCurrentUser } from '../ipc/auth-handlers';
 import { uploadLocalData } from './upload-sync';
@@ -105,6 +106,18 @@ export class SyncService {
         }
       } catch (salesError) {
         console.error('Sales sync failed (non-fatal):', salesError instanceof Error ? salesError.message : salesError);
+      }
+
+      // Sync closed shifts — all roles, deliberately NOT inside uploadLocalData(), which only
+      // runs for ADMIN. Shifts are closed by cashiers, so gating this on ADMIN would mean the
+      // drawer counts never reach the server on a normal terminal.
+      //
+      // After sales on purpose: the server buckets a shift's takings from the sales it already
+      // holds, so uploading the shift first would briefly show it against an incomplete day.
+      try {
+        await syncSmenas();
+      } catch (smenaError) {
+        console.error('Smena sync failed (non-fatal):', smenaError instanceof Error ? smenaError.message : smenaError);
       }
 
       // Sync categories (download from VPS — must come before products)

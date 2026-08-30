@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { sumDrawers } from '../smena/smena.math';
 
 const ZERO = new Prisma.Decimal(0);
 
@@ -15,13 +16,21 @@ export interface MoneyReconciliation {
   newDebts: Prisma.Decimal;
   expectedCollected: Prisma.Decimal;
   /**
-   * Null until shift data reaches the server. Presented as null rather than 0 so the UI can say
-   * "not available" instead of implying a perfect reconciliation that was never computed.
+   * Counted out of the drawer across the period's closed shifts. Still null when the period has
+   * no shift data — presented as null rather than 0 so the UI can say "not available" instead
+   * of implying a perfect reconciliation that was never computed.
    */
   actuallyCollected: Prisma.Decimal | null;
   cashVariance: Prisma.Decimal | null;
   /** Why the variance is null, for the UI to render honestly. */
   limitation: string | null;
+  /** The drawer side of the reconciliation, reported apart from the sales side. */
+  drawer: {
+    shiftCount: number;
+    /** opening float + cash sales + pay-ins − pay-outs − refunds, summed over closed shifts. */
+    expectedCash: Prisma.Decimal;
+    actualCash: Prisma.Decimal | null;
+  };
 }
 
 /**
@@ -31,10 +40,13 @@ export interface MoneyReconciliation {
  * the goods equation; it must not be subtracted there. Debt only explains why the drawer is
  * smaller than sales, which is this module's job alone.
  *
- * STAGE A (today): the expected side only. `Smena`/`SmenaMovement` hold `initialCash` and
- * `finalCash` — the actual drawer count — but they exist only in the terminal's SQLite and
- * have no sync path, so the server has nothing to compare against. Stage B adds that sync and
- * fills in `actuallyCollected`; the shape below already has the slot, so nothing restructures.
+ * The drawer side comes from `Smena` rows mirrored up by the terminals at shift close. Those
+ * carry terminal-computed totals rather than figures recomputed here, because a return is a
+ * hard-deleted Sale on this side — after one, the server can no longer reconstruct what a shift
+ * actually took in. See the note on the `Smena` model.
+ *
+ * A period with no synced shifts still reports the expected side and says so via `limitation`,
+ * rather than showing a zero variance that was never computed.
  */
 @Injectable()
 export class MoneyReconciliationService {
@@ -72,6 +84,23 @@ export class MoneyReconciliationService {
     // so discounts must not be subtracted a second time here. They are reported for context only.
     const expectedCollected = netSales.minus(newDebts);
 
+    // Bucketed by close time: a shift belongs to the period in which it was counted out, which
+    // is the instant its `finalCash` describes. A shift opened before `periodStart` and closed
+    // inside it is therefore included, correctly — its whole drawer was reconciled in-period.
+    const shifts = await this.prisma.smena.findMany({
+      where: { storeId, closedAt: { gte: periodStart, lte: periodEnd } },
+      select: {
+        initialCash: true,
+        finalCash: true,
+        cashSalesAmount: true,
+        payInTotal: true,
+        payOutTotal: true,
+        returnAmount: true,
+      },
+    });
+
+    const drawer = sumDrawers(shifts);
+
     return {
       periodStart,
       periodEnd,
@@ -81,9 +110,16 @@ export class MoneyReconciliationService {
       netSales,
       newDebts,
       expectedCollected,
-      actuallyCollected: null,
-      cashVariance: null,
-      limitation: 'NO_SHIFT_DATA_ON_SERVER',
+      actuallyCollected: drawer.actualCash,
+      cashVariance: drawer.variance,
+      // Kept as a distinct signal from "variance is zero": no shifts reached the server for this
+      // period, so nothing was compared. A terminal that never syncs must not read as balanced.
+      limitation: drawer.shiftCount === 0 ? 'NO_SHIFT_DATA_ON_SERVER' : null,
+      drawer: {
+        shiftCount: drawer.shiftCount,
+        expectedCash: drawer.expectedCash,
+        actualCash: drawer.actualCash,
+      },
     };
   }
 }

@@ -123,6 +123,9 @@ const Centered = styled.div`
   padding: ${({ theme }) => theme.spacing.lg};
 `;
 
+/** Shown instead of a figure that was never computed, so it can never be read as a zero. */
+const NOT_COMPUTED = "—";
+
 
 export function ReconciliationPage() {
   const { t } = useTranslation();
@@ -202,6 +205,10 @@ export function ReconciliationPage() {
 
   const varianceLines = (goods?.lines ?? []).filter((l) => l.varianceQty !== null);
 
+  // No finalized stocktake means nothing was compared — which is NOT the same as "compared and
+  // found nothing wrong". The summary cards must not report a clean zero variance in that case.
+  const hasCount = goods?.countId != null;
+
   return (
     <Container>
       <Title>
@@ -274,6 +281,20 @@ export function ReconciliationPage() {
         </InfoBanner>
       )}
 
+      {/* Above the cards on purpose. This is the state of the whole page, not a footnote on one
+          table — every variance figure below is uncomputable without a finalized count. */}
+      {!loading && goods && !hasCount && (
+        <InfoBanner>
+          <AlertTriangle size={18} />
+          <span>
+            {t(
+              "reconciliation.noCount",
+              "Нет завершённой инвентаризации — сравнивать книгу не с чем. Расхождения не рассчитаны; показан только книжный остаток.",
+            )}
+          </span>
+        </InfoBanner>
+      )}
+
       {!loading && goods && !goods.crossCheck.clean && (
         <BugBanner>
           <Bug size={18} />
@@ -294,39 +315,59 @@ export function ReconciliationPage() {
       {!loading && goods && (
         <>
           <Cards>
+            {/* Every card reads "—" without a count. A zero here would be a lie: it would mean
+                "we checked and found nothing", when in fact nothing was ever checked. The green
+                "good" tone on a zero shortage count made that lie reassuring on top of wrong. */}
             <Card>
               <CardLabel>{t("reconciliation.shortages", "Недостачи (позиций)")}</CardLabel>
-              <CardValue $tone={goods.totals.shortageQtyLines > 0 ? "bad" : "good"}>
-                {goods.totals.shortageQtyLines}
+              <CardValue
+                $tone={
+                  !hasCount ? "plain" : goods.totals.shortageQtyLines > 0 ? "bad" : "good"
+                }
+              >
+                {hasCount ? goods.totals.shortageQtyLines : NOT_COMPUTED}
               </CardValue>
             </Card>
             <Card>
               <CardLabel>{t("reconciliation.surpluses", "Излишки (позиций)")}</CardLabel>
-              <CardValue>{goods.totals.surplusQtyLines}</CardValue>
+              <CardValue>
+                {hasCount ? goods.totals.surplusQtyLines : NOT_COMPUTED}
+              </CardValue>
             </Card>
             <Card>
               <CardLabel>{t("reconciliation.varianceCost", "Расхождение по себестоимости")}</CardLabel>
-              <CardValue $tone={Number(goods.totals.varianceCost) > 0 ? "bad" : "plain"}>
-                {formatCurrency(Number(goods.totals.varianceCost))}
+              <CardValue
+                $tone={
+                  !hasCount ? "plain" : Number(goods.totals.varianceCost) > 0 ? "bad" : "plain"
+                }
+              >
+                {hasCount
+                  ? formatCurrency(Number(goods.totals.varianceCost))
+                  : NOT_COMPUTED}
               </CardValue>
             </Card>
             <Card>
               <CardLabel>{t("reconciliation.varianceRetail", "Расхождение в розничных ценах")}</CardLabel>
-              <CardValue>{formatCurrency(Number(goods.totals.varianceRetail))}</CardValue>
+              <CardValue>
+                {hasCount
+                  ? formatCurrency(Number(goods.totals.varianceRetail))
+                  : NOT_COMPUTED}
+              </CardValue>
             </Card>
           </Cards>
 
           <Section>{t("reconciliation.goodsTitle", "Товары — по позициям")}</Section>
-          {goods.countId === null ? (
-            <InfoBanner>
-              <AlertTriangle size={18} />
-              <span>
-                {t(
-                  "reconciliation.noCount",
-                  "Нет завершённой инвентаризации за период — сравнивать книгу не с чем. Показан только книжный остаток.",
-                )}
-              </span>
-            </InfoBanner>
+          {!hasCount ? (
+            // The "why" already sits in the banner at the top of the page; repeating it here
+            // would just be the same sentence twice on one screen.
+            <EmptyPlaceholder
+              icon={<Scale size={40} />}
+              title={t("reconciliation.noCountShort", "Нечего сравнивать")}
+              description={t(
+                "reconciliation.noCountHint",
+                "Завершите инвентаризацию, чтобы увидеть расхождения по позициям.",
+              )}
+            />
           ) : varianceLines.length === 0 ? (
             <EmptyPlaceholder
               icon={<Scale size={40} />}
@@ -405,16 +446,53 @@ export function ReconciliationPage() {
       {!loading && money && (
         <>
           <Section>{t("reconciliation.moneyTitle", "Деньги — по способам оплаты")}</Section>
-          {money.limitation === "NO_SHIFT_DATA_ON_SERVER" && (
+          {money.limitation === "NO_SHIFT_DATA_ON_SERVER" ? (
             <InfoBanner>
               <AlertTriangle size={18} />
               <span>
                 {t(
                   "reconciliation.noShiftData",
-                  "Данные смен (наличные в кассе) пока не синхронизируются на сервер, поэтому расхождение по кассе не рассчитывается. Показана только выручка по способам оплаты.",
+                  "За период нет закрытых смен на сервере, поэтому расхождение по кассе не рассчитано. Показана только выручка по способам оплаты.",
                 )}
               </span>
             </InfoBanner>
+          ) : (
+            <Cards>
+              <Card>
+                <CardLabel>
+                  {t("reconciliation.expectedCash", "Должно быть в кассе")}
+                </CardLabel>
+                <CardValue>
+                  {formatCurrency(Number(money.drawer.expectedCash))}
+                </CardValue>
+              </Card>
+              <Card>
+                <CardLabel>{t("reconciliation.actualCash", "Фактически в кассе")}</CardLabel>
+                <CardValue>
+                  {formatCurrency(Number(money.drawer.actualCash))}
+                </CardValue>
+              </Card>
+              <Card>
+                {/* Negative = money missing from the drawer. Signed on purpose, exactly like the
+                    goods variance, so a surplus never reads as a loss at a glance. */}
+                <CardLabel>{t("reconciliation.cashVariance", "Расхождение по кассе")}</CardLabel>
+                <CardValue
+                  $tone={
+                    Number(money.cashVariance) < 0
+                      ? "bad"
+                      : Number(money.cashVariance) > 0
+                        ? "plain"
+                        : "good"
+                  }
+                >
+                  {formatCurrency(Number(money.cashVariance))}
+                </CardValue>
+              </Card>
+              <Card>
+                <CardLabel>{t("reconciliation.shiftCount", "Смен учтено")}</CardLabel>
+                <CardValue>{money.drawer.shiftCount}</CardValue>
+              </Card>
+            </Cards>
           )}
           <Table
             data={money.byTender}

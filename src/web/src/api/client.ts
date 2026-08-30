@@ -739,6 +739,11 @@ export interface MoneyReconciliation {
   actuallyCollected: string | null;
   cashVariance: string | null;
   limitation: string | null;
+  drawer: {
+    shiftCount: number;
+    expectedCash: string;
+    actualCash: string | null;
+  };
 }
 
 export const reconciliation = {
