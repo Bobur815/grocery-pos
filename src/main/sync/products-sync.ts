@@ -1,6 +1,7 @@
 import { getPrismaClient } from "../database/sqlite-client";
 import { getAppConfig } from "../config/app-config";
 import { getServerToken } from "./queue-manager";
+import { LOCAL_ONLY_SETTINGS } from "./local-only-settings";
 
 export async function syncProducts(): Promise<
   { id: number; nameRu: string; stock: number }[]
@@ -516,19 +517,6 @@ export async function syncCategories(): Promise<void> {
     throw error;
   }
 }
-
-// Keys that live only on the terminal and must never be overwritten by VPS sync
-const LOCAL_ONLY_SETTINGS = new Set([
-  "server_token",
-  "last_product_sync",
-  "last_sale_sync",
-  "last_upload_sync",
-  "ai_token_limit_daily",
-  // Machine-scoped fiscal secret: encrypted with THIS terminal's safeStorage/DPAPI key. Pulling a
-  // server copy over it writes a blob this machine can't decrypt, so the cashier password silently
-  // falls back to '' on the next sync cycle.
-  "regos_vcr_password_enc",
-]);
 
 export async function syncSettings(): Promise<void> {
   const prisma = getPrismaClient();

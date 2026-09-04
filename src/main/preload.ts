@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     changePassword: (currentPassword: string, newPassword: string) =>
       ipcRenderer.invoke("auth:changePassword", currentPassword, newPassword),
     isPinConfigured: () => ipcRenderer.invoke("auth:isPinConfigured"),
+    verifyTerminalAccess: (secret: string) =>
+      ipcRenderer.invoke("auth:verifyTerminalAccess", secret),
     setupPin: (pin: string) => ipcRenderer.invoke("auth:setupPin", pin),
   },
 
@@ -277,12 +279,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Local config (VPS connection settings)
   config: {
     getLocalConfig: () => ipcRenderer.invoke("config:getLocalConfig"),
+    getWebAdminQr: () => ipcRenderer.invoke("config:getWebAdminQr"),
     updateLocalConfig: (data: {
       storeId?: string;
       apiUrl?: string;
       storeName?: string;
       terminalId?: string;
     }) => ipcRenderer.invoke("config:updateLocalConfig", data),
+    // Fires when a sync cycle pulls a changed operating mode, so the UI re-gates without a restart
+    onModeChanged: (
+      callback: (mode: {
+        mode?: "OFFLINE_ONLY" | "ONLINE";
+        posAdminLocked?: boolean;
+      }) => void,
+    ) => {
+      const handler = (
+        _event: IpcRendererEvent,
+        payload: { mode?: "OFFLINE_ONLY" | "ONLINE"; posAdminLocked?: boolean },
+      ) => callback(payload);
+      ipcRenderer.on("config:modeChanged", handler);
+      return () => ipcRenderer.removeListener("config:modeChanged", handler);
+    },
   },
 
   // Smena (shift) management
@@ -324,6 +341,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       syncInterval: string;
       token: string;
       pin?: string;
+      mode?: string;
+      posAdminLocked?: boolean;
     }) => ipcRenderer.invoke("setup:complete", data),
     launchApp: () => ipcRenderer.invoke("setup:launchApp"),
   },
@@ -441,6 +460,7 @@ declare global {
           newPassword: string,
         ) => Promise<boolean>;
         isPinConfigured: () => Promise<boolean>;
+        verifyTerminalAccess: (secret: string) => Promise<boolean>;
         setupPin: (pin: string) => Promise<boolean>;
       };
       products: {
@@ -637,6 +657,13 @@ declare global {
           apiUrl: string;
           storeName: string;
           terminalId: string;
+          // Cached store operating mode. null = never activated, which means "unrestricted".
+          mode: "OFFLINE_ONLY" | "ONLINE" | null;
+          posAdminLocked: boolean;
+        } | null>;
+        getWebAdminQr: () => Promise<{
+          url: string;
+          qrDataUrl: string | null;
         } | null>;
         updateLocalConfig: (data: {
           storeId?: string;
@@ -644,6 +671,12 @@ declare global {
           storeName?: string;
           terminalId?: string;
         }) => Promise<{ requiresRestart?: boolean }>;
+        onModeChanged: (
+          callback: (mode: {
+            mode?: "OFFLINE_ONLY" | "ONLINE";
+            posAdminLocked?: boolean;
+          }) => void,
+        ) => () => void;
       };
       smena: {
         getCurrent: () => Promise<unknown | null>;
@@ -683,6 +716,8 @@ declare global {
           syncInterval: string;
           token: string;
           pin?: string;
+          mode?: string;
+          posAdminLocked?: boolean;
         }) => Promise<{ success: boolean }>;
         launchApp: () => Promise<void>;
       };

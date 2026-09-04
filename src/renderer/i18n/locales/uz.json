@@ -778,7 +778,16 @@
     "devicesSettingsDescription": "Faol sessiyalar va qurilmalarni boshqarish",
     "usersDescription": "Xodimlar, rollar va kirish huquqi",
     "appUpdate": "Ilovani yangilash",
-    "appUpdateDescription": "Yangilanishlarni tekshirish va o'rnatish"
+    "appUpdateDescription": "Yangilanishlarni tekshirish va o'rnatish",
+    "serverUrl": "Server manzili",
+    "serverUrlHint": "Ushbu terminal ishlaydigan API manzili. Masalan: https://pos.bobur-dev.uz/api",
+    "serverUrlInvalid": "http:// yoki https:// bilan boshlanadigan to'g'ri manzil kiriting",
+    "terminalAccessTitle": "Terminal sozlamalari",
+    "terminalAccessSecret": "PIN yoki administrator paroli",
+    "terminalAccessHint": "Do'kon PIN kodini kiriting. PIN belgilanmagan bo'lsa, administrator parolini kiriting.",
+    "terminalAccessDenied": "PIN yoki parol noto'g'ri",
+    "webAdminOnPhone": "Panelni telefonda ochish",
+    "webAdminHint": "Boshqaruv panelini brauzerda ochish uchun kodni telefoningiz bilan skanerlang."
   },
   "updater": {
     "currentVersion": "Joriy versiya",

@@ -790,7 +790,16 @@
     "devicesSettingsDescription": "Управление активными сессиями и устройствами",
     "usersDescription": "Сотрудники, роли и доступ",
     "appUpdate": "Обновление приложения",
-    "appUpdateDescription": "Проверка и установка обновлений"
+    "appUpdateDescription": "Проверка и установка обновлений",
+    "serverUrl": "Адрес сервера",
+    "serverUrlHint": "Адрес API, с которым работает этот терминал. Например: https://pos.bobur-dev.uz/api",
+    "serverUrlInvalid": "Укажите корректный адрес, начинающийся с http:// или https://",
+    "terminalAccessTitle": "Настройки терминала",
+    "terminalAccessSecret": "PIN или пароль администратора",
+    "terminalAccessHint": "Введите PIN магазина. Если PIN не задан, введите пароль администратора.",
+    "terminalAccessDenied": "Неверный PIN или пароль",
+    "webAdminOnPhone": "Открыть панель на телефоне",
+    "webAdminHint": "Отсканируйте код телефоном, чтобы открыть панель управления в браузере."
   },
   "updater": {
     "currentVersion": "Текущая версия",

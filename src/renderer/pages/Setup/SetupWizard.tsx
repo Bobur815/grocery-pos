@@ -316,6 +316,10 @@ interface WizardData {
   taxRate: string;
   syncInterval: string;
   terminalId: string;
+  // Learned from the server during activation and cached locally, so an OFFLINE_ONLY terminal
+  // never has to reach the internet again.
+  mode: string;
+  posAdminLocked: boolean;
 }
 
 const STEPS: WizardStep[] = ['login', 'storeInfo', 'password', 'pin'];
@@ -352,6 +356,9 @@ export function SetupWizard() {
     taxRate: '0',
     syncInterval: '5',
     terminalId: 'T1',
+    // Unrestricted until the server says otherwise — a failed prefill must never lock a terminal.
+    mode: 'ONLINE',
+    posAdminLocked: false,
   });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -405,6 +412,9 @@ export function SetupWizard() {
             storeAddress: store.address || '',
             storePhone: store.phone || '',
             taxRate: settings.taxRate != null ? String(settings.taxRate) : '0',
+            // This is the activation step: the mode is cached now and never needs the net again.
+            mode: store.mode === 'OFFLINE_ONLY' ? 'OFFLINE_ONLY' : 'ONLINE',
+            posAdminLocked: store.posAdminLocked === true,
           };
         }
       } catch {
@@ -510,6 +520,8 @@ export function SetupWizard() {
         syncInterval: data.syncInterval || '5',
         token: data.token,
         pin: savedPin,
+        mode: data.mode,
+        posAdminLocked: data.posAdminLocked,
       });
       await window.electronAPI.setup.launchApp();
     } catch (e) {

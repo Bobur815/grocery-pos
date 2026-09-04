@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Layout } from "./components/layout/Layout";
 import { ProtectedRoute } from "./components/protected/ProtectedRoute";
 import { RoleGuard } from "./components/protected/RoleGuard";
+import { ModeGuard } from "./components/protected/ModeGuard";
 import { useAuthStore } from "./store/auth-store";
 import { ConfirmDialog } from "./components/common/ConfirmDialog";
 
@@ -106,7 +107,9 @@ function App() {
           path="products/stock"
           element={
             <RoleGuard allowedRoles={["ADMIN"]}>
-              <StockManagement />
+              <ModeGuard>
+                <StockManagement />
+              </ModeGuard>
             </RoleGuard>
           }
         />
@@ -213,7 +216,9 @@ function App() {
           path="users"
           element={
             <RoleGuard allowedRoles={["ADMIN"]}>
-              <UserList />
+              <ModeGuard>
+                <UserList />
+              </ModeGuard>
             </RoleGuard>
           }
         />
@@ -221,7 +226,9 @@ function App() {
           path="users/new"
           element={
             <RoleGuard allowedRoles={["ADMIN"]}>
-              <UserForm />
+              <ModeGuard>
+                <UserForm />
+              </ModeGuard>
             </RoleGuard>
           }
         />
@@ -229,7 +236,9 @@ function App() {
           path="users/:id/edit"
           element={
             <RoleGuard allowedRoles={["ADMIN"]}>
-              <UserForm />
+              <ModeGuard>
+                <UserForm />
+              </ModeGuard>
             </RoleGuard>
           }
         />
@@ -239,7 +248,9 @@ function App() {
           path="suppliers"
           element={
             <RoleGuard allowedRoles={["ADMIN"]}>
-              <SupplierList />
+              <ModeGuard>
+                <SupplierList />
+              </ModeGuard>
             </RoleGuard>
           }
         />
@@ -247,7 +258,9 @@ function App() {
           path="suppliers/:id"
           element={
             <RoleGuard allowedRoles={["ADMIN"]}>
-              <SupplierDetails />
+              <ModeGuard>
+                <SupplierDetails />
+              </ModeGuard>
             </RoleGuard>
           }
         />

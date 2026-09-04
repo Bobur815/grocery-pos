@@ -7,6 +7,7 @@ import { uploadLocalData } from './upload-sync';
 import { getAppConfig } from '../config/app-config';
 import { getPrismaClient } from '../database/sqlite-client';
 import { getServerToken, clearServerToken } from './queue-manager';
+import { shouldSync, shouldUploadMasterData } from './sync-policy';
 import { flushLogs } from '../logger';
 
 function decodeTokenStoreId(token: string): string | null | undefined {
@@ -67,6 +68,13 @@ export class SyncService {
       // Guard: verify the server token is scoped to this terminal's store
       const prisma = getPrismaClient();
       const localConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
+
+      // An OFFLINE_ONLY store's SQLite is the source of truth and it has no server to sync with.
+      // Checked here rather than in start() so a mode learned after launch takes effect at once.
+      if (!shouldSync(localConfig)) {
+        return;
+      }
+
       if (localConfig?.storeId) {
         const tokenStoreId = decodeTokenStoreId(token);
         console.log(`[sync] guard — token.storeId=${tokenStoreId ?? 'null'} localConfig.storeId=${localConfig.storeId}`);
@@ -88,9 +96,16 @@ export class SyncService {
 
       console.log(`[sync] Cycle start — user: ${currentUser?.phone ?? 'none'}, role: ${currentUser?.role ?? 'none'}`);
 
-      // Upload locally-created categories, suppliers, products, and arrivals to VPS
-      // Only ADMIN users have permission to upload product/supplier/category data
-      if (currentUser?.role === 'ADMIN') {
+      // Upload locally-created categories, suppliers, products, and arrivals to VPS.
+      // Only ADMIN users have permission to upload product/supplier/category data.
+      //
+      // When the store is locked to cashier-only operation the server owns all master data, so
+      // this whole block is skipped — that is the entire "narrowed sync" scope, because users,
+      // categories, suppliers, products, arrivals and settings all upload from inside
+      // uploadLocalData(). Sales, shifts, heartbeat and logs below are outside it and keep
+      // running. `posAdminLocked` is false unless a super admin opted this store in, so an
+      // un-opted-in or never-activated terminal behaves exactly as it always has.
+      if (shouldUploadMasterData(currentUser?.role, localConfig)) {
         try {
           await uploadLocalData();
         } catch (uploadError) {
@@ -186,6 +201,22 @@ export class SyncService {
           update: { value: String(data.ai_token_limit_daily) },
           create: { key: 'ai_token_limit_daily', value: String(data.ai_token_limit_daily) },
         });
+      }
+
+      // Refresh the cached operating mode. This is what makes the super admin's toggle reach a
+      // live terminal within one sync cycle — no rebuild, and flipping it back is the rollback.
+      // Only write fields the server actually sent, so an older server can't silently unlock a
+      // terminal by omitting them.
+      const modeUpdate: { mode?: string; posAdminLocked?: boolean } = {};
+      if (data.mode === 'OFFLINE_ONLY' || data.mode === 'ONLINE') {
+        modeUpdate.mode = data.mode;
+      }
+      if (typeof data.pos_admin_locked === 'boolean') {
+        modeUpdate.posAdminLocked = data.pos_admin_locked;
+      }
+      if (Object.keys(modeUpdate).length > 0) {
+        await prisma.localConfig.update({ where: { id: 'config' }, data: modeUpdate });
+        this.notifyRenderer('config:modeChanged', modeUpdate);
       }
     } catch {
       // Offline or endpoint not yet implemented — use cached limit

@@ -108,7 +108,9 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       terminal_id TEXT NOT NULL,
       api_url TEXT NOT NULL,
       store_pin TEXT,
-      last_sync DATETIME DEFAULT CURRENT_TIMESTAMP
+      last_sync DATETIME DEFAULT CURRENT_TIMESTAMP,
+      mode TEXT,
+      pos_admin_locked INTEGER DEFAULT 0
     )
   `;
 
@@ -637,6 +639,16 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
   // so stock restores correctly on receipt edit/delete and the fiscal quantity converts to pieces.
   if (!(await columnExists(prisma, 'sale_items', 'pieces_per_unit'))) {
     await prisma.$executeRaw`ALTER TABLE sale_items ADD COLUMN pieces_per_unit INTEGER NOT NULL DEFAULT 1`;
+  }
+
+  // Cached store operating mode. `mode` stays NULL until the terminal is activated against a
+  // server, and NULL plus pos_admin_locked = 0 is exactly today's behavior — so an existing
+  // install upgrades in place without any change until a super admin opts it in.
+  if (!(await columnExists(prisma, 'local_config', 'mode'))) {
+    await prisma.$executeRaw`ALTER TABLE local_config ADD COLUMN mode TEXT`;
+  }
+  if (!(await columnExists(prisma, 'local_config', 'pos_admin_locked'))) {
+    await prisma.$executeRaw`ALTER TABLE local_config ADD COLUMN pos_admin_locked INTEGER NOT NULL DEFAULT 0`;
   }
 }
 

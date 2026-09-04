@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsObject, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsObject, IsBoolean, IsIn, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class StoreSettingsDto {
@@ -45,6 +45,17 @@ export class CreateStoreDto {
   @IsString()
   @MaxLength(20)
   phone?: string;
+
+  @ApiPropertyOptional({ enum: ['OFFLINE_ONLY', 'ONLINE'], description: 'Operating mode (defaults to ONLINE)' })
+  @IsOptional()
+  @IsString()
+  @IsIn(['OFFLINE_ONLY', 'ONLINE'])
+  mode?: 'OFFLINE_ONLY' | 'ONLINE';
+
+  @ApiPropertyOptional({ example: false, description: 'Restrict the Electron app to cashier operation and narrow its sync' })
+  @IsOptional()
+  @IsBoolean()
+  posAdminLocked?: boolean;
 
   @ApiPropertyOptional({ type: StoreSettingsDto, description: 'Store settings' })
   @IsOptional()

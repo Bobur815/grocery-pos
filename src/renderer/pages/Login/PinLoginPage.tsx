@@ -11,6 +11,7 @@ import { Input } from "../../components/common/Input";
 import { UzbekPhoneInput } from "@renderer/components/common/UzbekPhoneInput";
 import { VirtualKeyboard } from "@renderer/components/common/VirtualKeyboard";
 import { isUzPhoneComplete } from "@shared/utils/phone";
+import { TerminalAccessBar } from "./TerminalAccessBar";
 
 type LoginMode = "pin" | "phone";
 
@@ -630,6 +631,7 @@ export function PinLoginPage() {
               )}
             </ContentWrapper>
           )}
+          <TerminalAccessBar />
         </LoginCard>
         {keyboardOpen && (
           <VirtualKeyboard

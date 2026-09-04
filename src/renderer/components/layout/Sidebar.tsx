@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { SyncButton } from "../common/SyncButton";
 import { useAuthStore } from "../../store/auth-store";
+import { useModeStore } from "../../store/mode-store";
 import { useSidebar } from "../../context/SidebarContext";
 import { useSync } from "../../hooks/useSync";
 import { APP_BAR_HEIGHT } from "./AppBar";
@@ -212,6 +213,7 @@ export function Sidebar() {
   const { isCollapsed, collapseSidebar, openSmenaModal } = useSidebar();
   const { status, refreshStatus } = useSync();
   const isAdmin = user?.role === "ADMIN";
+  const posAdminLocked = useModeStore((s) => s.posAdminLocked);
   const [currentVersion, setCurrentVersion] = useState("");
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
@@ -290,8 +292,11 @@ export function Sidebar() {
           {isAdmin && (
             <NavSection>
               <SectionTitle>{t("nav.management")}</SectionTitle>
-              {renderNavItem("/products/stock", ClipboardList, t("nav.inventory"))}
-              {renderNavItem("/suppliers", Truck, t("suppliers.title"))}
+              {/* Stock and suppliers move to the web dashboard once the store is cashier-only.
+                  Settings stays: printer, scale, fiscal and sync are this machine's own config. */}
+              {!posAdminLocked &&
+                renderNavItem("/products/stock", ClipboardList, t("nav.inventory"))}
+              {!posAdminLocked && renderNavItem("/suppliers", Truck, t("suppliers.title"))}
               <StyledNavLink to="/settings" onClick={collapseSidebar}>
                 <IconWrapper><Settings size={17} /></IconWrapper>
                 <NavText>{t("nav.settings")}</NavText>

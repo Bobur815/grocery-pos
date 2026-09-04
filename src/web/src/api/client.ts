@@ -513,6 +513,8 @@ export const receipt = {
 
 // ─── Stores (Super Admin) ─────────────────────────────────────────────────────
 
+export type StoreMode = "OFFLINE_ONLY" | "ONLINE";
+
 export interface StoreRecord {
   id: string;
   name: string;
@@ -524,6 +526,8 @@ export interface StoreRecord {
   subscriptionPlan: string | null;
   subscriptionExpiresAt: string | null;
   scheduledDeleteAt: string | null;
+  mode: StoreMode;
+  posAdminLocked: boolean;
   createdAt: string;
   updatedAt: string;
   _count?: { users: number; products: number; sales: number; terminalHeartbeats: number };
@@ -556,6 +560,8 @@ export const stores = {
     name: string;
     address?: string;
     phone?: string;
+    mode?: StoreMode;
+    posAdminLocked?: boolean;
   }): Promise<StoreRecord> => {
     const { data } = await axiosInstance.post("/stores", payload);
     return data;
@@ -570,6 +576,8 @@ export const stores = {
       aiPlan: string;
       subscriptionPlan: string;
       subscriptionExpiresAt: string | null;
+      mode: StoreMode;
+      posAdminLocked: boolean;
     }>,
   ): Promise<StoreRecord> => {
     const { data } = await axiosInstance.patch(`/stores/${id}`, payload);

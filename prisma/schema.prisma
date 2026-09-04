@@ -13,6 +13,11 @@ datasource db {
 
 // ==================== MULTI-TENANCY ====================
 
+enum StoreMode {
+  OFFLINE_ONLY // Local SQLite is authoritative, sync off, full admin CRUD stays on the terminal
+  ONLINE // Server is authoritative, terminal is cashier-focused, admin lives on the web dashboard
+}
+
 model Store {
   id      String  @id @default(cuid())
   name    String
@@ -28,6 +33,15 @@ model Store {
   settings String? @db.Text // JSON: tax rate, receipt template, etc.
 
   scheduledDeleteAt DateTime? @map("scheduled_delete_at")
+
+  // Operating mode. OFFLINE_ONLY: the terminal's SQLite is the source of truth and it never syncs.
+  // ONLINE: this server is the source of truth and the terminal runs a reduced, cashier-only sync.
+  mode StoreMode @default(ONLINE)
+
+  // Rollout switch for the ONLINE-mode restrictions (cashier-only Electron + narrowed sync).
+  // Deliberately false by default so existing stores keep today's behavior until a super admin
+  // opts them in. Flipping it back is the rollback — it needs no new build.
+  posAdminLocked Boolean @default(false) @map("pos_admin_locked")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

@@ -1,4 +1,5 @@
 import { ipcMain, app, net } from "electron";
+import QRCode from "qrcode";
 import { setupAuthHandlers } from "./auth-handlers";
 import { setupProductsHandlers } from "./products-handlers";
 import { setupSalesHandlers } from "./sales-handlers";
@@ -850,6 +851,26 @@ function setupAppHandlers(): void {
   ipcMain.handle("config:getLocalConfig", async () => {
     const prisma = getPrismaClient();
     return prisma.localConfig.findUnique({ where: { id: "config" } });
+  });
+
+  // Web admin dashboard address as a scannable QR, for opening it on a phone.
+  //
+  // Returns null for an OFFLINE_ONLY store: it has no server, so there is no dashboard to point
+  // at. The QR is generated here rather than in the renderer to match how UzQR does it and to
+  // keep the /api -> /web derivation in one place.
+  ipcMain.handle("config:getWebAdminQr", async () => {
+    const prisma = getPrismaClient();
+    const localConfig = await prisma.localConfig.findUnique({ where: { id: "config" } });
+    if (!localConfig?.apiUrl || localConfig.mode === "OFFLINE_ONLY") return null;
+
+    const url = `${localConfig.apiUrl.replace(/\/api\/?$/, "")}/web`;
+    try {
+      const qrDataUrl = await QRCode.toDataURL(url, { width: 320, margin: 1 });
+      return { url, qrDataUrl };
+    } catch {
+      // Still give the renderer the address so it can show it as text.
+      return { url, qrDataUrl: null };
+    }
   });
 
   ipcMain.handle(

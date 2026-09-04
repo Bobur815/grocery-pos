@@ -543,6 +543,34 @@ export function setupAuthHandlers(): void {
     return !!(config?.storePin);
   });
 
+  // Side-effect-free credential check, used to gate terminal-level settings on the login screen
+  // (changing the server URL from an unauthenticated screen would otherwise let anyone repoint
+  // this terminal at a server of their choosing). Deliberately NOT auth:loginWithPin — that
+  // starts a session. Accepts the store PIN, or an admin's password when no PIN is configured.
+  ipcMain.handle('auth:verifyTerminalAccess', async (_event, secret: string) => {
+    if (!secret) return false;
+    const prisma = getPrismaClient();
+
+    const config = await prisma.localConfig.findUnique({
+      where: { id: 'config' },
+      select: { storePin: true },
+    });
+
+    if (config?.storePin) {
+      return bcrypt.compare(secret, config.storePin);
+    }
+
+    // No PIN on this terminal — fall back to any active local admin's password.
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN', active: true },
+      select: { password: true },
+    });
+    for (const admin of admins) {
+      if (await bcrypt.compare(secret, admin.password)) return true;
+    }
+    return false;
+  });
+
   ipcMain.handle('auth:setupPin', async (_event, pin: string) => {
     if (!currentUser) {
       throw new Error('Not authenticated');

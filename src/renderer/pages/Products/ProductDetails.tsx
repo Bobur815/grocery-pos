@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { useProducts } from "../../hooks/useProducts";
 import { useAuthStore } from "../../store/auth-store";
+import { useModeStore } from "../../store/mode-store";
 import { Button } from "../../components/common/Button";
 import { Input } from "../../components/common/Input";
 import { Product } from "@shared/types";
@@ -203,6 +204,9 @@ export function ProductDetails() {
   );
 
   const isAdmin = user?.role === "ADMIN";
+  // Cost and analytics stay visible to an admin; only mutation moves to the web dashboard.
+  const posAdminLocked = useModeStore((s) => s.posAdminLocked);
+  const canManageProducts = isAdmin && !posAdminLocked;
   console.log(product);
   
   useEffect(() => {
@@ -307,7 +311,7 @@ export function ProductDetails() {
           </BackButton>
           <Title>{`${getProductName()} (№ ${product.storeProductCode ?? product.id})`}</Title>
         </HeaderLeft>
-        {isAdmin && (
+        {canManageProducts && (
           <Actions>
             <Button
               style={{ fontSize: "22px" }}

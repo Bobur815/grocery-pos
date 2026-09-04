@@ -110,6 +110,11 @@ export class StoresService {
             ? JSON.stringify(createStoreDto.settings)
             : null,
           active: true,
+          // Both fall back to the schema defaults (ONLINE / false) when the caller omits them.
+          ...(createStoreDto.mode !== undefined && { mode: createStoreDto.mode }),
+          ...(createStoreDto.posAdminLocked !== undefined && {
+            posAdminLocked: createStoreDto.posAdminLocked,
+          }),
         },
       });
 
@@ -193,6 +198,9 @@ export class StoresService {
         ? new Date(updateStoreDto.subscriptionExpiresAt)
         : null;
     }
+    if (updateStoreDto.mode !== undefined) data.mode = updateStoreDto.mode;
+    if (updateStoreDto.posAdminLocked !== undefined)
+      data.posAdminLocked = updateStoreDto.posAdminLocked;
     if (updateStoreDto.settings !== undefined) {
       data.settings = JSON.stringify(updateStoreDto.settings);
     }

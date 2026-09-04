@@ -310,6 +310,30 @@ export function StoreDetailModal({ store, onClose, onUpdated }: Props) {
           </StatGrid>
         )}
 
+        {/* Terminal mode — edited in the store form, shown here for reference */}
+        <SectionTitle>Terminal Mode</SectionTitle>
+        <PlanCard $pro={store.posAdminLocked}>
+          <PlanRow>
+            <PlanLabel>Mode</PlanLabel>
+            <PlanBadge $pro={store.mode === "ONLINE"}>
+              {store.mode === "ONLINE" ? "Online" : "Offline only"}
+            </PlanBadge>
+          </PlanRow>
+          <PlanRow>
+            <PlanLabel>Cashier-only POS</PlanLabel>
+            <PlanBadge $pro={store.posAdminLocked}>
+              {store.posAdminLocked ? "On" : "Off"}
+            </PlanBadge>
+          </PlanRow>
+          <PlanNote>
+            {store.mode === "OFFLINE_ONLY"
+              ? "This store never syncs. All management stays on the terminal."
+              : store.posAdminLocked
+                ? "The Electron app is restricted to cashier operation; management happens here. It uploads only sales, shifts, heartbeats and logs."
+                : "The Electron app still has full local management and uploads its own product, user, supplier, arrival and settings changes."}
+          </PlanNote>
+        </PlanCard>
+
         {/* Subscription Plan */}
         <SectionTitle>Subscription Plan</SectionTitle>
         <PlanCard $pro={!!currentSubPlan}>

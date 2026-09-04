@@ -24,6 +24,12 @@ model LocalConfig {
   storePin   String?  @map("store_pin") // 4-digit PIN (bcrypt hashed) for quick cashier login
   lastSync   DateTime @default(now()) @map("last_sync")
 
+  // Cached copy of the store's operating mode, learned at setup and refreshed every sync cycle
+  // from GET /store-config. Nullable on purpose: null means "never activated", which must behave
+  // exactly like an unrestricted terminal so an upgraded install never locks itself out offline.
+  mode           String? @map("mode") // "OFFLINE_ONLY" | "ONLINE"
+  posAdminLocked Boolean @default(false) @map("pos_admin_locked")
+
   @@map("local_config")
 }
 

@@ -543,3 +543,97 @@ detects a decrement that never fired.
   staging first.
 - No live run: the UI has not been opened, and no reconciliation has executed against a real
   database.
+
+
+# Per-Store Mode (OFFLINE_ONLY / ONLINE) + Cashier-Only Electron
+
+Plan: `~/.claude/plans/mossy-drifting-owl.md`. Brief: `MULTI_STORE_SETUP.md`.
+
+Key finding: multi-store, `SUPER_ADMIN`, the super-admin stores dashboard, and the full
+web admin (incl. StockManagement/arrivals/inventarizatsiya) **already exist**. The real work
+is a per-store mode + gating the Electron app on it.
+
+Safety rule: `posAdminLocked` defaults to `false` everywhere. Unset / unknown / server
+unreachable => behave exactly as today. The one live store must see zero change on deploy.
+
+## Phase 1 - Server: the mode fields (DONE)
+- [x] `prisma/schema.prisma`: `enum StoreMode`, `Store.mode` (@default ONLINE), `Store.posAdminLocked` (@default false)
+- [x] Migration (hand-written, idempotent, matches repo convention) via `prisma migrate dev` (additive: CREATE TYPE + 2 ADD COLUMN)
+- [x] `stores/dto/create-store.dto.ts` + `update-store.dto.ts` (forbidNonWhitelisted is on)
+- [x] `stores.service.ts`: pass through create/update, expose in findAll/findById
+- [x] `store-config.controller.ts`: add `mode` + `pos_admin_locked` to GET /store-config
+- [x] `src/web` StoreFormModal + StoreDetailModal + client.ts StoreRecord
+
+## Phase 2 - Terminal: learn and cache the mode (DONE)
+- [x] `prisma/schema.sqlite.prisma`: `LocalConfig.mode` (nullable), `LocalConfig.posAdminLocked`
+- [x] `sqlite-client.ts`: columns in `createSchemaIfNeeded()` + idempotent entry in `runMigrations()`
+- [x] `setup-handlers.ts`: persist mode/posAdminLocked at `setup:complete`
+- [x] `setup-handlers.ts`: pin `apiUrl` to the URL setup authenticated against (same value as the seed today, so no behavior change - makes it an invariant, not a coincidence)
+- [x] `sync-service.ts` `syncStoreConfig()`: persist mode/posAdminLocked each cycle
+- [x] `preload.ts`: expose the new fields on `config:getLocalConfig`
+
+## Phase 3 - Sync narrowing (DONE)
+- [x] `sync-service.ts`: gate `uploadLocalData()` on `!posAdminLocked`
+- [x] Lift duplicated `LOCAL_ONLY_SETTINGS` into one shared constant
+- [x] Add machine-scoped keys: printer_name, label_printer_name, label_width_mm, regos_vcr_url, regos_vcr_pos_id
+
+## Phase 4 - Electron mode gating (DONE)
+- [x] `store/mode-store.ts` (Zustand) + hydrate in `ProtectedRoute`
+- [x] `components/protected/ModeGuard.tsx`
+- [x] `App.tsx`: gate products/stock, suppliers*, users*
+- [x] `Sidebar.tsx`: hide the stock + suppliers nav items when locked (Settings stays - printer/scale/fiscal are machine-local)
+- [x] Hide create/edit triggers in `ProductList.tsx` and `ProductDetails.tsx`
+- [x] RU/UZ i18n keys
+
+## Phase 5 - Login page controls (DONE)
+- [x] Server-URL dialog, PIN-gated, via existing `config:updateLocalConfig`
+- [x] Web-admin QR (ONLINE only) using the existing `qrcode` dep
+- [x] RU/UZ i18n keys
+
+## Verification
+- [x] Unit test: upload gate on/off/undefined
+- [x] `npm test` (132 pass, incl. 15 new), `tsc --noEmit`, `electron-vite build`, `cd src/web && npm run build`
+- [ ] `npm run lint` BLOCKED: repo has no eslint.config.js and ESLint 9 dropped .eslintrc — pre-existing, unrelated to this work
+- [ ] Staging end-to-end incl. the unlocked regression check and the flip-back rollback
+
+## Review
+_(filled in on completion)_
+
+
+### What shipped
+Multi-store, `SUPER_ADMIN`, the super-admin stores dashboard and the full web admin all
+**already existed**. Rather than rebuild any of it, this adds a per-store mode and gates the
+Electron app on it — roughly 30 files, no rewrite.
+
+- **Server**: `StoreMode` enum + `Store.mode` + `Store.posAdminLocked`; both surfaced through the
+  existing `GET /store-config` that terminals already poll every cycle, so no new endpoint and no
+  new guard.
+- **Terminal**: caches both in `LocalConfig`, learned at setup (activation) and refreshed each
+  sync. Emits `config:modeChanged` so a super admin's toggle re-gates a running terminal.
+- **Sync**: `shouldSync()` / `shouldUploadMasterData()` in `sync-policy.ts` — pure, unit-tested.
+  One gate drops all six master-data uploads at once; sales, shifts, heartbeat and logs are
+  outside `uploadLocalData()` and keep running untouched.
+- **UI**: `ModeGuard` mirrors the existing `RoleGuard`; modal-opened surfaces hide their triggers
+  instead. Login screen gets a PIN-gated server-URL dialog and a web-admin QR.
+
+### Decisions worth remembering
+- `posAdminLocked` is a **separate knob from `mode`**, not a consequence of it. The live store
+  backfills to `mode=ONLINE, posAdminLocked=false` — an accurate description with zero behavior
+  change. Rollback is unchecking a box; it lands within one sync cycle, no installer.
+- Every unknown state (never activated, unreadable config, older server omitting the fields)
+  resolves to **today's behavior**, and that is what the 15 unit tests actually pin down.
+- `LOCAL_ONLY_SETTINGS` had **already drifted** between its two copies. It is now one shared
+  constant, and machine-scoped keys were added to it — required, because killing the settings
+  upload without also excluding them from the download would let one terminal's printer name
+  and REGOS URL propagate over every other terminal's.
+
+### Deferred (by decision)
+Local API server in Electron, LAN-served web admin, LAN-IP detection, offline phone QR,
+multi-terminal LAN topology, signed offline activation codes. `OFFLINE_ONLY` today means a
+single terminal with sync off and full local CRUD.
+
+### Not done
+- `npm run lint` cannot run: the repo has no `eslint.config.js` and ESLint 9 dropped `.eslintrc`
+  support. Pre-existing and unrelated — flagged, not fixed.
+- The PostgreSQL migration has **not** been applied anywhere yet, and no staging run has happened.
+- No `package.json` version bump yet — per convention, bump once at deploy.

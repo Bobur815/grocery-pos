@@ -1,6 +1,7 @@
 import { getPrismaClient } from "../database/sqlite-client";
 import { getAppConfig } from "../config/app-config";
 import { getServerToken } from "./queue-manager";
+import { LOCAL_ONLY_SETTINGS } from "./local-only-settings";
 import type {
   Category,
   Supplier,
@@ -239,20 +240,6 @@ async function uploadArrivals(
     throw new Error(`Failed to upload arrivals: ${text}`);
   }
 }
-
-// Keys that should never be pushed to VPS (terminal-local only)
-const LOCAL_ONLY_SETTINGS = new Set([
-  'server_token',
-  'last_product_sync',
-  'last_sale_sync',
-  'last_upload_sync',
-  'last_audit_log_sync',
-  'ai_token_limit_daily',
-  // Machine-scoped fiscal secret: encrypted with THIS terminal's safeStorage/DPAPI key, so it can
-  // only be decrypted here. Uploading it lets another terminal's blob (or a stale one) sync back
-  // and overwrite the local row, after which decryption throws and the password resolves to ''.
-  'regos_vcr_password_enc',
-]);
 
 // Values pushed successfully in this process run, so unchanged settings aren't re-uploaded
 // every cycle. Some values are large (receipt_logo_top/_bottom hold base64 images); re-sending them
