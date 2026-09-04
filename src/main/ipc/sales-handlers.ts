@@ -107,6 +107,10 @@ export function setupSalesHandlers(): void {
         cashierName: currentUser.nameRu,
         terminalId: config.terminalId,
         smenaId: currentSmena.id,
+        // Present only when the optional UzQR integration confirmed a payment BEFORE this sale
+        // was created. Its presence switches buildPayments() to the by-reference payment shape.
+        regosPaymentId: data.regosPaymentId ?? null,
+        regosPaymentRrn: data.regosPaymentRrn ?? null,
         synced: false,
         items: {
           create: items,
@@ -184,7 +188,10 @@ export function setupSalesHandlers(): void {
           where: { id: sale.id },
           data: { fiscalStatus: 'PENDING', regosLabels },
         });
-        if (data.fiscalize) {
+        // A UzQR sale fiscalizes NOW regardless of the checkbox: REGOS forbids reusing a
+        // Payment.Create payment across receipts, so deferring would strand the payment_id and
+        // the buyer's money with it.
+        if (data.fiscalize || data.regosPaymentId) {
           // Fire-and-forget: kick the device immediately but do not await the OFD round-trip.
           regosVcrService.fiscalizeSale(sale.id).catch((e) =>
             console.error('[fiscal] immediate fiscalize failed (will retry):', e instanceof Error ? e.message : e),

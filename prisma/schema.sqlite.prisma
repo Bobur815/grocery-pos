@@ -206,6 +206,13 @@ model Sale {
   regosReceiptNo  String?   @map("regos_receipt_no")
   regosFiscalAt   DateTime? @map("regos_fiscal_at")
   regosLabels     String?   @map("regos_labels") // JSON [{barcode,label}] snapshot for marked goods
+
+  // UzQR (REGOS Payment.Create). Set only when the optional UzQR integration is on and the
+  // buyer actually paid — its presence is what makes buildPayments() book the receipt against
+  // the payment instead of as a plain card. regosPaymentRrn is the UzQR payment identifier,
+  // kept for reconciliation when a payment succeeds but the receipt does not.
+  regosPaymentId  String?   @map("regos_payment_id")
+  regosPaymentRrn String?   @map("regos_payment_rrn")
   refunded        Boolean   @default(false) // true once a fiscal full refund has been issued
 
   // Sync tracking

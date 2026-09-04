@@ -115,6 +115,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     zClose: () => ipcRenderer.invoke("fiscal:zClose"),
   },
 
+  uzqr: {
+    isEnabled: () => ipcRenderer.invoke("uzqr:isEnabled"),
+    start: (amountSum: number) => ipcRenderer.invoke("uzqr:start", amountSum),
+    // Resolves only when the buyer pays, the deadline passes, or cancel() is called.
+    await: (vcrPaymentId: string) => ipcRenderer.invoke("uzqr:await", vcrPaymentId),
+    cancel: (vcrPaymentId: string) => ipcRenderer.invoke("uzqr:cancel", vcrPaymentId),
+  },
+
   // Inventory
   inventory: {
     createArrival: (data: unknown) =>
@@ -523,6 +531,16 @@ declare global {
         zInfo: () => Promise<import("../shared/types/fiscal.types").FiscalZReportStatus>;
         zOpen: () => Promise<import("../shared/types/fiscal.types").FiscalActionResult>;
         zClose: () => Promise<import("../shared/types/fiscal.types").FiscalActionResult>;
+      };
+      uzqr: {
+        isEnabled: () => Promise<boolean>;
+        start: (
+          amountSum: number,
+        ) => Promise<import("../shared/types/fiscal.types").UzQrStartResult>;
+        await: (
+          vcrPaymentId: string,
+        ) => Promise<import("../shared/types/fiscal.types").UzQrFinalResult>;
+        cancel: (vcrPaymentId: string) => Promise<{ ok: boolean; error?: string }>;
       };
       inventory: {
         createArrival: (data: unknown) => Promise<unknown>;

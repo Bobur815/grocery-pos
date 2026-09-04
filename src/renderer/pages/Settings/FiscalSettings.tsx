@@ -184,6 +184,11 @@ export function FiscalSettings() {
   const [posId, setPosId] = useState('');
   const [vcrPrintsReceipt, setVcrPrintsReceipt] = useState(false);
   const [markingCodeCheck, setMarkingCodeCheck] = useState(true);
+  // Held as strings so the number inputs stay editable while being typed (an empty field must
+  // not snap back to 0). Parsed on save; the main process floors them anyway.
+  const [uzqrEnabled, setUzqrEnabled] = useState(false);
+  const [uzqrPollMs, setUzqrPollMs] = useState('2000');
+  const [uzqrTimeoutMs, setUzqrTimeoutMs] = useState('120000');
 
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -235,6 +240,9 @@ export function FiscalSettings() {
       setPosId(cfg.posId);
       setVcrPrintsReceipt(cfg.vcrPrintsReceipt);
       setMarkingCodeCheck(cfg.markingCodeCheck);
+      setUzqrEnabled(cfg.uzqrEnabled);
+      setUzqrPollMs(String(cfg.uzqrPollMs));
+      setUzqrTimeoutMs(String(cfg.uzqrTimeoutMs));
       setLoaded(true);
     } catch {
       // Don't fall back to editable defaults — surface the error and let the user retry, so a
@@ -269,8 +277,13 @@ export function FiscalSettings() {
         posId,
         vcrPrintsReceipt,
         markingCodeCheck,
+        uzqrEnabled,
+        uzqrPollMs: Number(uzqrPollMs),
+        uzqrTimeoutMs: Number(uzqrTimeoutMs),
         ...(password ? { password } : {}),
       });
+      setUzqrPollMs(String(cfg.uzqrPollMs));
+      setUzqrTimeoutMs(String(cfg.uzqrTimeoutMs));
       setHasPassword(cfg.hasPassword);
       setPassword('');
       toast.success(t('common.saved', 'Сохранено'));
@@ -455,6 +468,46 @@ export function FiscalSettings() {
           />
           {t('fiscalSettings.markingCodeCheck', 'Проверять повторную продажу маркированных товаров (группа 022)')}
         </Row>
+
+        {/* UzQR is off by default: stores that already take UzQR through a bank terminal must
+            keep the current behaviour until someone deliberately opts in. */}
+        <Row>
+          <input
+            type="checkbox"
+            checked={uzqrEnabled}
+            onChange={(e) => setUzqrEnabled(e.target.checked)}
+          />
+          {t('fiscalSettings.uzqrEnabled', 'Оплата UzQR через REGOS (QR-код на экране кассы)')}
+        </Row>
+
+        {uzqrEnabled && (
+          <>
+            <Muted>
+              {t(
+                'fiscalSettings.uzqrHint',
+                'Покупатель сканирует QR-код с экрана. Чек создаётся только после подтверждения оплаты. Если выключено — UzQR остаётся обычным способом оплаты без QR-кода.',
+              )}
+            </Muted>
+            <Field>
+              <Label>{t('fiscalSettings.uzqrPollMs', 'Интервал опроса, мс')}</Label>
+              <Input
+                type="number"
+                value={uzqrPollMs}
+                onChange={(e) => setUzqrPollMs(e.target.value)}
+                placeholder="2000"
+              />
+            </Field>
+            <Field>
+              <Label>{t('fiscalSettings.uzqrTimeoutMs', 'Ожидание оплаты, мс')}</Label>
+              <Input
+                type="number"
+                value={uzqrTimeoutMs}
+                onChange={(e) => setUzqrTimeoutMs(e.target.value)}
+                placeholder="120000"
+              />
+            </Field>
+          </>
+        )}
 
         <ButtonRow>
           <Button variant="primary" onClick={handleSave} disabled={saving}>

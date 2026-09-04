@@ -11,6 +11,7 @@ import { NumberPad } from "../../components/common/NumberPad";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
 import { UZQR_BRAND_COLOR, type SaleTender } from "@shared/constants";
 import { UzQrLogo } from "./UzQrLogo";
+import { UzQrPaymentModal } from "./UzQrPaymentModal";
 
 function parseSaleError(
   err: unknown,
@@ -319,11 +320,20 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
   // Only show the fiscalize toggle when REGOS:VCR is actually enabled.
   const [fiscalEnabled, setFiscalEnabled] = useState(false);
 
+  // When on, choosing UzQR opens the QR modal and the sale is only created once the buyer pays.
+  const [uzqrEnabled, setUzqrEnabled] = useState(false);
+  const [uzQrAmount, setUzQrAmount] = useState<number | null>(null);
+
   useEffect(() => {
     window.electronAPI.fiscal
       .getConfig()
       .then((cfg) => setFiscalEnabled(cfg.enabled))
       .catch(() => {});
+    window.electronAPI.uzqr
+      .isEnabled()
+      .then(setUzqrEnabled)
+      // A failed check leaves UzQR as the plain tender it is today — never blocks a sale.
+      .catch(() => setUzqrEnabled(false));
   }, []);
   const [givenAmount, setGivenAmount] = useState(0);
   const [customInput, setCustomInput] = useState("");
@@ -331,6 +341,15 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
   const change = givenAmount - total;
   const isDiscount = givenAmount > 0 && change < 0;
   const discountFromUnderpayment = isDiscount ? Math.abs(change) : 0;
+
+  /**
+   * The "given amount" shortfall is a cash-drawer rounding courtesy and has no meaning for a QR
+   * payment, where the bank app charges an exact figure. Left in, a cashier who typed a given
+   * amount and then switched to UzQR would have the QR raised for `total` while the receipt
+   * recorded less — the buyer paying more than their receipt says.
+   */
+  const isUzqrFlow = paymentMethod === "uzqr" && uzqrEnabled;
+  const effectiveDiscount = isUzqrFlow ? discount : discount + discountFromUnderpayment;
 
   const formatCurrency = (amount: number) =>
     formatCurrencyBase(amount, i18n.language as "ru" | "uz");
@@ -356,7 +375,14 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  const handlePayment = async () => {
+  /**
+   * Write the sale. For UzQR this runs only AFTER the buyer has paid, with the confirmed
+   * payment attached — the cart survives an abandoned or timed-out payment untouched.
+   */
+  const completeSale = async (uzqrPayment?: {
+    vcrPaymentId: string;
+    rrn: string | null;
+  }) => {
     if (isLoading) return;
 
     try {
@@ -371,11 +397,15 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
           preWeighedItemId: item.preWeighedItemId,
         })),
         paymentMethod,
-        discountAmount: discount + discountFromUnderpayment,
+        discountAmount: effectiveDiscount,
         markingCodes: items
           .filter((i) => i.markingCode)
           .map((i) => ({ barcode: i.barcode, label: i.markingCode! })),
         fiscalize,
+        // Only set when the UzQR integration confirmed a payment. Its presence makes the sale
+        // fiscalize immediately and book against the payment id rather than as a plain card.
+        regosPaymentId: uzqrPayment?.vcrPaymentId,
+        regosPaymentRrn: uzqrPayment?.rrn ?? undefined,
       };
 
       const sale = editingSaleId
@@ -404,13 +434,61 @@ export function Checkout({ onComplete, onCancel }: CheckoutProps) {
       const msg = error instanceof Error ? (error.stack ?? error.message) : String(error);
       console.error("Payment failed:", error);
       window.electronAPI.logger.error(`Checkout.handlePayment: ${msg}`);
-      toast.error(parseSaleError(error, t));
+
+      if (uzqrPayment) {
+        // Money already moved but the receipt did not. Surface the identifiers so the cashier
+        // can reconcile rather than charging the buyer a second time.
+        window.electronAPI.logger.error(
+          `UzQR PAID BUT SALE FAILED — payment_id=${uzqrPayment.vcrPaymentId} rrn=${uzqrPayment.rrn ?? "-"}`,
+        );
+        toast.error(
+          `${t("pos.uzqrPaidButSaleFailed", "Оплата прошла, но чек не создан. Сообщите администратору.")} ${uzqrPayment.rrn ?? uzqrPayment.vcrPaymentId}`,
+        );
+      } else {
+        toast.error(parseSaleError(error, t));
+      }
       clearCart();
       onComplete();
     }
   };
 
+  /**
+   * Pay button / F10. UzQR forks to the QR modal when the integration is on; every other tender
+   * (and UzQR with it off) goes straight to the sale, exactly as before.
+   */
+  const handlePayment = async () => {
+    if (isLoading) return;
+    if (paymentMethod === "uzqr" && uzqrEnabled) {
+      setUzQrAmount(total);
+      return;
+    }
+    await completeSale();
+  };
+
   handlePaymentRef.current = handlePayment;
+
+  if (uzQrAmount !== null) {
+    // Replaces the checkout panel rather than stacking on it — the cashier's only choices while
+    // a QR is live are "buyer paid" or "cancel", and the tender buttons behind would be a trap.
+    return (
+      <UzQrPaymentModal
+        amount={uzQrAmount}
+        onPaid={(payment) => {
+          setUzQrAmount(null);
+          void completeSale(payment);
+        }}
+        onDismiss={(reason) => {
+          setUzQrAmount(null);
+          // Cart intact — the cashier can retry or pick another tender.
+          if (reason.state === "TIMEOUT") {
+            toast.error(t("pos.uzqrTimeout", "Время ожидания оплаты истекло"));
+          } else if (reason.state === "ERROR" && reason.error) {
+            toast.error(reason.error);
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <Modal title={t("pos.checkout")} onClose={onCancel} width="860px">

@@ -7,6 +7,7 @@ import { Catalog } from "./Catalog";
 import { BulkWeighModal } from "../../components/BulkWeighModal";
 import { SaleUnitModal } from "../../components/SaleUnitModal";
 import { Checkout } from "./Checkout";
+import { UzQrPaymentModal } from "./UzQrPaymentModal";
 import { PosTabBar } from "./PosTabBar";
 import { useCartStore } from "../../store/cart-store";
 import { APP_BAR_HEIGHT } from "../../components/layout/AppBar";
@@ -342,6 +343,19 @@ export function POSScreen() {
   const { openSmenaModal } = useSidebar();
 
   const [showSmenaModal, setShowSmenaModal] = useState(false);
+
+  // UzQR: when the optional REGOS integration is on, picking UzQR opens the QR modal instead of
+  // creating the sale straight away. Non-null amount = modal open.
+  const [uzqrEnabled, setUzqrEnabled] = useState(false);
+  const [uzQrAmount, setUzQrAmount] = useState<number | null>(null);
+
+  useEffect(() => {
+    window.electronAPI.uzqr
+      .isEnabled()
+      .then(setUzqrEnabled)
+      // A failed check leaves UzQR as the plain tender it is today — never blocks a sale.
+      .catch(() => setUzqrEnabled(false));
+  }, []);
   const [showCatalog, setShowCatalog] = useState(false);
   const closeCatalog = useCallback(() => setShowCatalog(false), []);
 
@@ -1003,13 +1017,16 @@ export function POSScreen() {
     writeBarcode,
   ]);
 
-  const handleQuickPay = useCallback(
-    async (method: SaleTender) => {
+  /**
+   * Write the sale. For UzQR this runs only AFTER the buyer has paid, with the confirmed
+   * payment attached — never before, so an abandoned payment leaves no sale behind.
+   */
+  const completeQuickSale = useCallback(
+    async (
+      method: SaleTender,
+      uzqrPayment?: { vcrPaymentId: string; rrn: string | null },
+    ) => {
       if (items.length === 0 || payingRef.current) return;
-      if (!(await checkSmena())) {
-        setShowSmenaModal(true);
-        return;
-      }
 
       payingRef.current = true;
 
@@ -1029,6 +1046,10 @@ export function POSScreen() {
           markingCodes: items
             .filter((i) => i.markingCode)
             .map((i) => ({ barcode: i.barcode, label: i.markingCode! })),
+          // Only set when the UzQR integration confirmed a payment. Its presence makes the sale
+          // fiscalize immediately and book against the payment id rather than as a plain card.
+          regosPaymentId: uzqrPayment?.vcrPaymentId,
+          regosPaymentRrn: uzqrPayment?.rrn ?? undefined,
         };
 
         const sale = editingSaleId
@@ -1059,14 +1080,25 @@ export function POSScreen() {
           err instanceof Error ? (err.stack ?? err.message) : String(err);
         console.error("Quick pay failed:", err);
         window.electronAPI.logger.error(`handleQuickPay(${method}): ${msg}`);
-        toast.error(parseSaleError(err, t));
+
+        if (uzqrPayment) {
+          // Money already moved but the receipt did not. Surface the identifiers instead of a
+          // generic error so the cashier can reconcile rather than charging the buyer twice.
+          window.electronAPI.logger.error(
+            `UzQR PAID BUT SALE FAILED — payment_id=${uzqrPayment.vcrPaymentId} rrn=${uzqrPayment.rrn ?? "-"}`,
+          );
+          toast.error(
+            `${t("pos.uzqrPaidButSaleFailed", "Оплата прошла, но чек не создан. Сообщите администратору.")} ${uzqrPayment.rrn ?? uzqrPayment.vcrPaymentId}`,
+          );
+        } else {
+          toast.error(parseSaleError(err, t));
+        }
         clearCart();
       } finally {
         payingRef.current = false;
       }
     },
     [
-      checkSmena,
       items,
       discount,
       editingSaleId,
@@ -1079,11 +1111,38 @@ export function POSScreen() {
     ],
   );
 
+  /**
+   * Quick-pay entry point (F9 / F11 / F12).
+   *
+   * UzQR forks here: with the integration on, the buyer must pay before any sale exists, so the
+   * QR modal takes over and calls completeQuickSale only on success. With it off, UzQR is a
+   * plain tender and behaves exactly as cash and card do.
+   */
+  const handleQuickPay = useCallback(
+    async (method: SaleTender) => {
+      if (items.length === 0 || payingRef.current) return;
+      if (!(await checkSmena())) {
+        setShowSmenaModal(true);
+        return;
+      }
+
+      if (method === "uzqr" && uzqrEnabled) {
+        setUzQrAmount(total);
+        return;
+      }
+
+      await completeQuickSale(method);
+    },
+    [items.length, checkSmena, uzqrEnabled, total, completeQuickSale],
+  );
+
   // Handle keyboard input
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if checkout or smena modal is open
-      if (showCheckout || showSmenaModal) return;
+      // Ignore if checkout or smena modal is open. The UzQR modal is included for the same
+      // reason as saleUnitChoice below: it owns Escape, and F9 behind it would start a second
+      // payment for a cart that is already being paid for.
+      if (showCheckout || showSmenaModal || uzQrAmount !== null) return;
 
       // SaleUnitModal owns the keyboard while it is open: its 1 / 2 / Escape would otherwise
       // ALSO be swallowed here — the digits appended to the barcode buffer and Escape clearing
@@ -1197,6 +1256,7 @@ export function POSScreen() {
     quantity,
     showCheckout,
     showSmenaModal,
+    uzQrAmount,
     saleUnitChoice,
     handleBarcodeSubmit,
     handleQuickPay,
@@ -1502,6 +1562,25 @@ export function POSScreen() {
           <Checkout
             onComplete={handleCheckoutComplete}
             onCancel={() => setShowCheckout(false)}
+          />
+        )}
+
+        {uzQrAmount !== null && (
+          <UzQrPaymentModal
+            amount={uzQrAmount}
+            onPaid={(payment) => {
+              setUzQrAmount(null);
+              void completeQuickSale("uzqr", payment);
+            }}
+            onDismiss={(reason) => {
+              setUzQrAmount(null);
+              // Cart is intentionally left intact — the cashier can retry or switch tender.
+              if (reason.state === "TIMEOUT") {
+                toast.error(t("pos.uzqrTimeout", "Время ожидания оплаты истекло"));
+              } else if (reason.state === "ERROR" && reason.error) {
+                toast.error(reason.error);
+              }
+            }}
           />
         )}
 

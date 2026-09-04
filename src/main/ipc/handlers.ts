@@ -8,6 +8,7 @@ import { setupSmenaHandlers } from "./smena-handlers";
 import { setupMarkingCodesHandlers } from "./marking-codes-handlers";
 import { setupMarkingCheckHandlers } from "./marking-check-handlers";
 import { setupFiscalHandlers } from "./fiscal-handlers";
+import { setupUzQrHandlers } from "./uzqr-handlers";
 import { getAppConfig, updateConfig } from "../config/app-config";
 import { getAuthToken, getServerToken } from "../sync/queue-manager";
 import { getPrismaClient, readStoreBootstrap, writeStoreBootstrap } from "../database/sqlite-client";
@@ -38,6 +39,7 @@ export function setupIpcHandlers(): void {
   setupMarkingCheckHandlers();
   setupMxikHandlers();
   setupFiscalHandlers();
+  setupUzQrHandlers();
 }
 
 // MXIK catalog lives only in the VPS PostgreSQL, so the renderer proxies through

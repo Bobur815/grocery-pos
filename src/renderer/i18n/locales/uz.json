@@ -228,7 +228,13 @@
       "NOT_FOUND": "reyestrda topilmadi"
     },
     "qrOnlyProduct": "Bu mahsulot faqat markirovka QR-kodi orqali sotiladi — QR ni skaner qiling",
-    "qrInvalidCharacters": "QR-kod noto'g'ri o'qildi (kirill/yaroqsiz belgilar) — klaviatura tilini lotinga o'tkazib, qayta skaner qiling"
+    "qrInvalidCharacters": "QR-kod noto'g'ri o'qildi (kirill/yaroqsiz belgilar) — klaviatura tilini lotinga o'tkazib, qayta skaner qiling",
+    "uzqrAmountDue": "To'lov uchun",
+    "uzqrWaiting": "To'lov amalga oshirilmoqda.",
+    "uzqrScanHint": "To'lov uchun QR kodni skanerlang",
+    "uzqrCreating": "QR kod yaratilmoqda…",
+    "uzqrTimeout": "To'lovni kutish vaqti tugadi",
+    "uzqrPaidButSaleFailed": "To'lov o'tdi, lekin chek yaratilmadi. Administratorga xabar bering."
   },
   "reconciliation": {
     "title": "Solishtirish",
@@ -574,7 +580,11 @@
       "outOfCirculationList": "Markirovka muomaladan chiqqani uchun o'chirilgan cheklar"
     },
     "bulkUnreachable": "Virtual kassa mavjud emas — qayta ishlash to'xtatildi",
-    "disabledFirst": "Avval fiskallashtirishni yoqing"
+    "disabledFirst": "Avval fiskallashtirishni yoqing",
+    "uzqrEnabled": "REGOS orqali UzQR to'lovi (kassa ekranida QR kod)",
+    "uzqrHint": "Xaridor ekrandagi QR kodni skanerlaydi. Chek faqat to'lov tasdiqlangandan keyin yaratiladi. O'chirilgan bo'lsa — UzQR QR kodsiz oddiy to'lov turi bo'lib qoladi.",
+    "uzqrPollMs": "So'rov oralig'i, ms",
+    "uzqrTimeoutMs": "To'lovni kutish, ms"
   },
   "reports": {
     "title": "Hisobotlar",

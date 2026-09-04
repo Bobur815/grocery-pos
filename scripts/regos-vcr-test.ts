@@ -34,6 +34,10 @@
  *   payment-create     Payment.Create (needs a payment terminal / EPS token)
  *   payment-get <id> / payment-cancel <id>   Payment.Get / Payment.Cancel
  *   acquiring-balance / acquiring-totals     Acquiring.Balance / Acquiring.Totals (need terminal)
+ *   uzqr-create [sum]  Payment.Create with payment_system_id=5 — prints qr_text + invoice_id
+ *   uzqr-get <id> / uzqr-cancel <id>   Payment.Get / Payment.Cancel for a UzQR invoice
+ *   uzqr-flow [sum]    create → poll until paid (or UZQR_TIMEOUT_MS), printing every status.
+ *                      Use this to map the undocumented Payment status enum against real data.
  *
  * NOTE: every method except Sys.Initialize/GetInfo/GetOverflowInfo prints on the VCR's
  * configured printer. On the test endpoint, watch the output at https://vcr-camera.regos.uz/.
@@ -352,6 +356,76 @@ async function cmdPaymentCancel(id: string) {
   if (!id) throw new Error('payment-cancel requires a payment_id');
   await call('Payment.Cancel', { payment_id: id });
 }
+// ── UzQR (payment_system_id = 5) ─────────────────────────────────────────────
+// Unlike the terminal/EPS commands above, UzQR needs no token and no hardware: VCR returns a
+// qr_text the buyer scans in their bank app.
+
+const UZQR_PAYMENT_SYSTEM_ID = 5;
+const UZQR_PAID = 3;
+
+async function cmdUzqrCreate(amountSum?: string) {
+  const sum = amountSum ? Number(amountSum) : PRICE_SUM * QTY;
+  const res = await call<{ id: string; qr_text?: string; invoice_id?: string; status: number }>(
+    'Payment.Create',
+    {
+      payment_system_id: UZQR_PAYMENT_SYSTEM_ID,
+      amount: toTiyin(sum),
+      description: 'posgro uzqr test',
+    },
+  );
+  console.log(`\npayment_id: ${res.id}`);
+  console.log(`invoice_id: ${res.invoice_id ?? '(none)'}`);
+  console.log(`qr_text   : ${res.qr_text ?? '(none — UzQR may not be enabled on this stand)'}`);
+  return res;
+}
+
+async function cmdUzqrGet(id: string) {
+  if (!id) throw new Error('uzqr-get requires a payment_id');
+  await call('Payment.Get', { payment_id: id });
+}
+
+async function cmdUzqrCancel(id: string) {
+  if (!id) throw new Error('uzqr-cancel requires a payment_id');
+  await call('Payment.Cancel', { payment_id: id });
+}
+
+/**
+ * Create an invoice and poll it, printing each status so the (undocumented) enum can be mapped
+ * against real responses. Does NOT create a receipt — cancel or let it lapse when done.
+ */
+async function cmdUzqrFlow(amountSum?: string) {
+  const created = await cmdUzqrCreate(amountSum);
+  if (!created.qr_text) {
+    console.log('\n⚠ No qr_text returned — nothing to scan. Aborting poll.');
+    return;
+  }
+
+  const intervalMs = 2_000;
+  const timeoutMs = Number(process.env.UZQR_TIMEOUT_MS ?? 120_000);
+  const startedAt = Date.now();
+  console.log(`\nPolling every ${intervalMs}ms for up to ${timeoutMs}ms — scan the QR now.`);
+
+  for (;;) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+    const p = await call<{ status: number; rrn?: string }>('Payment.Get', {
+      payment_id: created.id,
+    });
+    const elapsed = Date.now() - startedAt;
+    console.log(`  [${Math.round(elapsed / 1000)}s] status=${p.status} rrn=${p.rrn ?? '-'}`);
+
+    if (p.status === UZQR_PAID) {
+      console.log(`\n✓ PAID — rrn=${p.rrn ?? '-'}, payment_id=${created.id}`);
+      console.log('  Pass this payment_id to Receipt.Sale as payments[].payment_id (type 2).');
+      return;
+    }
+    if (elapsed >= timeoutMs) {
+      console.log('\n⏱ Timed out. Cancelling…');
+      await cmdUzqrCancel(created.id).catch((e) => console.log(`  cancel failed: ${e.message}`));
+      return;
+    }
+  }
+}
+
 async function cmdAcquiringBalance() {
   await call('Acquiring.Balance', { payment_system_id: '-2' });
 }
@@ -463,6 +537,10 @@ async function main() {
       case 'payment-cancel': await cmdPaymentCancel(args[0]); break;
       case 'acquiring-balance': await cmdAcquiringBalance(); break;
       case 'acquiring-totals': await cmdAcquiringTotals(); break;
+      case 'uzqr-create': await cmdUzqrCreate(args[0]); break;
+      case 'uzqr-get': await cmdUzqrGet(args[0]); break;
+      case 'uzqr-cancel': await cmdUzqrCancel(args[0]); break;
+      case 'uzqr-flow': await cmdUzqrFlow(args[0]); break;
       case 'all': await cmdAll(); break;
       default:
         console.error(`Unknown command: ${command}`);
@@ -470,7 +548,8 @@ async function main() {
           'Commands: all | info | validate | validate-position | zinfo | zopen | zclose | sale |\n' +
           '          getinfo <id|qr|receiptNo|code> | duplicate <id> | checkqr <url> |\n' +
           '          refund <qr> | validate-refund <qr> | refund-partial <qr> | advance | credit |\n' +
-          '          payment-create | payment-get <id> | payment-cancel <id> | acquiring-balance | acquiring-totals',
+          '          payment-create | payment-get <id> | payment-cancel <id> | acquiring-balance | acquiring-totals |\n' +
+          '          uzqr-create [sum] | uzqr-get <id> | uzqr-cancel <id> | uzqr-flow [sum]',
         );
         process.exit(1);
     }
