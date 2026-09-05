@@ -35,6 +35,10 @@ services:
       NODE_ENV: "production"
       PORT: "3002"
       RUN_MIGRATIONS: "true"
+      # Stock-movement ledger emission. Set HERE rather than in .env because both deploy
+      # workflows rewrite .env from the same shared secrets.ENV_FILE, so a value added there
+      # would switch production on too. This file is staging-only, so the flag cannot leak.
+      RECONCILIATION_LEDGER_ENABLED: "true"
     volumes:
       - ./uploads-staging:/app/uploads
     ports:

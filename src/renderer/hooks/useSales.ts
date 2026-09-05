@@ -9,6 +9,9 @@ interface CreateSaleData {
     barcode: string;
     quantity: number;
     unitPrice: number;
+    // Pieces in one `quantity` unit (1 = piece, N = box). Drives the stock decrement and the
+    // piece count reported to the fiscal system; absent/1 for every ordinary line.
+    piecesPerUnit?: number;
   }>;
   paymentMethod: SaleTender;
   discountAmount?: number;

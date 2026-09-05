@@ -1,8 +1,8 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "../../i18n";
-import styled, { keyframes } from "styled-components";
-import { CheckCircle, Store, KeyRound, ShieldCheck, Delete, Eraser, ChevronRight } from "lucide-react";
+import styled from "styled-components";
+import { CheckCircle, Store, KeyRound, ShieldCheck, ChevronRight } from "lucide-react";
 import { VirtualKeyboard } from "../../components/common/VirtualKeyboard";
 import { Button } from "../../components/common/Button";
 import { Input } from "../../components/common/Input";
@@ -191,118 +191,9 @@ const LoadingOverlay = styled.div`
   z-index: 999;
 `;
 
-// PIN pad styles
-const PinSection = styled.div`
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0;
-  max-width: 340px;
-`;
-
-const PinSubtitleSmall = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 14px;
-  margin: 0 0 20px;
-  text-align: center;
-`;
-
-const shake = keyframes`
-  0%, 100% { transform: translateX(0); }
-  20%, 60% { transform: translateX(-8px); }
-  40%, 80% { transform: translateX(8px); }
-`;
-
-const DotsRow = styled.div<{ $shake?: boolean }>`
-  display: flex;
-  justify-content: center;
-  gap: 16px;
-  margin-bottom: 24px;
-  animation: ${({ $shake }) => $shake ? shake : 'none'} 0.4s ease;
-`;
-
-const PinDot = styled.div<{ $filled: boolean; $error?: boolean }>`
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  border: 2px solid ${({ theme, $error }) => $error ? theme.colors.error : theme.colors.primary};
-  background: ${({ theme, $filled, $error }) =>
-    $filled ? ($error ? theme.colors.error : theme.colors.primary) : 'transparent'};
-  transition: all 0.2s;
-`;
-
-const PinPad = styled.div`
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  width: 280px;
-  margin: 0 auto 24px;
-`;
-
-const PinButton = styled.button<{ $variant?: 'clear' }>`
-  width: 64px;
-  height: 64px;
-  border-radius: 50%;
-  border: 2px solid ${({ theme }) => theme.colors.border};
-  background: ${({ theme }) => theme.colors.surface};
-  color: ${({ theme }) => theme.colors.text};
-  font-size: 22px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-
-  &:hover {
-    background: ${({ theme }) => theme.colors.primary}15;
-    border-color: ${({ theme }) => theme.colors.primary};
-  }
-
-  &:active {
-    transform: scale(0.95);
-    background: ${({ theme }) => theme.colors.primary}30;
-  }
-
-  ${({ $variant, theme }) => $variant === 'clear' && `
-    color: ${theme.colors.error};
-    border-color: ${theme.colors.error}50;
-    &:hover { background: ${theme.colors.error}15; border-color: ${theme.colors.error}; }
-  `}
-`;
-
-const PinStepIndicator = styled.div`
-  display: flex;
-  gap: 6px;
-  margin-bottom: 20px;
-`;
-
-const PinStepDot = styled.div<{ $active: boolean }>`
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: ${({ theme, $active }) => $active ? theme.colors.primary : theme.colors.border};
-`;
-
-const PinErrorMsg = styled.div`
-  color: ${({ theme }) => theme.colors.error};
-  font-size: 13px;
-  min-height: 18px;
-  text-align: center;
-  margin-bottom: 8px;
-`;
-
-const PinStepTitle = styled.h3`
-  margin: 0 0 4px;
-  font-size: 18px;
-  font-weight: 700;
-  text-align: center;
-  color: ${({ theme }) => theme.colors.text};
-`;
-
 // ─── Types ────────────────────────────────────────────────────────────────
 
-type WizardStep = 'login' | 'storeInfo' | 'password' | 'pin';
+type WizardStep = 'login' | 'storeInfo' | 'password';
 
 interface WizardData {
   phone: string;
@@ -316,15 +207,18 @@ interface WizardData {
   taxRate: string;
   syncInterval: string;
   terminalId: string;
+  // Learned from the server during activation and cached locally, so an OFFLINE_ONLY terminal
+  // never has to reach the internet again.
+  mode: string;
+  posAdminLocked: boolean;
 }
 
-const STEPS: WizardStep[] = ['login', 'storeInfo', 'password', 'pin'];
+const STEPS: WizardStep[] = ['login', 'storeInfo', 'password'];
 
 const STEP_ICONS: Record<WizardStep, React.ReactNode> = {
   login: <KeyRound size={14} />,
   storeInfo: <Store size={14} />,
   password: <ShieldCheck size={14} />,
-  pin: <ShieldCheck size={14} />,
 };
 
 // ─── Main Component ────────────────────────────────────────────────────────
@@ -352,6 +246,9 @@ export function SetupWizard() {
     taxRate: '0',
     syncInterval: '5',
     terminalId: 'T1',
+    // Unrestricted until the server says otherwise — a failed prefill must never lock a terminal.
+    mode: 'ONLINE',
+    posAdminLocked: false,
   });
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -405,6 +302,9 @@ export function SetupWizard() {
             storeAddress: store.address || '',
             storePhone: store.phone || '',
             taxRate: settings.taxRate != null ? String(settings.taxRate) : '0',
+            // This is the activation step: the mode is cached now and never needs the net again.
+            mode: store.mode === 'OFFLINE_ONLY' ? 'OFFLINE_ONLY' : 'ONLINE',
+            posAdminLocked: store.posAdminLocked === true,
           };
         }
       } catch {
@@ -490,13 +390,13 @@ export function SetupWizard() {
       // Non-fatal — proceed even if password change fails
     } finally {
       setIsLoading(false);
-      setCurrentStep('pin');
+      handleFinish();
     }
   };
 
   // ── Finish ───────────────────────────────────────────────────────────────
 
-  const handleFinish = async (savedPin?: string) => {
+  const handleFinish = async () => {
     setCompleting(true);
     try {
       await window.electronAPI.setup.complete({
@@ -509,7 +409,8 @@ export function SetupWizard() {
         taxRate: data.taxRate || '0',
         syncInterval: data.syncInterval || '5',
         token: data.token,
-        pin: savedPin,
+        mode: data.mode,
+        posAdminLocked: data.posAdminLocked,
       });
       await window.electronAPI.setup.launchApp();
     } catch (e) {
@@ -518,14 +419,6 @@ export function SetupWizard() {
       setError(t(msg, { defaultValue: t('setup.errors.login_failed') }));
     }
   };
-
-  // ── Step 4: PIN Setup ────────────────────────────────────────────────────
-
-  const [pinStep, setPinStep] = useState<'enter' | 'confirm'>('enter');
-  const [pin, setPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [shakePins, setShakePins] = useState(false);
 
   // ── Virtual Keyboard ─────────────────────────────────────────────────────
   const [activeField, setActiveField] = useState<string | null>(null);
@@ -556,64 +449,6 @@ export function SetupWizard() {
     else setData(p => ({ ...p, [field]: String(p[field]) + key }));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeField, data.phone.length]);
-
-  const currentPin = pinStep === 'enter' ? pin : confirmPin;
-  const setCurrentPin = pinStep === 'enter' ? setPin : setConfirmPin;
-
-  const triggerShake = () => {
-    setShakePins(true);
-    setTimeout(() => setShakePins(false), 450);
-  };
-
-  const handlePinNumber = useCallback((num: string) => {
-    if (currentPin.length >= 4) return;
-    setPinError('');
-    const next = currentPin + num;
-    setCurrentPin(next);
-    if (next.length === 4) {
-      if (pinStep === 'enter') {
-        setTimeout(() => setPinStep('confirm'), 200);
-      } else {
-        if (next !== pin) {
-          triggerShake();
-          setTimeout(() => {
-            setConfirmPin('');
-            setPinError(t('auth.errors.pin_mismatch'));
-          }, 420);
-        } else {
-          handleFinish(next);
-        }
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentPin, pin, pinStep, setCurrentPin]);
-
-  const handlePinBackspace = useCallback(() => {
-    setPinError('');
-    setCurrentPin(prev => prev.slice(0, -1));
-  }, [setCurrentPin]);
-
-  const handlePinClear = useCallback(() => {
-    setPinError('');
-    if (pinStep === 'confirm') {
-      setPinStep('enter');
-      setPin('');
-      setConfirmPin('');
-    } else {
-      setPin('');
-    }
-  }, [pinStep]);
-
-  useEffect(() => {
-    if (currentStep !== 'pin') return;
-    const handler = (e: KeyboardEvent) => {
-      if (/^[0-9]$/.test(e.key)) { e.preventDefault(); handlePinNumber(e.key); }
-      else if (e.key === 'Backspace') { e.preventDefault(); handlePinBackspace(); }
-      else if (e.key === 'Escape') { e.preventDefault(); handlePinClear(); }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [currentStep, handlePinNumber, handlePinBackspace, handlePinClear]);
 
   // ─── Render ──────────────────────────────────────────────────────────────
 
@@ -805,7 +640,7 @@ export function SetupWizard() {
                 <Button type="submit" disabled={isLoading}>
                   {isLoading ? t('setup.password.loading') : t('setup.password.submit')}
                 </Button>
-                <SkipLink type="button" onClick={() => { setError(''); setCurrentStep('pin'); }}>
+                <SkipLink type="button" onClick={() => { setError(''); handleFinish(); }}>
                   {t('setup.password.skip')}
                 </SkipLink>
               </Actions>
@@ -813,43 +648,6 @@ export function SetupWizard() {
           </>
         )}
 
-        {currentStep === 'pin' && (
-          <>
-            <StepHeader>
-              <StepTitle>{t('setup.pin.title')}</StepTitle>
-            </StepHeader>
-            <PinSection>
-              <PinStepTitle>
-                {pinStep === 'enter' ? t('auth.setupPinSubtitle') : t('auth.confirmPinSubtitle')}
-              </PinStepTitle>
-              <PinSubtitleSmall>
-                {t('setup.pin.subtitle')}
-              </PinSubtitleSmall>
-              <PinStepIndicator>
-                <PinStepDot $active={pinStep === 'enter'} />
-                <PinStepDot $active={pinStep === 'confirm'} />
-              </PinStepIndicator>
-              <DotsRow $shake={shakePins}>
-                {[0, 1, 2, 3].map((i) => (
-                  <PinDot key={i} $filled={currentPin.length > i} $error={!!pinError} />
-                ))}
-              </DotsRow>
-              <PinErrorMsg>{pinError}</PinErrorMsg>
-              <PinPad>
-                {['1','2','3','4','5','6','7','8','9'].map(num => (
-                  <PinButton key={num} onClick={() => handlePinNumber(num)}>{num}</PinButton>
-                ))}
-                <PinButton $variant="clear" onClick={handlePinClear}><Eraser size={26} /></PinButton>
-                <PinButton onClick={() => handlePinNumber('0')}>0</PinButton>
-                <PinButton onClick={handlePinBackspace}><Delete size={26} /></PinButton>
-              </PinPad>
-              {error && <ErrorMsg>{error}</ErrorMsg>}
-              <SkipLink onClick={() => handleFinish(undefined)}>
-                {t('setup.pin.skip')}
-              </SkipLink>
-            </PinSection>
-          </>
-        )}
       </Content>
 
       {activeField !== null && (

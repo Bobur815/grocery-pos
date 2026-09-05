@@ -35,6 +35,9 @@ export interface SaleItem {
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  // Pieces in one `quantity` unit (1 = piece, N = box). Stock math and the fiscal piece
+  // count multiply by this — see toPieces() in shared/utils/pack.
+  piecesPerUnit?: number;
 }
 
 export interface CartItem {

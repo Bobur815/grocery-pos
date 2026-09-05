@@ -107,8 +107,9 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       store_name TEXT NOT NULL,
       terminal_id TEXT NOT NULL,
       api_url TEXT NOT NULL,
-      store_pin TEXT,
-      last_sync DATETIME DEFAULT CURRENT_TIMESTAMP
+      last_sync DATETIME DEFAULT CURRENT_TIMESTAMP,
+      mode TEXT,
+      pos_admin_locked INTEGER DEFAULT 0
     )
   `;
 
@@ -121,6 +122,7 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       name_uz TEXT NOT NULL,
       name_ru TEXT NOT NULL,
       active INTEGER DEFAULT 1,
+      pin TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -177,6 +179,9 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       bulk_quantity REAL DEFAULT 0,
       min_sale_qty REAL DEFAULT 0,
       max_sale_qty REAL DEFAULT 0,
+      pieces_per_box INTEGER,
+      box_price REAL,
+      box_barcode TEXT UNIQUE,
       active INTEGER DEFAULT 1,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -212,6 +217,7 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       quantity REAL NOT NULL,
       unit_price REAL NOT NULL,
       subtotal REAL NOT NULL,
+      pieces_per_unit INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (sale_id) REFERENCES sales(id) ON DELETE CASCADE,
       FOREIGN KEY (product_id) REFERENCES products(id)
     )
@@ -329,13 +335,6 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
 }
 
 async function runMigrations(prisma: PrismaClientType): Promise<void> {
-  // Migration 1: Add store_pin column to local_config table if it doesn't exist
-  try {
-    await prisma.$queryRaw`SELECT store_pin FROM local_config LIMIT 1`;
-  } catch {
-    await prisma.$executeRaw`ALTER TABLE local_config ADD COLUMN store_pin TEXT`;
-  }
-
   // Migration 2: Add new product fields if they don't exist
   try {
     await prisma.$queryRaw`SELECT supplier_id FROM products LIMIT 1`;
@@ -616,6 +615,73 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
   // group heuristic. Backfilled on the VPS (scripts/backfill-is-marked.ts) and synced down.
   if (!(await columnExists(prisma, 'products', 'is_marked'))) {
     await prisma.$executeRaw`ALTER TABLE products ADD COLUMN is_marked INTEGER`;
+  }
+
+  // Migration 26: multi-piece pack ("box") — sell a product per piece or as a sealed pack of N.
+  // Stock stays counted in PIECES; a box sale decrements pieces_per_box. Null/1 pieces_per_box
+  // (every pre-existing row) means "not boxed", so behaviour is unchanged until an admin sets it.
+  if (!(await columnExists(prisma, 'products', 'pieces_per_box'))) {
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN pieces_per_box INTEGER`;
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN box_price REAL`;
+    // SQLite can't add a UNIQUE column via ALTER TABLE — create the index separately.
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN box_barcode TEXT`;
+    await prisma.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS products_box_barcode_key ON products(box_barcode)`;
+  }
+
+  // pieces_per_unit records how many pieces one sold `quantity` unit held (1 = piece, N = box),
+  // so stock restores correctly on receipt edit/delete and the fiscal quantity converts to pieces.
+  if (!(await columnExists(prisma, 'sale_items', 'pieces_per_unit'))) {
+    await prisma.$executeRaw`ALTER TABLE sale_items ADD COLUMN pieces_per_unit INTEGER NOT NULL DEFAULT 1`;
+  }
+
+  // Cached store operating mode. `mode` stays NULL until the terminal is activated against a
+  // server, and NULL plus pos_admin_locked = 0 is exactly today's behavior — so an existing
+  // install upgrades in place without any change until a super admin opts it in.
+  if (!(await columnExists(prisma, 'local_config', 'mode'))) {
+    await prisma.$executeRaw`ALTER TABLE local_config ADD COLUMN mode TEXT`;
+  }
+  if (!(await columnExists(prisma, 'local_config', 'pos_admin_locked'))) {
+    await prisma.$executeRaw`ALTER TABLE local_config ADD COLUMN pos_admin_locked INTEGER NOT NULL DEFAULT 0`;
+  }
+
+  // Migration 27: UzQR payment identifiers on sales. Added to the Prisma schema with the UzQR
+  // feature but never to this file, so the generated client asked every INSERT for two columns
+  // no local database has ever had — every sale failed with P2022 until someone happened to run
+  // `prisma db push` against their own DB. Nullable and unused by older rows.
+  if (!(await columnExists(prisma, 'sales', 'regos_payment_id'))) {
+    await prisma.$executeRaw`ALTER TABLE sales ADD COLUMN regos_payment_id TEXT`;
+    await prisma.$executeRaw`ALTER TABLE sales ADD COLUMN regos_payment_rrn TEXT`;
+  }
+
+  // Migration 28: the quick-login PIN moves from the terminal (local_config.store_pin) to the
+  // person (users.pin), so every cashier and admin gets their own. The old single store PIN
+  // signed you in as the first active cashier, so that is exactly the account it is handed to —
+  // the same PIN keeps opening the same session after the upgrade. local_config.store_pin is
+  // left in place but is no longer read by anything (SQLite cannot drop a column in place).
+  if (!(await columnExists(prisma, 'users', 'pin'))) {
+    await prisma.$executeRaw`ALTER TABLE users ADD COLUMN pin TEXT`;
+
+    if (await columnExists(prisma, 'local_config', 'store_pin')) {
+      const rows = await prisma.$queryRaw<{ store_pin: string | null }[]>`
+        SELECT store_pin FROM local_config WHERE id = 'config'
+      `;
+      const legacyPin = rows[0]?.store_pin ?? null;
+      if (legacyPin) {
+        const result = await prisma.$executeRaw`
+          UPDATE users SET pin = ${legacyPin}
+          WHERE id = (
+            SELECT id FROM users
+            WHERE role = 'USER' AND active = 1
+            ORDER BY created_at ASC LIMIT 1
+          )
+        `;
+        console.log(
+          result > 0
+            ? '[migration 28] store PIN carried over to the first active cashier'
+            : '[migration 28] store PIN dropped — no active cashier to carry it over to',
+        );
+      }
+    }
   }
 }
 

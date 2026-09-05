@@ -27,6 +27,106 @@ function decodeTokenStoreId(token: string): { storeId: string | null; expired: b
 
 let currentUser: AuthUser | null = null;
 
+/**
+ * Re-arm the VPS token kept from an earlier password login.
+ *
+ * A PIN login never reaches the VPS — it has no password to send — so this stored token is the
+ * only credential a PIN-only terminal holds for uploading its sales and shifts. Whatever is
+ * unusable gets deleted rather than left lying around: a dead token makes the sync loop 401 on
+ * every request instead of reporting that nobody has signed in with a password recently.
+ *
+ * Returns whether a usable token was restored.
+ */
+async function restorePersistedServerToken(
+  prisma: ReturnType<typeof getPrismaClient>,
+  storeId: string | null,
+): Promise<boolean> {
+  const setting = await prisma.systemSetting.findUnique({ where: { key: 'server_token' } });
+  if (!setting?.value) return false;
+
+  const decoded = decodeTokenStoreId(setting.value);
+  if (decoded && !decoded.expired && decoded.storeId === storeId) {
+    setServerToken(setting.value);
+    return true;
+  }
+
+  const reason = !decoded
+    ? 'unreadable'
+    : decoded.expired
+      ? 'expired'
+      : `issued for store ${decoded.storeId ?? 'null'}`;
+  console.warn(
+    `[auth] Dropping the stored VPS token (${reason}). Sales and shifts keep queueing locally ` +
+    'until someone signs in with a phone and password.',
+  );
+  clearServerToken();
+  await prisma.systemSetting.deleteMany({ where: { key: 'server_token' } });
+  return false;
+}
+
+/** A quick-login PIN is 1 to 4 digits — short by design, it only ever unlocks a local session. */
+const PIN_PATTERN = /^\d{1,4}$/;
+
+type PinCandidate = { id: string; pin: string | null };
+
+/**
+ * Active users of this terminal's store that carry a PIN.
+ *
+ * The store scope matters: a terminal caches users from whichever store it was last set up
+ * against, and a stale row from another store must never be able to unlock this one.
+ */
+async function usersWithPin(
+  prisma: ReturnType<typeof getPrismaClient>,
+  extra: { excludeUserId?: string } = {},
+): Promise<PinCandidate[]> {
+  const localConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
+  const storeId = localConfig?.storeId;
+
+  return prisma.user.findMany({
+    where: {
+      active: true,
+      pin: { not: null },
+      ...(storeId ? { storeId } : {}),
+      ...(extra.excludeUserId ? { id: { not: extra.excludeUserId } } : {}),
+    },
+    select: { id: true, pin: true },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+/** The user whose PIN this is, or null. Compares against every candidate — PINs are not unique by construction. */
+async function findUserIdByPin(
+  prisma: ReturnType<typeof getPrismaClient>,
+  pin: string,
+): Promise<string | null> {
+  for (const candidate of await usersWithPin(prisma)) {
+    if (candidate.pin && (await bcrypt.compare(pin, candidate.pin))) return candidate.id;
+  }
+  return null;
+}
+
+/**
+ * Hash a PIN for `userId`, rejecting a PIN another active user already owns.
+ *
+ * Two people sharing a PIN would make PIN login ambiguous — whoever was created first would
+ * silently take over the other's session, including their shift and their name on the receipt.
+ */
+async function hashNewPin(
+  prisma: ReturnType<typeof getPrismaClient>,
+  pin: string,
+  userId: string,
+): Promise<string> {
+  if (!PIN_PATTERN.test(pin)) {
+    throw new Error('auth.errors.invalid_pin_format');
+  }
+  for (const candidate of await usersWithPin(prisma, { excludeUserId: userId })) {
+    if (candidate.pin && (await bcrypt.compare(pin, candidate.pin))) {
+      throw new Error('auth.errors.pin_taken');
+    }
+  }
+  return bcrypt.hash(pin, 10);
+}
+
 export function setupAuthHandlers(): void {
   ipcMain.handle('auth:login', async (_event, phone: string, password: string) => {
     const prisma = getPrismaClient();
@@ -246,41 +346,29 @@ export function setupAuthHandlers(): void {
     const prisma = getPrismaClient();
     const config = getAppConfig();
 
-    // Get store config with PIN
-    const localConfig = await prisma.localConfig.findUnique({
-      where: { id: 'config' },
-    });
-
-    if (!localConfig || !localConfig.storePin) {
+    // The PIN identifies the person, so the session belongs to whoever owns it — a cashier or
+    // an admin. Nobody on this terminal having a PIN is a different failure from a wrong PIN:
+    // the login screen uses it to fall back to phone + password instead of showing an error.
+    if ((await usersWithPin(prisma)).length === 0) {
       throw new Error('auth.errors.pin_not_configured');
     }
 
-    // Verify PIN
-    const isPinValid = await bcrypt.compare(pin, localConfig.storePin);
-    if (!isPinValid) {
+    const matchedUserId = await findUserIdByPin(prisma, pin);
+    if (!matchedUserId) {
       throw new Error('auth.errors.invalid_pin');
     }
 
-    // Find default cashier (first active USER belonging to this store)
-    const cashier = await prisma.user.findFirst({
-      where: {
-        role: 'USER',
-        active: true,
-        ...(localConfig?.storeId ? { storeId: localConfig.storeId } : {}),
-      },
-      orderBy: { createdAt: 'asc' },
-    });
-
-    if (!cashier) {
-      throw new Error('auth.errors.no_cashier_found');
+    const pinUser = await prisma.user.findUnique({ where: { id: matchedUserId } });
+    if (!pinUser || !pinUser.active) {
+      throw new Error('auth.errors.user_deactivated');
     }
 
     // Generate JWT token
     const token = jwt.sign(
       {
-        sub: cashier.id,
-        phone: cashier.phone,
-        role: cashier.role,
+        sub: pinUser.id,
+        phone: pinUser.phone,
+        role: pinUser.role,
       },
       config.jwtSecret || 'local-secret-key',
       {
@@ -291,24 +379,17 @@ export function setupAuthHandlers(): void {
     // Store token for sync operations
     await setAuthToken(token);
 
-    // Restore persisted server token — only if it belongs to the same store
+    // Restore the persisted server token — a PIN login mints no new one.
     const pinLocalConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
-    const pinStoreId = pinLocalConfig?.storeId ?? null;
-    const serverTokenSetting = await prisma.systemSetting.findUnique({ where: { key: 'server_token' } });
-    if (serverTokenSetting?.value) {
-      const decoded = decodeTokenStoreId(serverTokenSetting.value);
-      if (decoded && !decoded.expired && decoded.storeId === pinStoreId) {
-        setServerToken(serverTokenSetting.value);
-      }
-    }
+    await restorePersistedServerToken(prisma, pinLocalConfig?.storeId ?? null);
 
     // Set current user
     currentUser = {
-      id: cashier.id,
-      phone: cashier.phone,
-      role: cashier.role,
-      nameUz: cashier.nameUz,
-      nameRu: cashier.nameRu,
+      id: pinUser.id,
+      phone: pinUser.phone,
+      role: pinUser.role,
+      nameUz: pinUser.nameUz,
+      nameRu: pinUser.nameRu,
     };
 
     return {
@@ -317,13 +398,21 @@ export function setupAuthHandlers(): void {
     };
   });
 
+  /**
+   * Ends the person's session — and deliberately keeps the VPS token.
+   *
+   * That token is the terminal's credential for uploading its own sales and shifts, not part of
+   * anyone's session, and only a phone+password login can mint one. Deleting it here meant that
+   * handing the till to the next cashier (switch user = logout, then a PIN login, which can only
+   * restore a stored token) left the terminal unable to sync until an admin typed a password
+   * again — it kept selling and uploaded nothing.
+   *
+   * It is still dropped where it is genuinely invalid: expired or issued for another store
+   * (restorePersistedServerToken, and the sync loop), or when the terminal is repointed at a
+   * different server (config:updateLocalConfig).
+   */
   ipcMain.handle('auth:logout', async () => {
-    const prisma = getPrismaClient();
-
-    // Clear tokens and user
     await clearAuthToken();
-    clearServerToken();
-    await prisma.systemSetting.deleteMany({ where: { key: 'server_token' } });
     currentUser = null;
   });
 
@@ -374,15 +463,8 @@ export function setupAuthHandlers(): void {
       // Restore token for sync
       await setAuthToken(token);
 
-      // Restore server token — only if it belongs to the same store as LocalConfig
-      const restoreStoreId = restoreLocalConfig?.storeId ?? null;
-      const serverTokenSetting = await prisma.systemSetting.findUnique({ where: { key: 'server_token' } });
-      if (serverTokenSetting?.value) {
-        const decoded = decodeTokenStoreId(serverTokenSetting.value);
-        if (decoded && !decoded.expired && decoded.storeId === restoreStoreId) {
-          setServerToken(serverTokenSetting.value);
-        }
-      }
+      // Restore the server token — only if it belongs to the same store as LocalConfig.
+      await restorePersistedServerToken(prisma, restoreLocalConfig?.storeId ?? null);
 
       return currentUser;
     } catch (err) {
@@ -402,7 +484,7 @@ export function setupAuthHandlers(): void {
     const localConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
     const storeId = localConfig?.storeId;
 
-    return prisma.user.findMany({
+    const users = await prisma.user.findMany({
       where: storeId ? { storeId } : {},
       select: {
         id: true,
@@ -412,9 +494,13 @@ export function setupAuthHandlers(): void {
         nameRu: true,
         active: true,
         createdAt: true,
+        pin: true,
       },
       orderBy: { createdAt: 'desc' },
     });
+
+    // The hash never leaves the main process — the UI only needs to know a PIN exists.
+    return users.map(({ pin, ...user }: { pin: string | null }) => ({ ...user, hasPin: !!pin }));
   });
 
   ipcMain.handle('users:create', async (_event, data) => {
@@ -429,6 +515,9 @@ export function setupAuthHandlers(): void {
 
     const localConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
 
+    // Hashed before the insert so a rejected PIN never leaves a half-created user behind.
+    const hashedPin = data.pin ? await hashNewPin(prisma, data.pin, '') : null;
+
     const user = await prisma.user.create({
       data: {
         phone: data.phone,
@@ -438,6 +527,7 @@ export function setupAuthHandlers(): void {
         nameRu: data.nameRu,
         active: true,
         storeId: localConfig?.storeId ?? null,
+        pin: hashedPin,
       },
       select: {
         id: true,
@@ -470,6 +560,10 @@ export function setupAuthHandlers(): void {
     }
     if (data.password) {
       updateData.password = await bcrypt.hash(data.password, 10);
+    }
+    // undefined = leave the PIN alone, null/'' = clear it, digits = replace it.
+    if (data.pin !== undefined) {
+      updateData.pin = data.pin ? await hashNewPin(prisma, data.pin, id) : null;
     }
 
     const user = await prisma.user.update({
@@ -534,28 +628,66 @@ export function setupAuthHandlers(): void {
     return true;
   });
 
+  // Whether PIN login is offered at all on this terminal — true as soon as anyone here has a PIN.
   ipcMain.handle('auth:isPinConfigured', async () => {
     const prisma = getPrismaClient();
-    const config = await prisma.localConfig.findUnique({
-      where: { id: 'config' },
-      select: { storePin: true },
-    });
-    return !!(config?.storePin);
+    return (await usersWithPin(prisma)).length > 0;
   });
 
+  // Whether the signed-in user personally has a PIN (drives "set up your PIN" after a password login).
+  ipcMain.handle('auth:hasPin', async () => {
+    if (!currentUser) return false;
+    const prisma = getPrismaClient();
+    const user = await prisma.user.findUnique({
+      where: { id: currentUser.id },
+      select: { pin: true },
+    });
+    return !!user?.pin;
+  });
+
+  ipcMain.handle('auth:removePin', async () => {
+    if (!currentUser) {
+      throw new Error('Not authenticated');
+    }
+    const prisma = getPrismaClient();
+    await prisma.user.update({ where: { id: currentUser.id }, data: { pin: null } });
+    return true;
+  });
+
+  // Side-effect-free credential check, used to gate terminal-level settings on the login screen
+  // (changing the server URL from an unauthenticated screen would otherwise let anyone repoint
+  // this terminal at a server of their choosing). Deliberately NOT auth:loginWithPin — that
+  // starts a session. Accepts any staff PIN, or an active admin's password.
+  ipcMain.handle('auth:verifyTerminalAccess', async (_event, secret: string) => {
+    if (!secret) return false;
+    const prisma = getPrismaClient();
+
+    if (PIN_PATTERN.test(secret) && (await findUserIdByPin(prisma, secret))) {
+      return true;
+    }
+
+    const admins = await prisma.user.findMany({
+      where: { role: 'ADMIN', active: true },
+      select: { password: true },
+    });
+    for (const admin of admins) {
+      if (await bcrypt.compare(secret, admin.password)) return true;
+    }
+    return false;
+  });
+
+  // Sets the signed-in user's own PIN. Deliberately does not ask for the password again: the
+  // session is already authenticated, and a locked terminal is what stands between the two.
   ipcMain.handle('auth:setupPin', async (_event, pin: string) => {
     if (!currentUser) {
       throw new Error('Not authenticated');
     }
-    if (!/^\d{4}$/.test(pin)) {
-      throw new Error('auth.errors.invalid_pin_format');
-    }
 
     const prisma = getPrismaClient();
-    const hashedPin = await bcrypt.hash(pin, 10);
-    await prisma.localConfig.update({
-      where: { id: 'config' },
-      data: { storePin: hashedPin },
+    const hashedPin = await hashNewPin(prisma, pin, currentUser.id);
+    await prisma.user.update({
+      where: { id: currentUser.id },
+      data: { pin: hashedPin },
     });
 
     return true;

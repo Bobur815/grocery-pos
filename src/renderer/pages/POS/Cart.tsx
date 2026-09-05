@@ -152,6 +152,18 @@ const ItemPrice = styled.span`
   font-size: 18px;
 `;
 
+/** Marks a line sold as a whole box, so it can't be mistaken for the same product per piece. */
+const BoxBadge = styled.span`
+  margin-left: ${({ theme }) => theme.spacing.xs};
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: ${({ theme }) => theme.colors.primary}1a;
+  color: ${({ theme }) => theme.colors.primary};
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+`;
+
 const QuantityControls = styled.div`
   display: flex;
   align-items: center;
@@ -298,6 +310,9 @@ export function Cart() {
         quantity: Number(item.quantity),
         stock: Number(item.quantity) + 100,
         unit: undefined,
+        // Must survive the round-trip: without it a re-saved box line would decrement stock
+        // by boxes instead of pieces, and the line would lose its "кор. x N" identity.
+        piecesPerUnit: item.piecesPerUnit ?? 1,
       }));
       loadSaleForEdit(sale.id, sale.receiptNumber, cartItems);
       setShowHistory(false);
@@ -396,10 +411,24 @@ export function Cart() {
             const isWeighed = item.unit === "кг" || item.unit === "л";
             const step = isWeighed ? 0.1 : 1;
 
+            // A box line and a piece line of the same product can coexist, so the multiplier
+            // is part of the line's identity — for the React key and for every store lookup.
+            const piecesPerUnit = item.piecesPerUnit ?? 1;
+            const isBox = piecesPerUnit > 1;
+
             return (
-              <CartItem key={`${item.productId}-${item.unitPrice}`}>
+              <CartItem
+                key={`${item.productId}-${item.unitPrice}-${piecesPerUnit}`}
+              >
                 <ItemRow>
-                  <ItemName>{item.productName}</ItemName>
+                  <ItemName>
+                    {item.productName}
+                    {isBox && (
+                      <BoxBadge>
+                        {t("saleUnit.boxShort", "кор.")} x{piecesPerUnit}
+                      </BoxBadge>
+                    )}
+                  </ItemName>
                   <ItemPrice>
                     {formatCurrency(item.unitPrice * item.quantity)}
                   </ItemPrice>
@@ -412,15 +441,21 @@ export function Cart() {
                           item.productId,
                           Math.round((item.quantity - step) * 100) / 100,
                           item.unitPrice,
+                          piecesPerUnit,
                         )
                       }
                     >
                       -
                     </QuantityButton>
                     <Quantity>
+                      {/* A box line counts BOXES, so labelling it "шт" would read as pieces
+                          and contradict the total. formatQuantity passes an unknown unit
+                          through verbatim, which is exactly what the localised label needs. */}
                       {formatQuantity(
                         item.quantity,
-                        item.unit || "шт",
+                        isBox
+                          ? t("saleUnit.boxShort", "кор.")
+                          : item.unit || "шт",
                         i18n.language as "ru" | "uz",
                       )}
                     </Quantity>
@@ -430,6 +465,7 @@ export function Cart() {
                           item.productId,
                           Math.round((item.quantity + step) * 100) / 100,
                           item.unitPrice,
+                          piecesPerUnit,
                         )
                       }
                       disabled={item.quantity >= item.stock || !!item.preWeighedItemId}
@@ -439,7 +475,9 @@ export function Cart() {
                     x<ItemPrice>{formatCurrency(item.unitPrice)}</ItemPrice>
                   </QuantityRow>
                   <RemoveButton
-                    onClick={() => removeItem(item.productId, item.unitPrice)}
+                    onClick={() =>
+                      removeItem(item.productId, item.unitPrice, piecesPerUnit)
+                    }
                   >
                     <Trash size={26} />
                   </RemoveButton>

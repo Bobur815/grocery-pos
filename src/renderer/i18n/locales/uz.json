@@ -1,8 +1,9 @@
 {
   "common": {
-    "store":"Do'kon",
-    "storeId":"Do'kon ID",
-    "noResults":"Hech narsa topilmadi",
+    "confirm": "Tasdiqlash",
+    "store": "Do'kon",
+    "storeId": "Do'kon ID",
+    "noResults": "Hech narsa topilmadi",
     "save": "Saqlash",
     "cancel": "Bekor qilish",
     "delete": "O'chirish",
@@ -30,7 +31,8 @@
     "load": "Yuklash",
     "exitApp": "Dasturdan chiqish",
     "exitAppConfirm": "Dasturni yopmoqchimisiz?",
-    "exit": "Chiqish"
+    "exit": "Chiqish",
+    "continue": "Davom etish"
   },
   "auth": {
     "rememberMe": "Meni eslab qol",
@@ -43,22 +45,22 @@
     "password": "Parol",
     "enterPin": "PIN-kodni kiriting",
     "setupPin": "PIN-kodni sozlash",
-    "setupPinSubtitle": "Tez kirish uchun 4 raqamli PIN-kod o'rnating",
+    "setupPinSubtitle": "Tez kirish uchun PIN-kod o'rnating (4 raqamgacha)",
     "confirmPinSubtitle": "Tasdiqlash uchun PIN-kodni qayta kiriting",
     "usePhoneLogin": "Telefon va parol bilan kirish",
-    "switchUser": "Foydalanuvchini almashtirish",
-    "keyboardHint": "Klaviaturadan raqamlarni kiriting",
+    "switchUser": "Foydalanuvchini almashtirish (PIN-kod bilan kirish)",
     "errors": {
       "user_not_found": "Foydalanuvchi topilmadi",
       "user_deactivated": "Foydalanuvchi hisobi o'chirilgan",
       "invalid_password": "Noto'g'ri parol",
       "invalid_pin": "Noto'g'ri PIN-kod",
-      "pin_not_configured": "Do'kon PIN-kodi sozlanmagan",
+      "pin_not_configured": "PIN-kod sozlanmagan",
       "pin_mismatch": "PIN-kodlar mos kelmadi. Qayta urining",
-      "invalid_pin_format": "PIN-kod 4 raqamdan iborат bo'lishi kerak",
+      "invalid_pin_format": "PIN-kod 1 dan 4 gacha raqamdan iborat bo'lishi kerak",
       "no_cashier_found": "Faol kassir hisobi topilmadi",
       "login_failed": "Kirish xatosi",
-      "server_not_configured": "Noto'g'ri Store ID. Server sozlamalarini tekshiring."
+      "server_not_configured": "Noto'g'ri Store ID. Server sozlamalarini tekshiring.",
+      "pin_taken": "Bu PIN-kod boshqa xodimda mavjud"
     },
     "serverSettings": "Server sozlamalari",
     "storeId": "Store ID",
@@ -77,6 +79,7 @@
     "inventory": "Ombor",
     "arrivals": "Kirimlar",
     "stocktake": "Inventarizatsiya",
+    "reconciliation": "Solishtirish",
     "users": "Foydalanuvchilar",
     "settings": "Sozlamalar",
     "userSettings": "Sozlamalarim",
@@ -226,7 +229,56 @@
       "NOT_FOUND": "reyestrda topilmadi"
     },
     "qrOnlyProduct": "Bu mahsulot faqat markirovka QR-kodi orqali sotiladi — QR ni skaner qiling",
-    "qrInvalidCharacters": "QR-kod noto'g'ri o'qildi (kirill/yaroqsiz belgilar) — klaviatura tilini lotinga o'tkazib, qayta skaner qiling"
+    "qrInvalidCharacters": "QR-kod noto'g'ri o'qildi (kirill/yaroqsiz belgilar) — klaviatura tilini lotinga o'tkazib, qayta skaner qiling",
+    "uzqrAmountDue": "To'lov uchun",
+    "uzqrWaiting": "To'lov amalga oshirilmoqda.",
+    "uzqrScanHint": "To'lov uchun QR kodni skanerlang",
+    "uzqrCreating": "QR kod yaratilmoqda…",
+    "uzqrTimeout": "To'lovni kutish vaqti tugadi",
+    "uzqrPaidButSaleFailed": "To'lov o'tdi, lekin chek yaratilmadi. Administratorga xabar bering."
+  },
+  "reconciliation": {
+    "title": "Solishtirish",
+    "from": "Dan",
+    "to": "Gacha",
+    "refresh": "Yangilash",
+    "anchoredAt": "Inventarizatsiyadan boshlab",
+    "seedOpening": "Boshlang'ich qoldiqlarni yozish",
+    "seedConfirm": "Har bir mahsulot uchun joriy ombor bo'yicha boshlang'ich qoldiq yoziladi. Qayta ishga tushirish hech narsani ikki marta yozmaydi.",
+    "seeded": "Boshlang'ich qoldiqlar yozildi: {{count}}",
+    "seedNoLedger": "Jurnal o'chirilgan — hech narsa yozilmadi. RECONCILIATION_LEDGER_ENABLED ni yoqing.",
+    "shortages": "Kamomad (pozitsiya)",
+    "surpluses": "Ortiqcha (pozitsiya)",
+    "varianceCost": "Tannarx bo'yicha farq",
+    "varianceRetail": "Chakana narxda farq",
+    "goodsTitle": "Tovarlar — pozitsiyalar bo'yicha",
+    "book": "Hisobda",
+    "counted": "Amalda",
+    "variance": "Farq",
+    "atCost": "Tannarxda",
+    "allClear": "Hammasi mos keldi",
+    "allClearHint": "Sanalgan barcha pozitsiyalarda hisobdagi qoldiq amaldagi bilan mos keldi.",
+    "noCount": "Yakunlangan inventarizatsiya yo'q — solishtirish uchun ma'lumot yo'q. Farqlar hisoblanmadi; faqat hisobdagi qoldiq ko'rsatilgan.",
+    "noCountShort": "Solishtirish uchun ma'lumot yo'q",
+    "noCountHint": "Pozitsiyalar bo'yicha farqlarni ko'rish uchun inventarizatsiyani yakunlang.",
+    "ledgerDisabled": "Harakatlar jurnali o'chirilgan (RECONCILIATION_LEDGER_ENABLED). Yangi harakatlar yozilmayapti, shuning uchun hisob to'liq bo'lmaydi.",
+    "crossCheckFailed": "Hisob va jurnal o'rtasida farq",
+    "crossCheckHint": "Bu dastur yoki sinxronizatsiya xatosi, kamomad EMAS.",
+    "crossCheckTitle": "Texnik farq (kamomad emas)",
+    "perpetual": "Joriy qoldiq",
+    "recomputed": "Jurnal bo'yicha",
+    "drift": "Chetlanish",
+    "moneyTitle": "Pul — to'lov turlari bo'yicha",
+    "noShiftData": "Davr uchun serverda yopilgan smenalar yo'q, shuning uchun kassa farqi hisoblanmadi. Faqat to'lov turlari bo'yicha tushum ko'rsatilgan.",
+    "tender": "To'lov turi",
+    "saleCount": "Cheklar",
+    "amount": "Summa",
+    "netSales": "Jami savdo",
+    "discounts": "Chegirmalar (ma'lumot uchun)",
+    "expectedCash": "Kassada bo'lishi kerak",
+    "actualCash": "Kassada amalda",
+    "cashVariance": "Kassa bo'yicha farq",
+    "shiftCount": "Hisobga olingan smenalar"
   },
   "products": {
     "title": "Mahsulotlar",
@@ -254,6 +306,23 @@
     "productTypeBulkWeighted": "Vazn bo'yicha",
     "productTypePrepackaged": "Qadoqlangan",
     "internalCode": "PLU",
+    "tabGeneral": "Asosiy",
+    "tabTax": "Soliqqa oid",
+    "tabPhoto": "Rasm",
+    "moreFields": "Qo'shimcha maydonlar",
+    "fillRequired": "Majburiy maydonlarni to'ldiring",
+    "photoComingSoon": "Tez orada",
+    "photoComingSoonHint": "Mahsulot rasmlarini yuklash keyingi yangilanishlarning birida paydo bo'ladi.",
+    "piecesPerBox": "Qutidagi dona soni",
+    "piecesPerBoxHint": "qutida emas",
+    "piecesPerBoxTitle": "1 dan katta bo'lsa, kassir sotishda tanlaydi: dona yoki quti. Qoldiq har doim donada hisoblanadi.",
+    "boxPrice": "Quti narxi",
+    "boxPriceTitle": "Standart: dona narxi × soni. Ulgurji chegirma uchun kamaytirish mumkin.",
+    "boxBarcode": "Quti shtrix-kodi",
+    "boxBarcodeTitle": "Majburiy emas. Bu kod skanerlansa, quti savolsiz qo'shiladi.",
+    "scanBoxBarcode": "Quti shtrix-kodini kamera bilan skanerlash",
+    "boxBarcodeScanned": "Quti shtrix-kodi skanerlandi",
+    "boxBarcodeSameAsPiece": "Bu mahsulotning o'z shtrix-kodi — qutida alohida kod bo'lishi kerak",
     "add": "Qo'shish",
     "edit": "Tahrirlash",
     "addProduct": "Qo'shish",
@@ -434,6 +503,17 @@
       "saveError": "Miqdorni saqlab bo'lmadi"
     }
   },
+  "saleUnit": {
+    "title": "Qanday sotiladi?",
+    "piece": "Dona",
+    "box": "Quti",
+    "boxShort": "quti",
+    "pcs": "dona",
+    "inStock": "Omborda",
+    "quantity": "Miqdori",
+    "pieceHint": "Ombordan 1 dona",
+    "notEnoughForBox": "Omborda yetarli emas"
+  },
   "bulkWeigh": {
     "title": "Mahsulotni tortish",
     "placeOnScale": "Mahsulotni taroziga qo'ying",
@@ -454,9 +534,9 @@
     "totalAvailable": "Mavjud birliklar",
     "totalValue": "Jami qiymati",
     "soldToday": "Bugun sotilgan",
-    "kg":"kg",
-    "g":"g",
-    "sum":"so'm"
+    "kg": "kg",
+    "g": "g",
+    "sum": "so'm"
   },
   "scaleSettings": {
     "title": "Tarozilar va yorliqlar",
@@ -501,7 +581,11 @@
       "outOfCirculationList": "Markirovka muomaladan chiqqani uchun o'chirilgan cheklar"
     },
     "bulkUnreachable": "Virtual kassa mavjud emas — qayta ishlash to'xtatildi",
-    "disabledFirst": "Avval fiskallashtirishni yoqing"
+    "disabledFirst": "Avval fiskallashtirishni yoqing",
+    "uzqrEnabled": "REGOS orqali UzQR to'lovi (kassa ekranida QR kod)",
+    "uzqrHint": "Xaridor ekrandagi QR kodni skanerlaydi. Chek faqat to'lov tasdiqlangandan keyin yaratiladi. O'chirilgan bo'lsa — UzQR QR kodsiz oddiy to'lov turi bo'lib qoladi.",
+    "uzqrPollMs": "So'rov oralig'i, ms",
+    "uzqrTimeoutMs": "To'lovni kutish, ms"
   },
   "reports": {
     "title": "Hisobotlar",
@@ -593,7 +677,15 @@
       "rawBody": "So'rov tanasi (JSON-RPC)",
       "copy": "Nusxa olish",
       "copied": "Nusxalandi"
-    }
+    },
+    "productRankings": "Mahsulotlar reytingi",
+    "rankByQuantity": "Soni bo'yicha",
+    "rankByRevenue": "Tushum bo'yicha",
+    "rankByProfit": "Foyda bo'yicha",
+    "bestSellers": "Eng yaxshi 10 ta",
+    "worstSellers": "Eng yomon 10 ta",
+    "rankScope": "{{total}} ta faol mahsulotdan. Umuman sotilmagan: {{neverSold}} ta.",
+    "rankNoCost": "Tannarxi yo'q — foydada hisobga olinmaydi: {{count}} ta."
   },
   "users": {
     "title": "Foydalanuvchilar",
@@ -616,10 +708,14 @@
     "noUsers": "Foydalanuvchilar topilmadi",
     "activate": "Faollashtirish",
     "deactivate": "O'chirish",
-    "deactivateConfirm":"Bu foydalanuvchini o'chirasizmi? Bu foydalanuvchi sistemaga kira olmaydi, ammo uning ma'lumotlari saqlanadi.",
-    "activateConfirm":"Bu foydalanuvchini faollashtirmoqchimisiz? Bu foydalanuvchi sistemaga kira oladi.",
+    "deactivateConfirm": "Bu foydalanuvchini o'chirasizmi? Bu foydalanuvchi sistemaga kira olmaydi, ammo uning ma'lumotlari saqlanadi.",
+    "activateConfirm": "Bu foydalanuvchini faollashtirmoqchimisiz? Bu foydalanuvchi sistemaga kira oladi.",
     "passwordRequired": "Parol talab qilinadi",
-    "leaveBlankToKeep": "Joriy parolni saqlash uchun bo'sh qoldiring"
+    "leaveBlankToKeep": "Joriy parolni saqlash uchun bo'sh qoldiring",
+    "pin": "Tez kirish uchun PIN-kod",
+    "pinHint": "Ixtiyoriy — 1 dan 4 gacha raqam",
+    "pinSet": "PIN-kod o'rnatilgan",
+    "removePin": "PIN-kodni o'chirish"
   },
   "settings": {
     "title": "Sozlamalar",
@@ -687,7 +783,29 @@
     "devicesSettingsDescription": "Faol sessiyalar va qurilmalarni boshqarish",
     "usersDescription": "Xodimlar, rollar va kirish huquqi",
     "appUpdate": "Ilovani yangilash",
-    "appUpdateDescription": "Yangilanishlarni tekshirish va o'rnatish"
+    "appUpdateDescription": "Yangilanishlarni tekshirish va o'rnatish",
+    "serverUrl": "Server manzili",
+    "serverUrlHint": "Ushbu terminal ishlaydigan API manzili. Masalan: https://pos.bobur-dev.uz/api",
+    "serverUrlInvalid": "http:// yoki https:// bilan boshlanadigan to'g'ri manzil kiriting",
+    "terminalAccessTitle": "Terminal sozlamalari",
+    "terminalAccessSecret": "PIN yoki administrator paroli",
+    "terminalAccessHint": "Do'kon PIN kodini kiriting. PIN belgilanmagan bo'lsa, administrator parolini kiriting.",
+    "terminalAccessDenied": "PIN yoki parol noto'g'ri",
+    "webAdminOnPhone": "Panelni telefonda ochish",
+    "webAdminHint": "Boshqaruv panelini brauzerda ochish uchun kodni telefoningiz bilan skanerlang.",
+    "pinCode": "PIN-kod",
+    "pinHint": "faqat shu terminalda, 1 dan 4 gacha raqam",
+    "pinSet": "PIN-kod o'rnatilgan",
+    "pinNotSet": "PIN-kod o'rnatilmagan",
+    "newPin": "Yangi PIN-kod",
+    "confirmPin": "PIN-kodni tasdiqlang",
+    "setPin": "PIN-kodni o'rnatish",
+    "updatePin": "PIN-kodni yangilash",
+    "removePin": "PIN-kodni o'chirish",
+    "pinMismatch": "PIN-kodlar mos kelmaydi",
+    "pinChanged": "PIN-kod muvaffaqiyatli o'zgartirildi",
+    "pinRemoved": "PIN-kod o'chirildi",
+    "pinChangeFailed": "PIN-kodni o'zgartirib bo'lmadi"
   },
   "updater": {
     "currentVersion": "Joriy versiya",
@@ -779,7 +897,10 @@
     "syncFailed": "Sinxronizatsiya xatosi",
     "syncing": "Sinxronlanmoqda...",
     "lastSync": "Oxirgi sinxronizatsiya",
-    "notSynced": "Sinxronlanmagan"
+    "notSynced": "Sinxronlanmagan",
+    "errors": {
+      "serverLoginRequired": "Sinxronizatsiya to‘xtadi: serverga kirilmagan. Savdolar va smenalar terminalda saqlanmoqda — ularni yuborish uchun telefon va parol bilan kiring."
+    }
   },
   "categories": {
     "title": "Kategoriyalar",
@@ -799,7 +920,7 @@
     "meter": "Metr"
   },
   "priceTags": {
-    "el_unit":"Birlik",
+    "el_unit": "Birlik",
     "title": "Narx yorliqlari",
     "settingsDescription": "Narx yorliqlari shablonlari va chop etish",
     "createTemplate": "Shablon yaratish",
@@ -835,8 +956,8 @@
     "back": "Orqaga"
   },
   "suppliers": {
-    "status":"Holat",
-    "add":"Qo'shish",
+    "status": "Holat",
+    "add": "Qo'shish",
     "title": "Yetkazib beruvchilar",
     "supplier": "Yetkazib beruvchi",
     "nameRu": "Nomi (RU)",
@@ -945,7 +1066,7 @@
     "drawerOpened": "Tortma ochildi",
     "drawerFailed": "Tortmani ochib bo'lmadi"
   },
-  "scanner":{
+  "scanner": {
     "title": "Shtrix-kod skaneri",
     "description": "Mahsulot qo'shish uchun shtrix-kodni skanerlang",
     "scanning": "Skanerlanmoqda...",
@@ -958,8 +1079,8 @@
     "enterManually": "Qo'lda kiritish"
   },
   "receiptScan": {
-    "scanCharged":"Skaner narxi",
-    "balance":"Balans",
+    "scanCharged": "Skaner narxi",
+    "balance": "Balans",
     "supplierNotFound": "Chekdagi yetkazib beruvchi topilmadi",
     "scanReceipt": "Chekni skanerlash",
     "uploadImage": "Faylni yuklash",
@@ -1028,8 +1149,8 @@
     "pricePerMonth": "so'm/oy"
   },
   "smena": {
-    "viewDetails":"Batafsil",
-    "actions":"Harakatlar",
+    "viewDetails": "Batafsil",
+    "actions": "Harakatlar",
     "title": "Smena",
     "currentShift": "Joriy smena",
     "history": "Tarix",

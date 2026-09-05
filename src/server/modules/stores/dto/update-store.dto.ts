@@ -43,6 +43,17 @@ export class UpdateStoreDto {
   @IsDateString()
   subscriptionExpiresAt?: string;
 
+  @ApiPropertyOptional({ enum: ['OFFLINE_ONLY', 'ONLINE'], description: 'Operating mode' })
+  @IsOptional()
+  @IsString()
+  @IsIn(['OFFLINE_ONLY', 'ONLINE'])
+  mode?: 'OFFLINE_ONLY' | 'ONLINE';
+
+  @ApiPropertyOptional({ example: false, description: 'Restrict the Electron app to cashier operation and narrow its sync' })
+  @IsOptional()
+  @IsBoolean()
+  posAdminLocked?: boolean;
+
   @ApiPropertyOptional({ type: StoreSettingsDto, description: 'Store settings' })
   @IsOptional()
   @IsObject()

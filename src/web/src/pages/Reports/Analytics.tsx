@@ -16,6 +16,12 @@ import {
 import { Select } from "@components/common/Select";
 import { DateInput } from "@components/common/DateInput";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
+import {
+  parseUztDate,
+  uztDayEnd,
+  uztDayStart,
+  uztToday,
+} from "../../utils/uzt-date";
 import { analytics as analyticsApi } from "../../api/client";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -30,6 +36,28 @@ type DatePreset =
   | "last365"
   | "custom";
 
+/** Which measure the top/worst product lists are ordered by. */
+type RankMetric = "quantity" | "revenue" | "profit";
+
+interface RankedProduct {
+  productId: number;
+  nameRu: string;
+  nameUz: string;
+  quantity: number;
+  revenue: number;
+  /** Null when the product has no cost price — an unknown margin, not a zero one. */
+  profit: number | null;
+}
+
+interface ProductRanking {
+  byQuantity: { top: RankedProduct[]; bottom: RankedProduct[] };
+  byRevenue: { top: RankedProduct[]; bottom: RankedProduct[] };
+  byProfit: { top: RankedProduct[]; bottom: RankedProduct[] };
+  neverSoldCount: number;
+  noCostCount: number;
+  totalProducts: number;
+}
+
 interface AnalyticsData {
   salesTrend: { date: string; revenue: number; count: number }[];
   salesByCategory: {
@@ -40,6 +68,7 @@ interface AnalyticsData {
   }[];
   hourlyDistribution: { hour: number; revenue: number; count: number }[];
   topProducts: { name: string; quantity: number; revenue: number }[];
+  productRanking: ProductRanking;
   cashierPerformance: { name: string; revenue: number; count: number }[];
   profitMargins: {
     categoryRu: string;
@@ -54,32 +83,6 @@ interface AnalyticsData {
     cardSales: number;
     averageTransaction: number;
   };
-}
-
-// ── Tashkent (UTC+5) date helpers ────────────────────────────────────────────
-
-const UZT_OFFSET_MS = 5 * 60 * 60 * 1000;
-
-/** Current year/month/day in Tashkent time. */
-function uztToday(): { y: number; m: number; d: number } {
-  const t = new Date(Date.now() + UZT_OFFSET_MS);
-  return { y: t.getUTCFullYear(), m: t.getUTCMonth(), d: t.getUTCDate() };
-}
-
-/** 00:00:00.000 of a Tashkent calendar day expressed as a UTC Date. */
-function uztDayStart(y: number, m: number, d: number): Date {
-  return new Date(Date.UTC(y, m, d, 0, 0, 0, 0) - UZT_OFFSET_MS);
-}
-
-/** 23:59:59.999 of a Tashkent calendar day expressed as a UTC Date. */
-function uztDayEnd(y: number, m: number, d: number): Date {
-  return new Date(Date.UTC(y, m, d, 23, 59, 59, 999) - UZT_OFFSET_MS);
-}
-
-/** Parse a YYYY-MM-DD string (from <input type="date">) as a Tashkent date. */
-function parseUztDate(s: string): { y: number; m: number; d: number } {
-  const [y, m, d] = s.split("-").map(Number);
-  return { y, m: m - 1, d };
 }
 
 // ── Date range helpers ────────────────────────────────────────────────────────
@@ -225,6 +228,160 @@ const LoadingText = styled.div`
   padding: ${({ theme }) => theme.spacing.xl};
 `;
 
+const CardHead = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.md};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+  flex-wrap: wrap;
+`;
+
+const MetricSelect = styled(Select)`
+  min-width: 220px;
+`;
+
+const RankNote = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin-bottom: ${({ theme }) => theme.spacing.md};
+`;
+
+const RankHeading = styled.h4`
+  margin: 0 0 ${({ theme }) => theme.spacing.sm};
+  font-size: 14px;
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const RankTable = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+`;
+
+const RankRow = styled.tr`
+  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+
+  &:last-child {
+    border-bottom: none;
+  }
+`;
+
+const RankIndex = styled.td`
+  padding: ${({ theme }) => theme.spacing.xs} 0;
+  width: 22px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  font-variant-numeric: tabular-nums;
+`;
+
+const RankName = styled.td`
+  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+/** Fixed width so the numbers form a column the eye can scan, independent of name length. */
+const RankValue = styled.td<{ $tone?: "bad" | "muted" }>`
+  padding: ${({ theme }) => theme.spacing.xs} 0;
+  width: 108px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: ${({ theme, $tone }) =>
+    $tone === "bad"
+      ? theme.colors.error
+      : $tone === "muted"
+        ? theme.colors.textSecondary
+        : theme.colors.text};
+`;
+
+/**
+ * Inline proportional bar, in place of a chart.
+ *
+ * A bar chart is unreadable for the worst-sellers list — most of its entries are zero, so every
+ * bar collapses to nothing. Scaling each table to its own maximum keeps the comparison visible
+ * within a list while the exact figure stays on the row.
+ */
+const BarCell = styled.td`
+  width: 76px;
+  padding: ${({ theme }) => theme.spacing.xs} 0
+    ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
+`;
+
+const BarTrack = styled.div`
+  height: 6px;
+  border-radius: 3px;
+  background-color: ${({ theme }) => theme.colors.border};
+  overflow: hidden;
+`;
+
+const BarFill = styled.div<{ $pct: number; $color: string }>`
+  height: 100%;
+  width: ${({ $pct }) => $pct}%;
+  background-color: ${({ $color }) => $color};
+`;
+
+// ── Ranking list ──────────────────────────────────────────────────────────────
+
+interface RankListProps {
+  rows: RankedProduct[];
+  lang: "ru" | "uz";
+  color: string;
+  metricValue: (p: RankedProduct) => number;
+  formatMetric: (p: RankedProduct) => string;
+  emptyLabel: string;
+}
+
+/**
+ * Ten products with an inline proportional bar, used instead of a Recharts bar chart.
+ *
+ * The worst-sellers list is mostly zeros — a chart of it renders as ten invisible bars and a
+ * column of truncated labels. A table keeps the names readable and the figures exact, and the
+ * bar still carries the visual comparison where there is one to make.
+ */
+function RankList({
+  rows,
+  lang,
+  color,
+  metricValue,
+  formatMetric,
+  emptyLabel,
+}: RankListProps) {
+  if (rows.length === 0) return <NoData>{emptyLabel}</NoData>;
+
+  // Scaled to this list's own maximum, not the other list's: the worst-sellers bars are about
+  // comparing dead stock with itself, and sharing a scale with the best sellers would flatten
+  // every one of them to nothing.
+  const peak = Math.max(...rows.map((r) => Math.abs(metricValue(r))), 0);
+
+  return (
+    <RankTable>
+      <tbody>
+        {rows.map((p, i) => {
+          const value = metricValue(p);
+          return (
+            <RankRow key={p.productId}>
+              <RankIndex>{i + 1}</RankIndex>
+              <RankName>{lang === "ru" ? p.nameRu : p.nameUz}</RankName>
+              <BarCell>
+                <BarTrack>
+                  <BarFill
+                    $pct={peak > 0 ? (Math.abs(value) / peak) * 100 : 0}
+                    $color={color}
+                  />
+                </BarTrack>
+              </BarCell>
+              {/* A negative figure is a product sold below cost — worth seeing in red. */}
+              <RankValue $tone={value < 0 ? "bad" : value === 0 ? "muted" : undefined}>
+                {formatMetric(p)}
+              </RankValue>
+            </RankRow>
+          );
+        })}
+      </tbody>
+    </RankTable>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function Analytics() {
@@ -236,6 +393,8 @@ export function Analytics() {
   const [customEnd, setCustomEnd] = useState("");
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  // All three rankings ship in one response, so switching the metric is instant — no refetch.
+  const [rankMetric, setRankMetric] = useState<RankMetric>("quantity");
   
   const lang = i18n.language as "ru" | "uz";
   const fmt = (amount: number) => formatCurrencyBase(amount, lang);
@@ -285,6 +444,31 @@ export function Analytics() {
       revenue: c.revenue,
       cost: c.cost,
     })) ?? [];
+
+  const metricOptions = [
+    { value: "quantity", label: t("reports.rankByQuantity", "По количеству") },
+    { value: "revenue", label: t("reports.rankByRevenue", "По выручке") },
+    { value: "profit", label: t("reports.rankByProfit", "По прибыли") },
+  ];
+
+  const ranking = data?.productRanking;
+  const rankSlice =
+    rankMetric === "revenue"
+      ? ranking?.byRevenue
+      : rankMetric === "profit"
+        ? ranking?.byProfit
+        : ranking?.byQuantity;
+
+  /** The figure the current metric ranks on. Profit is null-safe: no cost price → no row here. */
+  const metricValue = (p: RankedProduct): number =>
+    rankMetric === "revenue"
+      ? p.revenue
+      : rankMetric === "profit"
+        ? (p.profit ?? 0)
+        : p.quantity;
+
+  const formatMetric = (p: RankedProduct): string =>
+    rankMetric === "quantity" ? String(p.quantity) : fmt(metricValue(p));
 
   const PRIMARY = theme.colors.primary;
   const SUCCESS = theme.colors.success;
@@ -480,43 +664,70 @@ export function Analytics() {
             </Card>
           </TwoCol>
 
-          {/* ── Top Products | Cashier Performance ── */}
-          <TwoCol>
-            <Card>
-              <CardTitle>{t("reports.topSellingProducts")}</CardTitle>
-              {data.topProducts.length === 0 ? (
-                <NoData>{t("reports.noData")}</NoData>
-              ) : (
-                <ResponsiveContainer width="100%" height={210}>
-                  <BarChart
-                    data={data.topProducts}
-                    layout="vertical"
-                    margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke={BORDER} />
-                    <XAxis type="number" tick={tickStyle} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={120}
-                      tick={tickStyle}
-                    />
-                    <Tooltip
-                      formatter={(v: any) => [v ?? 0, t("reports.items")]}
-                      contentStyle={tooltipStyle}
-                      cursor={tooltipCursor}
-                    />
-                    <Bar
-                      dataKey="quantity"
-                      fill={SUCCESS}
-                      radius={[0, 3, 3, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </Card>
+          {/* ── Product rankings (full width, one filter drives both lists) ── */}
+          <Card>
+            <CardHead>
+              <CardTitle style={{ margin: 0 }}>
+                {t("reports.productRankings", "Рейтинг товаров")}
+              </CardTitle>
+              <MetricSelect
+                options={metricOptions}
+                value={rankMetric}
+                onChange={(e) => setRankMetric(e.target.value as RankMetric)}
+                selectSize="small"
+              />
+            </CardHead>
 
-            <Card>
+            {/* What the lists are drawn from. Without this the worst-sellers list looks like a
+                complete answer, when it is ten rows sampled from however many never sold. */}
+            <RankNote>
+              {t("reports.rankScope", {
+                defaultValue:
+                  "Из {{total}} активных товаров. Не продавалось ни разу: {{neverSold}}.",
+                total: ranking?.totalProducts ?? 0,
+                neverSold: ranking?.neverSoldCount ?? 0,
+              })}
+              {rankMetric === "profit" && (ranking?.noCostCount ?? 0) > 0 && (
+                <>
+                  {" "}
+                  {t("reports.rankNoCost", {
+                    defaultValue:
+                      "Без себестоимости — не учитывается в прибыли: {{count}}.",
+                    count: ranking?.noCostCount ?? 0,
+                  })}
+                </>
+              )}
+            </RankNote>
+
+            <TwoCol>
+              <div>
+                <RankHeading>{t("reports.bestSellers", "Лучшие 10")}</RankHeading>
+                <RankList
+                  rows={rankSlice?.top ?? []}
+                  lang={lang}
+                  color={SUCCESS}
+                  metricValue={metricValue}
+                  formatMetric={formatMetric}
+                  emptyLabel={t("reports.noData")}
+                />
+              </div>
+              <div>
+                <RankHeading>{t("reports.worstSellers", "Худшие 10")}</RankHeading>
+                <RankList
+                  rows={rankSlice?.bottom ?? []}
+                  lang={lang}
+                  color={ERROR}
+                  metricValue={metricValue}
+                  formatMetric={formatMetric}
+                  emptyLabel={t("reports.noData")}
+                />
+              </div>
+            </TwoCol>
+          </Card>
+
+          {/* ── Cashier Performance (full width — it lost its former row partner to the
+              rankings block above, and a half-width chart beside empty space reads as broken) ── */}
+          <Card>
               <CardTitle>{t("reports.cashierPerformance")}</CardTitle>
               {data.cashierPerformance.length === 0 ? (
                 <NoData>{t("reports.noData")}</NoData>
@@ -549,8 +760,7 @@ export function Analytics() {
                   </BarChart>
                 </ResponsiveContainer>
               )}
-            </Card>
-          </TwoCol>
+          </Card>
 
           {/* ── Profit Margins (full width) ── */}
           <Card>

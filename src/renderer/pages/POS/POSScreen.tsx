@@ -5,7 +5,9 @@ import { Cart } from "./Cart";
 import { UzQrLogo } from "./UzQrLogo";
 import { Catalog } from "./Catalog";
 import { BulkWeighModal } from "../../components/BulkWeighModal";
+import { SaleUnitModal } from "../../components/SaleUnitModal";
 import { Checkout } from "./Checkout";
+import { UzQrPaymentModal } from "./UzQrPaymentModal";
 import { PosTabBar } from "./PosTabBar";
 import { useCartStore } from "../../store/cart-store";
 import { APP_BAR_HEIGHT } from "../../components/layout/AppBar";
@@ -30,6 +32,7 @@ import { parseBarcode } from "../../../shared/utils/barcode-parser";
 import { parseWeightBarcode } from "../../../shared/utils/weightBarcode";
 import { physicalKeyToChar } from "../../../shared/utils/keyboard-layout";
 import { productRequiresMarking } from "../../../shared/utils/marking";
+import { boxUnitPrice, isBoxedProduct, PIECE } from "../../../shared/utils/pack";
 import { Modal } from "@renderer/components/common/Modal";
 import { useSidebar } from "@renderer/context/SidebarContext";
 
@@ -249,7 +252,18 @@ const ErrorMessage = styled.div`
   margin-bottom: ${({ theme }) => theme.spacing.sm};
 `;
 
+/**
+ * The column is a size container, so everything inside it adapts to the width it actually gets
+ * — a quarter of the window — instead of to the viewport. A narrow monoblock and a wide desktop
+ * differ here by a hundred pixels or so of column, which viewport breakpoints cannot see, and
+ * that is exactly the range where the three tender buttons stop fitting.
+ *
+ * Deliberately NOT a mobile layout: the POS only ever runs full-screen on a terminal, so these
+ * queries just trim the row down, they never restack the screen.
+ */
 const InputColumn = styled.div`
+  container-type: inline-size;
+  container-name: pos-input;
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.xs};
@@ -265,8 +279,62 @@ const InputRow = styled.div`
 
 const QuickPayRow = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  /* minmax(0, …) rather than 1fr: a plain 1fr floors at the content width, so the widest tender
+     (UzQR — wordmark, label and hint) pushed the row past the column instead of shrinking. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: ${({ theme }) => theme.spacing.xs};
+`;
+
+/**
+ * The keyboard hint shrinks, then goes — the shortcut keeps working either way, and F9/F11/F12
+ * are printed on the keyboard. Shared with the Pay button above, which is glad of the room too.
+ */
+const ShortcutHint = styled.span`
+  font-size: 14px;
+  opacity: 0.7;
+  font-weight: 500;
+  white-space: nowrap;
+
+  @container pos-input (max-width: 440px) {
+    font-size: 11px;
+  }
+
+  @container pos-input (max-width: 375px) {
+    display: none;
+  }
+`;
+
+/** Tender icon: dropped before the word it decorates, since the word carries the meaning. */
+const QuickPayIcon = styled.span`
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+
+  @container pos-input (max-width: 315px) {
+    display: none;
+  }
+`;
+
+/** Tender name. Last to go — below this the buttons are icon-only and lean on their colour. */
+const QuickPayLabel = styled.span`
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  @container pos-input (max-width: 215px) {
+    display: none;
+  }
+`;
+
+/** UzQR's wordmark says "UzQR" already, so the word goes as soon as space is tight. */
+const UzQrTextLabel = styled(QuickPayLabel)`
+  @container pos-input (max-width: 315px) {
+    display: none;
+  }
+`;
+
+/** The wordmark is this button's icon and its label at once — it never shrinks and never hides. */
+const QuickPayUzQrLogo = styled(UzQrLogo)`
+  flex-shrink: 0;
 `;
 
 /** Cash is the till (green), card the house colour, UzQR its own brand navy. */
@@ -278,6 +346,10 @@ function quickPayColor(theme: DefaultTheme, variant: SaleTender) {
 
 const QuickPayButton = styled.button<{ $variant: SaleTender }>`
   height: 44px;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
   border-radius: ${({ theme }) => theme.borderRadius};
   border: 1px solid ${({ theme, $variant }) => quickPayColor(theme, $variant)};
   background-color: ${({ theme, $variant }) => quickPayColor(theme, $variant)};
@@ -289,7 +361,7 @@ const QuickPayButton = styled.button<{ $variant: SaleTender }>`
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: 6px;
 
   &:hover {
     opacity: 0.9;
@@ -304,12 +376,17 @@ const QuickPayButton = styled.button<{ $variant: SaleTender }>`
     cursor: not-allowed;
     transform: none;
   }
-`;
 
-const ShortcutHint = styled.span`
-  font-size: 14px;
-  opacity: 0.7;
-  font-weight: 500;
+  /* Measured in Electron's Chromium against the Russian labels, which are the longest: below
+     these widths the row spilled out of the column, so each step buys back what it costs. */
+  @container pos-input (max-width: 440px) {
+    padding: 0 4px;
+    gap: 4px;
+  }
+
+  @container pos-input (max-width: 315px) {
+    font-size: 12px;
+  }
 `;
 
 const SmenaBlock = styled.div`
@@ -340,6 +417,19 @@ export function POSScreen() {
   const { openSmenaModal } = useSidebar();
 
   const [showSmenaModal, setShowSmenaModal] = useState(false);
+
+  // UzQR: when the optional REGOS integration is on, picking UzQR opens the QR modal instead of
+  // creating the sale straight away. Non-null amount = modal open.
+  const [uzqrEnabled, setUzqrEnabled] = useState(false);
+  const [uzQrAmount, setUzQrAmount] = useState<number | null>(null);
+
+  useEffect(() => {
+    window.electronAPI.uzqr
+      .isEnabled()
+      .then(setUzqrEnabled)
+      // A failed check leaves UzQR as the plain tender it is today — never blocks a sale.
+      .catch(() => setUzqrEnabled(false));
+  }, []);
   const [showCatalog, setShowCatalog] = useState(false);
   const closeCatalog = useCallback(() => setShowCatalog(false), []);
 
@@ -428,6 +518,13 @@ export function POSScreen() {
 
   const [bulkWeighProduct, setBulkWeighProduct] = useState<Product | null>(null);
 
+  // A boxed product can be rung up either way, so the cashier is asked which before the line
+  // is created. Carries the typed quantity along — it is interpreted in whichever unit is picked.
+  const [saleUnitChoice, setSaleUnitChoice] = useState<{
+    product: Product;
+    qty: number;
+  } | null>(null);
+
   /** True when this product should be weighed on the scale rather than typed. */
   const needsScaleWeighing = useCallback(
     (product: Product) =>
@@ -435,8 +532,27 @@ export function POSScreen() {
     [],
   );
 
+  /**
+   * True when the cashier must choose between a single piece and a whole box.
+   *
+   * Marked goods are excluded: each physical piece carries its own DataMatrix and a fiscal
+   * position accepts only one label, so a box of N marked pieces cannot be fiscalized as one
+   * line. Weighed products are excluded because the scale already owns their quantity.
+   */
+  const needsSaleUnitChoice = useCallback(
+    (product: Product) =>
+      isBoxedProduct(product) &&
+      product.productType !== "BULK_WEIGHTED" &&
+      !productRequiresMarking(product),
+    [],
+  );
+
+  /**
+   * @param piecesPerUnit pieces contained in one `qty` unit — PIECE (1) for a normal line,
+   *   product.piecesPerBox when the cashier chose to sell whole boxes.
+   */
   const addProductToCart = useCallback(
-    (product: Product, qty: number) => {
+    (product: Product, qty: number, piecesPerUnit: number = PIECE) => {
       if (!product.isActive) {
         const productName =
           i18n.language === "uz" ? product.nameUz : product.nameRu;
@@ -446,6 +562,23 @@ export function POSScreen() {
 
       const productName =
         i18n.language === "uz" ? product.nameUz : product.nameRu;
+
+      // Box line. Deliberately skips the pending-price split below: pendingPrice is a PIECE
+      // price, and splitting a sealed box across two price tiers has no meaning. `stock` is
+      // converted to boxes so the cart's own clamp keeps working in the unit being sold.
+      if (piecesPerUnit > PIECE) {
+        addItem({
+          productId: product.id,
+          productName,
+          barcode: product.barcode,
+          unitPrice: boxUnitPrice(product),
+          quantity: qty,
+          stock: Math.floor(product.stock / piecesPerUnit),
+          unit: product.unit,
+          piecesPerUnit,
+        });
+        return;
+      }
 
       const hasPending =
         product.pendingPrice != null &&
@@ -563,6 +696,19 @@ export function POSScreen() {
         }
 
         const qty = parseFloat(quantity) || 1;
+
+        // Boxed product: ask piece-or-box before creating the line. Checked BEFORE the stock
+        // guard, which is expressed in pieces and would reject a box the modal can still offer.
+        if (needsSaleUnitChoice(product)) {
+          setId("");
+          writeBarcode("", true);
+          setQuantity("1");
+          setInputMode("barcode");
+          setError("");
+          setSaleUnitChoice({ product, qty });
+          return;
+        }
+
         if (qty > product.stock) {
           setError(
             t("errors.insufficientStock", {
@@ -600,6 +746,7 @@ export function POSScreen() {
     getById,
     addProductToCart,
     needsScaleWeighing,
+    needsSaleUnitChoice,
     t,
     i18n.language,
     writeBarcode,
@@ -787,7 +934,13 @@ export function POSScreen() {
           // Quantity field's default of 1 would spuriously fail this for a product with
           // under 1 unit left. The marking checks below still apply, and the weight is
           // validated in BulkWeighModal.
-          if (qty > product.stock && !needsScaleWeighing(product)) {
+          // Boxed products are exempt too: this guard counts PIECES, but the cashier may be
+          // about to buy boxes — SaleUnitModal does the piece-accurate check per unit.
+          if (
+            qty > product.stock &&
+            !needsScaleWeighing(product) &&
+            !needsSaleUnitChoice(product)
+          ) {
             setError(
               t("errors.insufficientStock", {
                 name: i18n.language === "uz" ? product.nameUz : product.nameRu,
@@ -890,6 +1043,21 @@ export function POSScreen() {
             setBulkWeighProduct(product);
             return;
           }
+
+          // Boxed product. Scanning the code printed on the PACK is already an unambiguous
+          // "sell me a box", so it skips the prompt; the piece barcode (or a catalog pick)
+          // still asks. product.boxBarcode is what the lookup matched on, so this compares
+          // the exact same string the DB did.
+          if (needsSaleUnitChoice(product)) {
+            resetInputs();
+            if (product.boxBarcode && product.boxBarcode === barcodeValue) {
+              addProductToCart(product, qty, product.piecesPerBox ?? PIECE);
+            } else {
+              setSaleUnitChoice({ product, qty });
+            }
+            return;
+          }
+
           addProductToCart(product, qty);
           resetInputs();
         }
@@ -912,6 +1080,7 @@ export function POSScreen() {
     searchByBarcode,
     addProductToCart,
     needsScaleWeighing,
+    needsSaleUnitChoice,
     addItem,
     removeByMarkingCode,
     items,
@@ -922,13 +1091,16 @@ export function POSScreen() {
     writeBarcode,
   ]);
 
-  const handleQuickPay = useCallback(
-    async (method: SaleTender) => {
+  /**
+   * Write the sale. For UzQR this runs only AFTER the buyer has paid, with the confirmed
+   * payment attached — never before, so an abandoned payment leaves no sale behind.
+   */
+  const completeQuickSale = useCallback(
+    async (
+      method: SaleTender,
+      uzqrPayment?: { vcrPaymentId: string; rrn: string | null },
+    ) => {
       if (items.length === 0 || payingRef.current) return;
-      if (!(await checkSmena())) {
-        setShowSmenaModal(true);
-        return;
-      }
 
       payingRef.current = true;
 
@@ -940,6 +1112,7 @@ export function POSScreen() {
             barcode: item.barcode,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
+            piecesPerUnit: item.piecesPerUnit,
             preWeighedItemId: item.preWeighedItemId,
           })),
           paymentMethod: method,
@@ -947,6 +1120,10 @@ export function POSScreen() {
           markingCodes: items
             .filter((i) => i.markingCode)
             .map((i) => ({ barcode: i.barcode, label: i.markingCode! })),
+          // Only set when the UzQR integration confirmed a payment. Its presence makes the sale
+          // fiscalize immediately and book against the payment id rather than as a plain card.
+          regosPaymentId: uzqrPayment?.vcrPaymentId,
+          regosPaymentRrn: uzqrPayment?.rrn ?? undefined,
         };
 
         const sale = editingSaleId
@@ -977,14 +1154,25 @@ export function POSScreen() {
           err instanceof Error ? (err.stack ?? err.message) : String(err);
         console.error("Quick pay failed:", err);
         window.electronAPI.logger.error(`handleQuickPay(${method}): ${msg}`);
-        toast.error(parseSaleError(err, t));
+
+        if (uzqrPayment) {
+          // Money already moved but the receipt did not. Surface the identifiers instead of a
+          // generic error so the cashier can reconcile rather than charging the buyer twice.
+          window.electronAPI.logger.error(
+            `UzQR PAID BUT SALE FAILED — payment_id=${uzqrPayment.vcrPaymentId} rrn=${uzqrPayment.rrn ?? "-"}`,
+          );
+          toast.error(
+            `${t("pos.uzqrPaidButSaleFailed", "Оплата прошла, но чек не создан. Сообщите администратору.")} ${uzqrPayment.rrn ?? uzqrPayment.vcrPaymentId}`,
+          );
+        } else {
+          toast.error(parseSaleError(err, t));
+        }
         clearCart();
       } finally {
         payingRef.current = false;
       }
     },
     [
-      checkSmena,
       items,
       discount,
       editingSaleId,
@@ -997,11 +1185,44 @@ export function POSScreen() {
     ],
   );
 
+  /**
+   * Quick-pay entry point (F9 / F11 / F12).
+   *
+   * UzQR forks here: with the integration on, the buyer must pay before any sale exists, so the
+   * QR modal takes over and calls completeQuickSale only on success. With it off, UzQR is a
+   * plain tender and behaves exactly as cash and card do.
+   */
+  const handleQuickPay = useCallback(
+    async (method: SaleTender) => {
+      if (items.length === 0 || payingRef.current) return;
+      if (!(await checkSmena())) {
+        setShowSmenaModal(true);
+        return;
+      }
+
+      if (method === "uzqr" && uzqrEnabled) {
+        setUzQrAmount(total);
+        return;
+      }
+
+      await completeQuickSale(method);
+    },
+    [items.length, checkSmena, uzqrEnabled, total, completeQuickSale],
+  );
+
   // Handle keyboard input
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignore if checkout or smena modal is open
-      if (showCheckout || showSmenaModal) return;
+      // Ignore if checkout or smena modal is open. The UzQR modal is included for the same
+      // reason as saleUnitChoice below: it owns Escape, and F9 behind it would start a second
+      // payment for a cart that is already being paid for.
+      if (showCheckout || showSmenaModal || uzQrAmount !== null) return;
+
+      // SaleUnitModal owns the keyboard while it is open: its 1 / 2 / Escape would otherwise
+      // ALSO be swallowed here — the digits appended to the barcode buffer and Escape clearing
+      // the screen behind the modal. (BulkWeighModal doesn't need this because it keeps a real
+      // <input> focused, which the tag check below already skips.)
+      if (saleUnitChoice) return;
 
       // Let native inputs handle their own keyboard events
       const tag = (e.target as HTMLElement)?.tagName;
@@ -1109,6 +1330,8 @@ export function POSScreen() {
     quantity,
     showCheckout,
     showSmenaModal,
+    uzQrAmount,
+    saleUnitChoice,
     handleBarcodeSubmit,
     handleQuickPay,
     writeBarcode,
@@ -1121,6 +1344,20 @@ export function POSScreen() {
       setBulkWeighProduct(null);
     },
     [bulkWeighProduct, addProductToCart],
+  );
+
+  const handleSaleUnitSelect = useCallback(
+    (unit: "piece" | "box") => {
+      if (!saleUnitChoice) return;
+      const { product, qty } = saleUnitChoice;
+      setSaleUnitChoice(null);
+      addProductToCart(
+        product,
+        qty,
+        unit === "box" ? (product.piecesPerBox ?? PIECE) : PIECE,
+      );
+    },
+    [saleUnitChoice, addProductToCart],
   );
 
   const handleBulkWeighPrintAndScan = useCallback(
@@ -1195,6 +1432,15 @@ export function POSScreen() {
         return;
       }
       const qty = parseFloat(quantity) || 1;
+
+      // Boxed product: ask piece-or-box. Before the stock guard, which counts pieces.
+      if (needsSaleUnitChoice(product)) {
+        setQuantity("1");
+        setError("");
+        setSaleUnitChoice({ product, qty });
+        return;
+      }
+
       if (qty > product.stock) {
         setError(
           t("errors.insufficientStock", {
@@ -1209,7 +1455,14 @@ export function POSScreen() {
       setQuantity("1");
       setError("");
     },
-    [quantity, t, i18n.language, addProductToCart, needsScaleWeighing],
+    [
+      quantity,
+      t,
+      i18n.language,
+      addProductToCart,
+      needsScaleWeighing,
+      needsSaleUnitChoice,
+    ],
   );
 
   const handleCheckoutComplete = () => {
@@ -1341,22 +1594,32 @@ export function POSScreen() {
               <ShortcutHint>(F10)</ShortcutHint>
             </Button>
             <QuickPayRow>
+              {/* Each button keeps its title, because a narrow column strips it down to its
+                  icon or wordmark and the colour alone should not have to carry the meaning. */}
               <QuickPayButton
                 $variant="cash"
                 onClick={() => handleQuickPay("cash")}
                 disabled={items.length === 0 || isPayingLoading}
+                aria-label={t("pos.cash")}
+                title={t("pos.cash")}
               >
-                <Banknote size={18} />
-                {t("pos.cash")}
+                <QuickPayIcon>
+                  <Banknote size={18} />
+                </QuickPayIcon>
+                <QuickPayLabel>{t("pos.cash")}</QuickPayLabel>
                 <ShortcutHint>(F11)</ShortcutHint>
               </QuickPayButton>
               <QuickPayButton
                 $variant="card"
                 onClick={() => handleQuickPay("card")}
                 disabled={items.length === 0 || isPayingLoading}
+                aria-label={t("pos.card")}
+                title={t("pos.card")}
               >
-                <CreditCard size={18} />
-                {t("pos.card")}
+                <QuickPayIcon>
+                  <CreditCard size={18} />
+                </QuickPayIcon>
+                <QuickPayLabel>{t("pos.card")}</QuickPayLabel>
                 <ShortcutHint>(F12)</ShortcutHint>
               </QuickPayButton>
               <QuickPayButton
@@ -1366,10 +1629,10 @@ export function POSScreen() {
                 aria-label={t("pos.uzqr")}
                 title={t("pos.uzqr")}
               >
-                {/* The wordmark replaces icon + text: the button is already navy, and
-                    three tenders in this row leave no width for a label. */}
-                <UzQrLogo $height={20} />
-                {t("pos.uzqr")}
+                {/* The button is already navy, so the wordmark reads as the tender by itself;
+                    once the column tightens it stands in for the label too. */}
+                <QuickPayUzQrLogo $height={20} />
+                <UzQrTextLabel>{t("pos.uzqr")}</UzQrTextLabel>
                 <ShortcutHint>(F9)</ShortcutHint>
               </QuickPayButton>
             </QuickPayRow>
@@ -1383,6 +1646,25 @@ export function POSScreen() {
           <Checkout
             onComplete={handleCheckoutComplete}
             onCancel={() => setShowCheckout(false)}
+          />
+        )}
+
+        {uzQrAmount !== null && (
+          <UzQrPaymentModal
+            amount={uzQrAmount}
+            onPaid={(payment) => {
+              setUzQrAmount(null);
+              void completeQuickSale("uzqr", payment);
+            }}
+            onDismiss={(reason) => {
+              setUzQrAmount(null);
+              // Cart is intentionally left intact — the cashier can retry or switch tender.
+              if (reason.state === "TIMEOUT") {
+                toast.error(t("pos.uzqrTimeout", "Время ожидания оплаты истекло"));
+              } else if (reason.state === "ERROR" && reason.error) {
+                toast.error(reason.error);
+              }
+            }}
           />
         )}
 
@@ -1416,6 +1698,15 @@ export function POSScreen() {
             onAddToCart={handleBulkWeighAddNow}
             onPrintAndScan={handleBulkWeighPrintAndScan}
             onCancel={() => setBulkWeighProduct(null)}
+          />
+        )}
+
+        {saleUnitChoice && (
+          <SaleUnitModal
+            product={saleUnitChoice.product}
+            quantity={saleUnitChoice.qty}
+            onSelect={handleSaleUnitSelect}
+            onCancel={() => setSaleUnitChoice(null)}
           />
         )}
       </Container>

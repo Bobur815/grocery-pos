@@ -14,7 +14,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     changePassword: (currentPassword: string, newPassword: string) =>
       ipcRenderer.invoke("auth:changePassword", currentPassword, newPassword),
     isPinConfigured: () => ipcRenderer.invoke("auth:isPinConfigured"),
+    verifyTerminalAccess: (secret: string) =>
+      ipcRenderer.invoke("auth:verifyTerminalAccess", secret),
     setupPin: (pin: string) => ipcRenderer.invoke("auth:setupPin", pin),
+    hasPin: () => ipcRenderer.invoke("auth:hasPin"),
+    removePin: () => ipcRenderer.invoke("auth:removePin"),
   },
 
   // Products
@@ -113,6 +117,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     zInfo: () => ipcRenderer.invoke("fiscal:zInfo"),
     zOpen: () => ipcRenderer.invoke("fiscal:zOpen"),
     zClose: () => ipcRenderer.invoke("fiscal:zClose"),
+  },
+
+  uzqr: {
+    isEnabled: () => ipcRenderer.invoke("uzqr:isEnabled"),
+    start: (amountSum: number) => ipcRenderer.invoke("uzqr:start", amountSum),
+    // Resolves only when the buyer pays, the deadline passes, or cancel() is called.
+    await: (vcrPaymentId: string) => ipcRenderer.invoke("uzqr:await", vcrPaymentId),
+    cancel: (vcrPaymentId: string) => ipcRenderer.invoke("uzqr:cancel", vcrPaymentId),
   },
 
   // Inventory
@@ -269,12 +281,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Local config (VPS connection settings)
   config: {
     getLocalConfig: () => ipcRenderer.invoke("config:getLocalConfig"),
+    getWebAdminQr: () => ipcRenderer.invoke("config:getWebAdminQr"),
     updateLocalConfig: (data: {
       storeId?: string;
       apiUrl?: string;
       storeName?: string;
       terminalId?: string;
     }) => ipcRenderer.invoke("config:updateLocalConfig", data),
+    // Fires when a sync cycle pulls a changed operating mode, so the UI re-gates without a restart
+    onModeChanged: (
+      callback: (mode: {
+        mode?: "OFFLINE_ONLY" | "ONLINE";
+        posAdminLocked?: boolean;
+      }) => void,
+    ) => {
+      const handler = (
+        _event: IpcRendererEvent,
+        payload: { mode?: "OFFLINE_ONLY" | "ONLINE"; posAdminLocked?: boolean },
+      ) => callback(payload);
+      ipcRenderer.on("config:modeChanged", handler);
+      return () => ipcRenderer.removeListener("config:modeChanged", handler);
+    },
   },
 
   // Smena (shift) management
@@ -315,7 +342,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       taxRate: string;
       syncInterval: string;
       token: string;
-      pin?: string;
+      mode?: string;
+      posAdminLocked?: boolean;
     }) => ipcRenderer.invoke("setup:complete", data),
     launchApp: () => ipcRenderer.invoke("setup:launchApp"),
   },
@@ -433,7 +461,10 @@ declare global {
           newPassword: string,
         ) => Promise<boolean>;
         isPinConfigured: () => Promise<boolean>;
+        verifyTerminalAccess: (secret: string) => Promise<boolean>;
         setupPin: (pin: string) => Promise<boolean>;
+        hasPin: () => Promise<boolean>;
+        removePin: () => Promise<boolean>;
       };
       products: {
         getAll: (filters?: unknown) => Promise<unknown[]>;
@@ -523,6 +554,16 @@ declare global {
         zInfo: () => Promise<import("../shared/types/fiscal.types").FiscalZReportStatus>;
         zOpen: () => Promise<import("../shared/types/fiscal.types").FiscalActionResult>;
         zClose: () => Promise<import("../shared/types/fiscal.types").FiscalActionResult>;
+      };
+      uzqr: {
+        isEnabled: () => Promise<boolean>;
+        start: (
+          amountSum: number,
+        ) => Promise<import("../shared/types/fiscal.types").UzQrStartResult>;
+        await: (
+          vcrPaymentId: string,
+        ) => Promise<import("../shared/types/fiscal.types").UzQrFinalResult>;
+        cancel: (vcrPaymentId: string) => Promise<{ ok: boolean; error?: string }>;
       };
       inventory: {
         createArrival: (data: unknown) => Promise<unknown>;
@@ -619,6 +660,13 @@ declare global {
           apiUrl: string;
           storeName: string;
           terminalId: string;
+          // Cached store operating mode. null = never activated, which means "unrestricted".
+          mode: "OFFLINE_ONLY" | "ONLINE" | null;
+          posAdminLocked: boolean;
+        } | null>;
+        getWebAdminQr: () => Promise<{
+          url: string;
+          qrDataUrl: string | null;
         } | null>;
         updateLocalConfig: (data: {
           storeId?: string;
@@ -626,6 +674,12 @@ declare global {
           storeName?: string;
           terminalId?: string;
         }) => Promise<{ requiresRestart?: boolean }>;
+        onModeChanged: (
+          callback: (mode: {
+            mode?: "OFFLINE_ONLY" | "ONLINE";
+            posAdminLocked?: boolean;
+          }) => void,
+        ) => () => void;
       };
       smena: {
         getCurrent: () => Promise<unknown | null>;
@@ -664,7 +718,8 @@ declare global {
           taxRate: string;
           syncInterval: string;
           token: string;
-          pin?: string;
+          mode?: string;
+          posAdminLocked?: boolean;
         }) => Promise<{ success: boolean }>;
         launchApp: () => Promise<void>;
       };

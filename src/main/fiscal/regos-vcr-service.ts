@@ -7,6 +7,7 @@ import { getPrismaClient } from '../database/sqlite-client';
 import { getAppConfig } from '../config/app-config';
 import { getVcrPassword, hasVcrPassword, setVcrPassword } from './secret-store';
 import { log } from '../logger';
+import { normalizePollOptions } from './uzqr-poll';
 import {
   RegosVcrClient,
   VcrError,
@@ -30,6 +31,7 @@ import type {
 } from '../../shared/types/fiscal.types';
 import { repairCyrillicLayout, isLayoutCorrupted } from '../../shared/utils/keyboard-layout';
 import { productRequiresMarking } from '../../shared/utils/marking';
+import { toPieces } from '../../shared/utils/pack';
 import { isCashTender } from '../../shared/constants';
 import { isCodeOutOfCirculation } from '../marking/circulation-check';
 
@@ -63,6 +65,10 @@ interface ResolvedConfig {
   posId: string;
   vcrPrintsReceipt: boolean;
   markingCodeCheck: boolean;
+  uzqrEnabled: boolean;
+  /** Spread from normalizePollOptions — always present and always sane. */
+  intervalMs: number;
+  timeoutMs: number;
 }
 
 const SETTING_KEYS = {
@@ -74,6 +80,9 @@ const SETTING_KEYS = {
   posId: 'regos_vcr_pos_id',
   printsReceipt: 'regos_vcr_prints_receipt',
   markingCheck: 'regos_vcr_marking_check',
+  uzqrEnabled: 'regos_vcr_uzqr_enabled',
+  uzqrPollMs: 'regos_vcr_uzqr_poll_ms',
+  uzqrTimeoutMs: 'regos_vcr_uzqr_timeout_ms',
 } as const;
 
 class RegosVcrService {
@@ -118,6 +127,13 @@ class RegosVcrService {
       vcrPrintsReceipt: map[SETTING_KEYS.printsReceipt] === 'true',
       // Default ON — only disabled when explicitly set to 'false'.
       markingCodeCheck: map[SETTING_KEYS.markingCheck] !== 'false',
+      // Default OFF, unlike markingCheck above. Stores already taking UzQR through a bank
+      // terminal must keep the current behaviour until someone deliberately opts in.
+      uzqrEnabled: map[SETTING_KEYS.uzqrEnabled] === 'true',
+      ...normalizePollOptions({
+        intervalMs: Number(map[SETTING_KEYS.uzqrPollMs]),
+        timeoutMs: Number(map[SETTING_KEYS.uzqrTimeoutMs]),
+      }),
     };
   }
 
@@ -141,6 +157,9 @@ class RegosVcrService {
       posId: cfg.posId,
       vcrPrintsReceipt: cfg.vcrPrintsReceipt,
       markingCodeCheck: cfg.markingCodeCheck,
+      uzqrEnabled: cfg.uzqrEnabled,
+      uzqrPollMs: cfg.intervalMs,
+      uzqrTimeoutMs: cfg.timeoutMs,
     };
   }
 
@@ -155,6 +174,9 @@ class RegosVcrService {
     if (input.posId !== undefined) writes.push([SETTING_KEYS.posId, input.posId]);
     if (input.vcrPrintsReceipt !== undefined) writes.push([SETTING_KEYS.printsReceipt, String(input.vcrPrintsReceipt)]);
     if (input.markingCodeCheck !== undefined) writes.push([SETTING_KEYS.markingCheck, String(input.markingCodeCheck)]);
+    if (input.uzqrEnabled !== undefined) writes.push([SETTING_KEYS.uzqrEnabled, String(input.uzqrEnabled)]);
+    if (input.uzqrPollMs !== undefined) writes.push([SETTING_KEYS.uzqrPollMs, String(input.uzqrPollMs)]);
+    if (input.uzqrTimeoutMs !== undefined) writes.push([SETTING_KEYS.uzqrTimeoutMs, String(input.uzqrTimeoutMs)]);
 
     for (const [key, value] of writes) {
       await prisma.systemSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
@@ -170,6 +192,32 @@ class RegosVcrService {
   private buildClient(cfg: ResolvedConfig): RegosVcrClient | null {
     if (!cfg.password) return null;
     return new RegosVcrClient(cfg.url, cfg.login, cfg.password);
+  }
+
+  /**
+   * Run one VCR call through the same single-threaded queue as fiscalization.
+   *
+   * Exposed for the UzQR flow, which lives outside this class but must not talk to the device
+   * concurrently with a sale or Z-report. Callers pass ONE call at a time — never a whole poll
+   * loop — so a buyer taking two minutes cannot block fiscalization for two minutes.
+   */
+  async runVcr<T>(fn: (client: RegosVcrClient) => Promise<T>): Promise<T> {
+    const cfg = await this.resolveConfig();
+    const client = this.buildClient(cfg);
+    if (!client) throw new Error('Пароль кассира не задан');
+    return this.runExclusive(() => fn(client));
+  }
+
+  /** Config the UzQR flow needs, without exposing the password to callers. */
+  async getUzQrConfig(): Promise<{ enabled: boolean; intervalMs: number; timeoutMs: number }> {
+    const cfg = await this.resolveConfig();
+    return {
+      // Both switches matter: UzQR rides the VCR connection, so it cannot run with fiscalization
+      // switched off entirely.
+      enabled: cfg.enabled && cfg.uzqrEnabled,
+      intervalMs: cfg.intervalMs,
+      timeoutMs: cfg.timeoutMs,
+    };
   }
 
   // ── Connection test ───────────────────────────────────────────────────────
@@ -361,7 +409,15 @@ class RegosVcrService {
         barcode: String(item.barcode),
         icps: product?.mxik ?? '',
         amount,
-        quantity: Math.round(Number(item.quantity) * 1000),
+        // REGOS is told the PHYSICAL piece count, not the number of boxes. Its implied unit
+        // price is amount/quantity, and package_code registers the product in its SMALLEST
+        // packaging unit (pickSingleUnitPackage in shared/utils/mxik-packages), i.e. one piece.
+        // Sending 1 for a box would make the implied unit price the box price and disagree with
+        // the registered package. amount stays the true line total, so 2 boxes of 5 @ 45 000
+        // report quantity 10 000 (10 pcs) / amount 9 000 000 → 9 000 per piece.
+        quantity: Math.round(
+          toPieces(Number(item.quantity), Number(item.piecesPerUnit ?? 1)) * 1000,
+        ),
         vat_value: vat,
         discount,
         unit_name: product?.unit ?? undefined,
@@ -427,13 +483,26 @@ class RegosVcrService {
     return changed;
   }
 
-  private buildPayments(sale: { paymentMethod: string; finalAmount: unknown }): VcrPayment[] {
+  private buildPayments(sale: {
+    paymentMethod: string;
+    finalAmount: unknown;
+    regosPaymentId?: string | null;
+  }): VcrPayment[] {
     const value = Math.round(Number(sale.finalAmount) * 100);
     // paymentMethod may be 'cash'/'card'/'uzqr' (POS quick-pay) or upper-case elsewhere.
     if (isCashTender(sale.paymentMethod)) return [{ type: 1, value }];
-    // UzQR books exactly like a bank card — REGOS treats it as a cashless card payment
-    // (type 2 / card_type 2). It carries no `payment_id` because the POS does not drive
-    // the VCR Payment.Create flow; see tasks/UZQR_INTEGRATION_TODO.md if that changes.
+
+    // A Payment.Create-backed tender (UzQR) is booked by REFERENCE: VCR already holds the
+    // amount against that payment id, so the receipt links to it instead of restating a sum.
+    // `value` is deliberately omitted — the Receipt.Sale example for a Payment.Create-backed
+    // payment sends payment_id alone, and sending both risks a mismatch rejection.
+    //
+    // Only ONE such payment is allowed per receipt, and it may not be reused across receipts,
+    // which is why the UzQR flow fiscalizes immediately rather than deferring.
+    if (sale.regosPaymentId) return [{ type: 2, payment_id: sale.regosPaymentId }];
+
+    // Plain cashless: a bank terminal the POS does not drive (card, or UzQR with the
+    // integration switched off). REGOS treats it as a card payment.
     return [{ type: 2, value, card_type: 2 }];
   }
 

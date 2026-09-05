@@ -1,11 +1,13 @@
 import { BrowserWindow } from 'electron';
 import { syncSales, SalesSyncResult } from './sales-sync';
+import { syncSmenas } from './smena-sync';
 import { syncProducts, syncCategories, syncSuppliers, syncUsers, syncSettings } from './products-sync';
 import { getCurrentUser } from '../ipc/auth-handlers';
 import { uploadLocalData } from './upload-sync';
 import { getAppConfig } from '../config/app-config';
 import { getPrismaClient } from '../database/sqlite-client';
 import { getServerToken, clearServerToken } from './queue-manager';
+import { shouldSync, shouldUploadMasterData } from './sync-policy';
 import { flushLogs } from '../logger';
 
 function decodeTokenStoreId(token: string): string | null | undefined {
@@ -16,6 +18,19 @@ function decodeTokenStoreId(token: string): string | null | undefined {
     return payload.storeId ?? null;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * True when the JWT says it has expired. An unreadable token is left alone — the store guard
+ * below decides that case, and guessing here would throw away a token that may be fine.
+ */
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()) as { exp?: number };
+    return !!payload.exp && payload.exp * 1000 <= Date.now();
+  } catch {
+    return false;
   }
 }
 
@@ -57,15 +72,35 @@ export class SyncService {
     this.lastError = null;
 
     try {
-      const token = getServerToken();
-      if (!token) {
-        // Not logged in yet — skip silently until user authenticates
+      const prisma = getPrismaClient();
+      const localConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
+
+      // An OFFLINE_ONLY store's SQLite is the source of truth and it has no server to sync with.
+      // Checked here rather than in start() so a mode learned after launch takes effect at once.
+      if (!shouldSync(localConfig)) {
         return;
       }
 
       // Guard: verify the server token is scoped to this terminal's store
-      const prisma = getPrismaClient();
-      const localConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
+      const token = getServerToken();
+      if (!token) {
+        // Nobody has signed in with a password on this terminal since the last token expired.
+        // A PIN login cannot mint one, so a cashier-only terminal reaches this state on its own
+        // and would otherwise go quiet for a whole shift — say so instead of returning silently.
+        await this.reportMissingServerToken(prisma);
+        return;
+      }
+
+      // A POS terminal runs for days, so the token can die mid-session — the login handlers only
+      // check it as someone signs in. Left in place it turns every upload below into a 401.
+      if (isTokenExpired(token)) {
+        console.warn('[sync] Stored VPS token has expired — dropping it and pausing uploads');
+        clearServerToken();
+        await prisma.systemSetting.deleteMany({ where: { key: 'server_token' } });
+        await this.reportMissingServerToken(prisma);
+        return;
+      }
+
       if (localConfig?.storeId) {
         const tokenStoreId = decodeTokenStoreId(token);
         console.log(`[sync] guard — token.storeId=${tokenStoreId ?? 'null'} localConfig.storeId=${localConfig.storeId}`);
@@ -87,9 +122,16 @@ export class SyncService {
 
       console.log(`[sync] Cycle start — user: ${currentUser?.phone ?? 'none'}, role: ${currentUser?.role ?? 'none'}`);
 
-      // Upload locally-created categories, suppliers, products, and arrivals to VPS
-      // Only ADMIN users have permission to upload product/supplier/category data
-      if (currentUser?.role === 'ADMIN') {
+      // Upload locally-created categories, suppliers, products, and arrivals to VPS.
+      // Only ADMIN users have permission to upload product/supplier/category data.
+      //
+      // When the store is locked to cashier-only operation the server owns all master data, so
+      // this whole block is skipped — that is the entire "narrowed sync" scope, because users,
+      // categories, suppliers, products, arrivals and settings all upload from inside
+      // uploadLocalData(). Sales, shifts, heartbeat and logs below are outside it and keep
+      // running. `posAdminLocked` is false unless a super admin opted this store in, so an
+      // un-opted-in or never-activated terminal behaves exactly as it always has.
+      if (shouldUploadMasterData(currentUser?.role, localConfig)) {
         try {
           await uploadLocalData();
         } catch (uploadError) {
@@ -105,6 +147,18 @@ export class SyncService {
         }
       } catch (salesError) {
         console.error('Sales sync failed (non-fatal):', salesError instanceof Error ? salesError.message : salesError);
+      }
+
+      // Sync closed shifts — all roles, deliberately NOT inside uploadLocalData(), which only
+      // runs for ADMIN. Shifts are closed by cashiers, so gating this on ADMIN would mean the
+      // drawer counts never reach the server on a normal terminal.
+      //
+      // After sales on purpose: the server buckets a shift's takings from the sales it already
+      // holds, so uploading the shift first would briefly show it against an incomplete day.
+      try {
+        await syncSmenas();
+      } catch (smenaError) {
+        console.error('Smena sync failed (non-fatal):', smenaError instanceof Error ? smenaError.message : smenaError);
       }
 
       // Sync categories (download from VPS — must come before products)
@@ -148,6 +202,36 @@ export class SyncService {
     }
   }
 
+  /**
+   * Raise an error only when the missing token is actually costing us something.
+   *
+   * Before anyone logs in there is nothing to upload and nothing to say. Once sales or closed
+   * shifts have queued up, silence is the wrong answer: the terminal looks fine, the cashier
+   * keeps selling, and the money only reaches the server whenever an admin next signs in.
+   */
+  private async reportMissingServerToken(
+    prisma: ReturnType<typeof getPrismaClient>,
+  ): Promise<void> {
+    const [pendingSales, pendingShifts] = await Promise.all([
+      prisma.sale.count({ where: { synced: false } }),
+      prisma.smena.count({ where: { synced: false, status: 'CLOSED' } }),
+    ]);
+
+    if (pendingSales === 0 && pendingShifts === 0) return;
+
+    // An i18n key: the renderer translates it and falls back to the raw text for other errors.
+    this.lastError = 'sync.errors.serverLoginRequired';
+    console.warn(
+      `[sync] No VPS token — ${pendingSales} sale(s) and ${pendingShifts} shift(s) are waiting. ` +
+      'Someone has to sign in with a phone and password to send them.',
+    );
+    this.notifyRenderer('sync:failed', {
+      message: this.lastError,
+      pendingSales,
+      pendingShifts,
+    });
+  }
+
   // Fetches server-controlled config keys (e.g. AI token limit) from VPS.
   // The VPS should expose GET /store-config returning { ai_token_limit_daily: number }.
   // Silently skips if the endpoint is unavailable.
@@ -173,6 +257,22 @@ export class SyncService {
           update: { value: String(data.ai_token_limit_daily) },
           create: { key: 'ai_token_limit_daily', value: String(data.ai_token_limit_daily) },
         });
+      }
+
+      // Refresh the cached operating mode. This is what makes the super admin's toggle reach a
+      // live terminal within one sync cycle — no rebuild, and flipping it back is the rollback.
+      // Only write fields the server actually sent, so an older server can't silently unlock a
+      // terminal by omitting them.
+      const modeUpdate: { mode?: string; posAdminLocked?: boolean } = {};
+      if (data.mode === 'OFFLINE_ONLY' || data.mode === 'ONLINE') {
+        modeUpdate.mode = data.mode;
+      }
+      if (typeof data.pos_admin_locked === 'boolean') {
+        modeUpdate.posAdminLocked = data.pos_admin_locked;
+      }
+      if (Object.keys(modeUpdate).length > 0) {
+        await prisma.localConfig.update({ where: { id: 'config' }, data: modeUpdate });
+        this.notifyRenderer('config:modeChanged', modeUpdate);
       }
     } catch {
       // Offline or endpoint not yet implemented — use cached limit

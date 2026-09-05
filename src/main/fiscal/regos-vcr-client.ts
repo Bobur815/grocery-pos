@@ -23,11 +23,48 @@ export interface VcrPosition {
 
 export interface VcrPayment {
   type: 1 | 2; // 1 = cash, 2 = card/terminal
-  value: number; // tiyin
+  /**
+   * Tiyin. Optional ONLY because a Payment.Create-backed payment (UzQR) is booked by reference:
+   * VCR already holds the amount against `payment_id`, and restating it risks a mismatch. Every
+   * other payment shape must set it — see buildPayments(), the only producer.
+   */
+  value?: number;
   payment_id?: string;
-  card_type?: 1 | 2 | 3;
+  card_type?: 1 | 2 | 3; // 1 = ?, 2 = bank card, 3 = social
   rrn?: string;
 }
+
+/**
+ * A VCR payment (Payment.Create / Get / Cancel).
+ *
+ * `status` is only partially documented: 2 = awaiting the buyer, 3 = paid. The rest of the enum
+ * is unconfirmed, which is why nothing here treats "not 3" as failure — see UZQR_PAID.
+ */
+export interface VcrPaymentResult {
+  id: string;
+  status: number;
+  amount: number;
+  datetime?: string;
+  payment_system_id?: number;
+  payment_id?: string;
+  receipt_id?: string;
+  phone?: string;
+  /** UzQR payment identifier, present once paid. */
+  rrn?: string;
+  slip?: string;
+  card_type_id?: number;
+  /** Masked, e.g. "8600****1234". */
+  card_number?: string;
+  invoice_id?: string;
+  /** The string to render as a QR code for the buyer to scan. */
+  qr_text?: string;
+}
+
+/** The only status REGOS documents as "paid". Everything else keeps polling. */
+export const UZQR_PAID = 3;
+
+/** UzQR in REGOS's payment-system table. */
+export const UZQR_PAYMENT_SYSTEM_ID = 5;
 
 export interface VcrReceiptResult {
   Id: string;
@@ -185,6 +222,29 @@ export class RegosVcrClient {
   getReceiptInfo(params: { Id?: string; QRCodeURL?: string; ReceiptNo?: string; Code?: string }) {
     return this.call<(VcrReceiptResult & { Code: string }) | null>('Receipt.GetInfo', params);
   }
+
+  // ── Payments (UzQR) ─────────────────────────────────────────────────────────
+
+  /**
+   * Create a payment invoice. For UzQR (`payment_system_id: 5`) VCR returns `qr_text` — the
+   * string to render as a QR for the buyer — plus an `invoice_id`; no `token` is sent.
+   *
+   * The payment confirms ASYNCHRONOUSLY in the buyer's bank app, so this returning does NOT
+   * mean money moved. Poll `getPayment` until the status is terminal.
+   */
+  createPayment(params: { payment_system_id: number; amount: number; description?: string }) {
+    return this.call<VcrPaymentResult>('Payment.Create', params);
+  }
+
+  /** Re-reads a payment AND syncs its status with the payment system. Safe to poll. */
+  getPayment(paymentId: string) {
+    return this.call<VcrPaymentResult>('Payment.Get', { payment_id: paymentId });
+  }
+
+  /** Only possible BEFORE the buyer pays; afterwards VCR answers 704036. */
+  cancelPayment(paymentId: string) {
+    return this.call<null>('Payment.Cancel', { payment_id: paymentId });
+  }
 }
 
 /**
@@ -222,4 +282,39 @@ export const VCR_ERROR_HINTS: Record<number, string> = {
   705000: 'Неверный логин или пароль кассира',
   705002: 'Принтер не настроен в REGOS:VCR',
   705511: 'Ошибка проверки МХИК (ИКПУ) товара',
+
+  // Shift codes from the UPDATED interface. Note 704100/704101 duplicate the meaning of the
+  // older 704011/704010 above — REGOS ships both, so both are mapped rather than picking one.
+  704100: 'Смена уже открыта',
+  704101: 'Нет открытой смены — откройте смену',
+
+  // Payment.* (UzQR and other payment systems)
+  704034: 'Платёжная система не поддерживается',
+  704035: 'Не указан ID платежа',
+  704036: 'Отмена невозможна — платёж уже проведён или чек закрыт',
+  704037: 'Не указан ID чека продажи',
+  704038: 'Платёжная система не активна — включите её в REGOS:VCR',
+  704039: 'Дополнительные типы чеков не активны',
+  704040: 'Ошибка выполнения платежа',
+
+  // Bank terminal / Arccom
+  705520: 'Ошибка терминала оплаты',
+  705521: 'Терминал оплаты не отвечает',
+  705522: 'Операция отклонена терминалом',
+  705523: 'Терминал занят другой операцией',
+  705524: 'Неверная сумма для терминала оплаты',
+  705525: 'Терминал не настроен',
+  705526: 'Ошибка связи с банком',
+
+  // EPS token apps (out of scope today, mapped so their errors are readable if they surface)
+  705700: 'Ошибка Payme GO',
+  705701: 'Payme GO недоступен',
+  705720: 'Ошибка Click PASS',
+  705721: 'Click PASS недоступен',
+  705730: 'Ошибка Uzum Pay',
+  705731: 'Uzum Pay недоступен',
+  705740: 'Ошибка Anor GO',
+  705741: 'Anor GO недоступен',
+  705750: 'Ошибка NIC API',
+  705751: 'NIC API недоступен',
 };

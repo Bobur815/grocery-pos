@@ -11,6 +11,9 @@ export interface ReceiptItem {
   subtotal: number;
   barcode?: string;
   mxik?: string;
+  // Pieces in one `quantity` unit. >1 means the line was sold as a box, which the printed
+  // name says explicitly — otherwise "1 x 45 000" gives the customer no idea what they bought.
+  piecesPerUnit?: number;
 }
 
 export interface ReceiptData {
@@ -262,7 +265,9 @@ export function buildReceiptHTML(
     const itemVat = taxRate > 0 ? item.subtotal * taxRate / 100 : 0;
     itemsHTML += `
       <div class="item-row">
-        <div class="item-name">${idx + 1}. ${escapeHtml(item.productName)}</div>
+        <div class="item-name">${idx + 1}. ${escapeHtml(item.productName)}${
+          (item.piecesPerUnit ?? 1) > 1 ? ` (x${item.piecesPerUnit})` : ""
+        }</div>
         <div class="item-detail">
           <span>${item.quantity} × ${fmt(item.unitPrice, cur)}</span>
           <span>${fmt(item.subtotal, cur)}</span>

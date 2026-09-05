@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Sale, SaleItem } from '@prisma/client';
+import { rankProducts, type ProductPerformanceRow } from './analytics.ranking';
 
 type SaleWithItems = Sale & { items: SaleItem[] };
 
@@ -142,6 +143,7 @@ export class AnalyticsService {
       cashierPerformanceRaw,
       profitMarginsRaw,
       summaryRaw,
+      productPerformanceRaw,
     ] = await Promise.all([
       this.prisma.$queryRaw<{ date: string; revenue: number; count: number }[]>`
         SELECT
@@ -160,7 +162,7 @@ export class AnalyticsService {
           COALESCE(c.name_ru, 'Без категории') AS "categoryRu",
           COALESCE(c.name_uz, 'Kategoriyasiz') AS "categoryUz",
           SUM(si.subtotal)::float AS revenue,
-          SUM(si.quantity)::float AS quantity
+          SUM(si.quantity * si.pieces_per_unit)::float AS quantity
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON si.product_id = p.id
@@ -186,7 +188,7 @@ export class AnalyticsService {
       this.prisma.$queryRaw<{ name: string; quantity: number; revenue: number }[]>`
         SELECT
           si.product_name AS name,
-          SUM(si.quantity)::float AS quantity,
+          SUM(si.quantity * si.pieces_per_unit)::float AS quantity,
           SUM(si.subtotal)::float AS revenue
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
@@ -214,7 +216,7 @@ export class AnalyticsService {
           COALESCE(c.name_ru, 'Без категории') AS "categoryRu",
           COALESCE(c.name_uz, 'Kategoriyasiz') AS "categoryUz",
           SUM(si.subtotal)::float AS revenue,
-          SUM(si.quantity * COALESCE(p.cost, 0))::float AS cost
+          SUM(si.quantity * si.pieces_per_unit * COALESCE(p.cost, 0))::float AS cost
         FROM sale_items si
         JOIN sales s ON si.sale_id = s.id
         JOIN products p ON si.product_id = p.id
@@ -243,13 +245,51 @@ export class AnalyticsService {
           AND created_at >= ${startDate}
           AND created_at <= ${endDate}
       `,
+      // Drives the top/bottom-10 rankings. Starts from `products`, not `sale_items`, so a
+      // product that sold NOTHING in the period still appears — with zeros — and can rank as a
+      // worst seller. Aggregating from sale_items would make dead stock invisible, which is
+      // precisely the thing a worst-sellers list exists to surface.
+      //
+      // The period filter lives inside the subquery, not in the outer WHERE: applied outside it
+      // would silently turn the LEFT JOIN back into an inner join and drop every zero row.
+      //
+      // Cost is today's Product.cost, because SaleItem carries no cost snapshot. A product
+      // re-priced mid-period is therefore valued at its latest cost — acceptable for a ranking,
+      // but it is why reconciliation values variance from the ledger instead.
+      this.prisma.$queryRaw<ProductPerformanceRow[]>`
+        SELECT
+          p.id AS "productId",
+          p.name_ru AS "nameRu",
+          p.name_uz AS "nameUz",
+          COALESCE(agg.quantity, 0)::float AS quantity,
+          COALESCE(agg.revenue, 0)::float AS revenue,
+          (COALESCE(agg.quantity, 0) * COALESCE(p.cost, 0))::float AS cost,
+          (p.cost IS NOT NULL) AS "hasCost"
+        FROM products p
+        LEFT JOIN (
+          SELECT
+            si.product_id,
+            SUM(si.quantity * si.pieces_per_unit) AS quantity,
+            SUM(si.subtotal) AS revenue
+          FROM sale_items si
+          JOIN sales s ON si.sale_id = s.id
+          WHERE s.store_id = ${storeId}
+            AND s.created_at >= ${startDate}
+            AND s.created_at <= ${endDate}
+          GROUP BY si.product_id
+        ) agg ON agg.product_id = p.id
+        WHERE p.store_id = ${storeId}
+          AND p.active = true
+      `,
     ]);
 
     return {
       salesTrend: salesTrendRaw,
       salesByCategory: salesByCategoryRaw,
       hourlyDistribution: hourlyDistributionRaw,
+      // Kept as-is: the Electron renderer's own Analytics page still reads this shape.
       topProducts: topProductsRaw,
+      productRanking: rankProducts(productPerformanceRaw),
       cashierPerformance: cashierPerformanceRaw,
       profitMargins: profitMarginsRaw,
       summary: summaryRaw[0] ?? {

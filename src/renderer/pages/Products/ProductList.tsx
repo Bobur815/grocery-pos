@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { useProducts } from "../../hooks/useProducts";
 import { useAuthStore } from "../../store/auth-store";
+import { useModeStore } from "../../store/mode-store";
 import { Table } from "../../components/common/Table";
 import { Pagination } from "../../components/common/Pagination";
 import { usePagination } from "../../hooks/usePagination";
@@ -89,6 +90,10 @@ export function ProductList() {
     product?: Product;
   }>({ open: false });
   const isAdmin = user?.role === "ADMIN";
+  // Product master data is server-owned once the store is cashier-only, so the terminal browses
+  // it read-only. The list itself, search and details all stay available.
+  const posAdminLocked = useModeStore((s) => s.posAdminLocked);
+  const canManageProducts = isAdmin && !posAdminLocked;
 
   useEffect(() => {
     loadProducts();
@@ -253,25 +258,29 @@ export function ProductList() {
       header: t("common.actions"),
       render: (product: Product) => (
         <div style={{ display: "flex", gap: "8px" }}>
-          <Button
-            variant="secondary"
-            size="small"
-            tooltip={t("common.edit")}
-            onClick={() =>
-              setFormModal({ open: true, productId: String(product.id) })
-            }
-          >
-            <Edit size={16} />
-          </Button>
+          {canManageProducts && (
+            <Button
+              variant="secondary"
+              size="small"
+              tooltip={t("common.edit")}
+              onClick={() =>
+                setFormModal({ open: true, productId: String(product.id) })
+              }
+            >
+              <Edit size={16} />
+            </Button>
+          )}
 
-          <Button
-            variant="danger"
-            size="small"
-            tooltip={t("common.delete")}
-            onClick={() => setDeleteModal({ open: true, product })}
-          >
-            <Trash size={16} />
-          </Button>
+          {canManageProducts && (
+            <Button
+              variant="danger"
+              size="small"
+              tooltip={t("common.delete")}
+              onClick={() => setDeleteModal({ open: true, product })}
+            >
+              <Trash size={16} />
+            </Button>
+          )}
 
           <Button
             variant="primary"
@@ -290,7 +299,7 @@ export function ProductList() {
     <Container>
       <Header>
         <Title>{t("products.title")}</Title>
-        {isAdmin && (
+        {canManageProducts && (
           <Button
             style={{ fontSize: "26px" }}
             onClick={() => setFormModal({ open: true })}

@@ -1,5 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
+import {
+  MovementSource,
+  StockMovementService,
+} from '../stock-movement/stock-movement.service';
 import { CreateSupplierDto } from './dto/create-supplier.dto';
 import { UpdateSupplierDto } from './dto/update-supplier.dto';
 import { CreateTransactionDto } from './dto/create-transaction.dto';
@@ -9,7 +13,10 @@ import { Prisma, SupplierTransactionType, SupplierPaymentMethod, SupplierPayment
 
 @Injectable()
 export class SuppliersService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private stockMovements: StockMovementService,
+  ) {}
 
   async findByPhoneAnyStore(phone: string) {
     return this.prisma.supplier.findFirst({
@@ -200,10 +207,31 @@ export class SuppliersService {
         dto.quantity != null
       ) {
         const productId = parseInt(dto.referenceId, 10);
+        const product = await tx.product.findUnique({
+          where: { id: productId },
+          select: { cost: true, price: true },
+        });
         await tx.product.update({
           where: { id: productId },
           data: { stock: { decrement: dto.quantity } },
         });
+
+        // Inside the caller's transaction, so the ledger row and the stock write it describes
+        // commit or roll back together.
+        await this.stockMovements.emit(tx, [
+          {
+            storeId,
+            productId,
+            type: 'SUPPLIER_RETURN',
+            quantity: -dto.quantity, // signed: goods going back to the supplier leave stock
+            unitCost: product?.cost ?? null,
+            unitPrice: product?.price ?? null,
+            sourceType: MovementSource.SUPPLIER_TX,
+            sourceId: created.id,
+            note: dto.description ?? null,
+            occurredAt: new Date(),
+          },
+        ]);
       }
 
       return created;

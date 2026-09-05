@@ -21,6 +21,9 @@ import { LogsModule } from './modules/logs/logs.module';
 import { SiteConfigModule } from './modules/site-config/site-config.module';
 import { AslBelgisiModule } from './modules/aslbelgisi/aslbelgisi.module';
 import { MarkingCodesModule } from './modules/marking-codes/marking-codes.module';
+import { StockMovementModule } from './modules/stock-movement/stock-movement.module';
+import { ReconciliationModule } from './modules/reconciliation/reconciliation.module';
+import { SmenaModule } from './modules/smena/smena.module';
 
 @Module({
   imports: [
@@ -29,6 +32,9 @@ import { MarkingCodesModule } from './modules/marking-codes/marking-codes.module
     }),
     ScheduleModule.forRoot(),
     PrismaModule,
+    StockMovementModule,
+    ReconciliationModule,
+    SmenaModule,
     AuthModule,
     UsersModule,
     ProductsModule,

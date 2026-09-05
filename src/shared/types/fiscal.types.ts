@@ -21,6 +21,15 @@ export interface RegosVcrConfig {
   // When true (default), scanning a group-022 marking code checks SoldMarkingCode
   // (local + server) to block reselling an already-sold unique DataMatrix QR.
   markingCodeCheck: boolean;
+  // ── UzQR (REGOS Payment.* over the same VCR connection) ──────────────────────
+  // When false (default) the `uzqr` tender stays a plain label: the sale books as a cashless
+  // card and the cashier takes payment out-of-band. When true, choosing UzQR drives
+  // Payment.Create → on-screen QR → poll → Receipt.Sale with the resulting payment_id.
+  uzqrEnabled: boolean;
+  /** How often to ask VCR whether the buyer has paid. */
+  uzqrPollMs: number;
+  /** How long to wait for the buyer before giving up and offering a retry. */
+  uzqrTimeoutMs: number;
 }
 
 /** Payload to update config; `password` only set when the user types a new one. */
@@ -34,7 +43,35 @@ export interface RegosVcrConfigInput {
   posId?: string;
   vcrPrintsReceipt?: boolean;
   markingCodeCheck?: boolean;
+  uzqrEnabled?: boolean;
+  uzqrPollMs?: number;
+  uzqrTimeoutMs?: number;
 }
+
+// ── UzQR ──────────────────────────────────────────────────────────────────────
+
+/** Result of creating the QR invoice. The buyer has NOT paid yet at this point. */
+export type UzQrStartResult =
+  | {
+      ok: true;
+      /** VCR's local payment uuid — later becomes the sale's regosPaymentId. */
+      vcrPaymentId: string;
+      /** Raw string encoded in the QR; kept for support/debugging. */
+      qrText: string;
+      /** PNG data-URL rendered in main, ready for an <img src>. */
+      qrDataUrl: string;
+      /** Shown under the QR so a cashier can quote it to support. */
+      invoiceId: string | null;
+      status: number;
+    }
+  | { ok: false; error: string };
+
+/** How the wait ended. Only PAID may produce a sale. */
+export type UzQrState = 'PAID' | 'TIMEOUT' | 'CANCELLED';
+
+export type UzQrFinalResult =
+  | { ok: true; state: 'PAID'; vcrPaymentId: string; rrn: string | null }
+  | { ok: false; state: Exclude<UzQrState, 'PAID'>; error?: string };
 
 export interface FiscalConnectionResult {
   ok: boolean;

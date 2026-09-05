@@ -3,16 +3,32 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import styled, { keyframes } from "styled-components";
 import { Delete, Eraser, ShieldCheck } from "lucide-react";
+import { Button } from "../../components/common/Button";
+import { useToast } from "../../context/ToastContext";
 
 const Container = styled.div`
   display: flex;
   min-height: 100vh;
   background-color: ${({ theme }) => theme.colors.background};
-  align-items: center;
+  /* safe: on a screen too short for the card, centring would put its top out of reach above the
+     scroll origin. Falls back to start-aligned, so the page simply scrolls. */
+  align-items: safe center;
   justify-content: center;
 `;
 
+/**
+ * Same sizing tokens as the login pad in PinLoginPage — deliberately identical, since it is the
+ * same pad and the two pages are seen back to back. See that file for the reasoning; the short
+ * version is that keys take the height left over after the fixed chrome (440px covers this
+ * card's 402px plus breathing room), which is exactly today's 64px on a 768px-tall monoblock.
+ */
 const Card = styled.div`
+  --pin-key: clamp(48px, calc((100vh - 440px) / 5.125), 88px);
+  --pin-gap: calc(var(--pin-key) * 0.375);
+  --pin-dot: clamp(16px, 2.6vmin, 26px);
+  --pin-rhythm: clamp(16px, 3.125vmin, 32px);
+  --pin-icon: clamp(32px, 6.25vmin, 48px);
+
   width: 100%;
   max-width: 360px;
   text-align: center;
@@ -24,6 +40,11 @@ const IconWrap = styled.div`
   justify-content: center;
   margin-bottom: ${({ theme }) => theme.spacing.md};
   color: ${({ theme }) => theme.colors.primary};
+
+  svg {
+    width: var(--pin-icon);
+    height: var(--pin-icon);
+  }
 `;
 
 const Title = styled.h1`
@@ -36,14 +57,7 @@ const Title = styled.h1`
 const Subtitle = styled.p`
   color: ${({ theme }) => theme.colors.textSecondary};
   font-size: 15px;
-  margin: 0 0 ${({ theme }) => theme.spacing.xl};
-`;
-
-const PinDisplay = styled.div`
-  display: flex;
-  justify-content: center;
-  gap: ${({ theme }) => theme.spacing.md};
-  margin-bottom: ${({ theme }) => theme.spacing.xl};
+  margin: 0 0 var(--pin-rhythm);
 `;
 
 const shake = keyframes`
@@ -53,8 +67,8 @@ const shake = keyframes`
 `;
 
 const PinDot = styled.div<{ $filled: boolean; $error?: boolean }>`
-  width: 20px;
-  height: 20px;
+  width: var(--pin-dot);
+  height: var(--pin-dot);
   border-radius: 50%;
   border: 2px solid ${({ theme, $error }) => $error ? theme.colors.error : theme.colors.primary};
   background-color: ${({ theme, $filled, $error }) =>
@@ -66,32 +80,40 @@ const DotsRow = styled.div<{ $shake?: boolean }>`
   display: flex;
   justify-content: center;
   gap: ${({ theme }) => theme.spacing.md};
-  margin-bottom: ${({ theme }) => theme.spacing.xl};
+  margin-bottom: var(--pin-rhythm);
   animation: ${({ $shake }) => $shake ? shake : "none"} 0.4s ease;
 `;
 
+/* Tracks one key wide, so the block of keys is what gets centred — with 1fr tracks the fixed
+   keys sat at the left of each, leaving the pad visibly off-centre inside the card. */
 const PinPad = styled.div`
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: ${({ theme }) => theme.spacing.md};
-  max-width: 300px;
+  grid-template-columns: repeat(3, var(--pin-key));
+  justify-content: center;
+  gap: var(--pin-gap);
   margin: 0 auto;
 `;
 
 const PinButton = styled.button<{ $variant?: "clear" | "back" }>`
-  width: 64px;
-  height: 64px;
+  width: var(--pin-key);
+  height: var(--pin-key);
   border-radius: 50%;
   border: 2px solid ${({ theme }) => theme.colors.border};
   background-color: ${({ theme }) => theme.colors.surface};
   color: ${({ theme }) => theme.colors.text};
-  font-size: 22px;
+  /* Reproduces today's 22px digits and 28px icons at the 64px floor. */
+  font-size: calc(var(--pin-key) * 0.34);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
+
+  svg {
+    width: calc(var(--pin-key) * 0.44);
+    height: calc(var(--pin-key) * 0.44);
+  }
 
   &:hover {
     background-color: ${({ theme }) => theme.colors.primary}15;
@@ -116,11 +138,23 @@ const PinButton = styled.button<{ $variant?: "clear" | "back" }>`
   `}
 `;
 
-const ErrorMsg = styled.div`
-  color: ${({ theme }) => theme.colors.error};
+const SkipLink = styled.button`
+  margin-top: ${({ theme }) => theme.spacing.lg};
+  background: none;
+  border: none;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  cursor: pointer;
   font-size: 14px;
-  min-height: 20px;
-  margin-bottom: ${({ theme }) => theme.spacing.md};
+  text-decoration: underline;
+
+  &:hover {
+    color: ${({ theme }) => theme.colors.primary};
+  }
+`;
+
+const ConfirmRow = styled.div`
+  width: calc(var(--pin-key) * 3 + var(--pin-gap) * 2);
+  margin: ${({ theme }) => theme.spacing.md} auto 0;
 `;
 
 const StepIndicator = styled.div`
@@ -143,11 +177,12 @@ type Step = "enter" | "confirm";
 export function SetupPinPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const toast = useToast();
 
   const [step, setStep] = useState<Step>("enter");
   const [pin, setPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
-  const [error, setError] = useState("");
+  const [hasError, setHasError] = useState(false);
   const [shakeConfirm, setShakeConfirm] = useState(false);
 
   const current = step === "enter" ? pin : confirmPin;
@@ -158,43 +193,59 @@ export function SetupPinPage() {
     setTimeout(() => setShakeConfirm(false), 450);
   };
 
+  // Save, or move on to the confirm step. A 4-digit PIN triggers this on its own; a shorter one
+  // (1–3 digits is allowed) waits for the continue button, since it has no natural end.
+  const submitCurrent = useCallback((value: string) => {
+    if (value.length < 1 || value.length > 4) return;
+
+    if (step === "enter") {
+      setStep("confirm");
+      return;
+    }
+
+    if (value !== pin) {
+      triggerShake();
+      toast.error(t("auth.errors.pin_mismatch"));
+      // Let the shake finish before the dots empty, so the two read as one reaction.
+      setTimeout(() => {
+        setConfirmPin("");
+        setHasError(true);
+      }, 420);
+      return;
+    }
+
+    window.electronAPI.auth.setupPin(value).then(() => {
+      navigate("/", { replace: true });
+    }).catch((err: unknown) => {
+      const raw = err instanceof Error ? err.message : "";
+      const match = raw.match(/(auth\.errors\.\S+)/);
+      toast.error(t(match ? match[1] : "auth.errors.login_failed"));
+      // A rejected PIN (already taken, bad format) means starting over, not fixing a typo.
+      setConfirmPin("");
+      setStep("enter");
+      setPin("");
+    });
+  }, [pin, step, navigate, toast, t]);
+
   const handleNumber = useCallback((num: string) => {
     if (current.length >= 4) return;
-    setError("");
+    setHasError(false);
     const next = current + num;
     setCurrent(next);
 
     if (next.length === 4) {
-      if (step === "enter") {
-        setTimeout(() => setStep("confirm"), 200);
-      } else {
-        // Confirm step complete — validate
-        if (next !== pin) {
-          triggerShake();
-          setTimeout(() => {
-            setConfirmPin("");
-            setError(t("auth.errors.pin_mismatch"));
-          }, 420);
-        } else {
-          // Save PIN
-          window.electronAPI.auth.setupPin(next).then(() => {
-            navigate("/", { replace: true });
-          }).catch(() => {
-            setError(t("auth.errors.login_failed"));
-            setConfirmPin("");
-          });
-        }
-      }
+      // Let the fourth dot render before the step flips or the page navigates away.
+      setTimeout(() => submitCurrent(next), 200);
     }
-  }, [current, pin, step, setCurrent, navigate, t]);
+  }, [current, setCurrent, submitCurrent]);
 
   const handleBackspace = useCallback(() => {
-    setError("");
+    setHasError(false);
     setCurrent((prev) => prev.slice(0, -1));
   }, [setCurrent]);
 
   const handleClear = useCallback(() => {
-    setError("");
+    setHasError(false);
     if (step === "confirm") {
       setStep("enter");
       setPin("");
@@ -215,13 +266,16 @@ export function SetupPinPage() {
       } else if (e.key === "Escape") {
         e.preventDefault();
         handleClear();
+      } else if (e.key === "Enter" && current.length > 0) {
+        e.preventDefault();
+        submitCurrent(current);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleNumber, handleBackspace, handleClear]);
+  }, [handleNumber, handleBackspace, handleClear, submitCurrent, current]);
 
-  const isError = !!error && step === "confirm";
+  const isError = hasError && step === "confirm";
 
   return (
     <Container>
@@ -246,8 +300,6 @@ export function SetupPinPage() {
           ))}
         </DotsRow>
 
-        <ErrorMsg>{error}</ErrorMsg>
-
         <PinPad>
           {["1", "2", "3", "4", "5", "6", "7", "8", "9"].map((num) => (
             <PinButton key={num} onClick={() => handleNumber(num)}>
@@ -262,6 +314,20 @@ export function SetupPinPage() {
             <Delete size={28} />
           </PinButton>
         </PinPad>
+
+        {/* Only 1–3 digit PINs need it — a 4th digit continues on its own. */}
+        {current.length > 0 && current.length < 4 && (
+          <ConfirmRow>
+            <Button onClick={() => submitCurrent(current)} fullWidth>
+              {t("common.continue")}
+            </Button>
+          </ConfirmRow>
+        )}
+
+        {/* A PIN is a convenience, not a requirement — phone + password always works. */}
+        <SkipLink type="button" onClick={() => navigate("/", { replace: true })}>
+          {t("setup.pin.skip")}
+        </SkipLink>
       </Card>
     </Container>
   );

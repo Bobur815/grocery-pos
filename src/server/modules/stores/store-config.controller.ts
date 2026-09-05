@@ -20,12 +20,16 @@ export class StoreConfigController {
     const store = storeId
       ? await this.prisma.store.findUnique({
           where: { id: storeId },
-          select: { aiPlan: true },
+          select: { aiPlan: true, mode: true, posAdminLocked: true },
         })
       : null;
 
     return {
       ai_token_limit_daily: store?.aiPlan === 'paid' ? AI_TOKEN_LIMIT_PAID : AI_TOKEN_LIMIT_FREE,
+      // Terminal operating mode. A terminal that can't resolve its store must keep behaving as it
+      // does today, so an unknown store yields ONLINE + unlocked rather than a restricted terminal.
+      mode: store?.mode ?? 'ONLINE',
+      pos_admin_locked: store?.posAdminLocked ?? false,
     };
   }
 }

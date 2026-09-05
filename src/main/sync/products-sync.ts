@@ -1,6 +1,7 @@
 import { getPrismaClient } from "../database/sqlite-client";
 import { getAppConfig } from "../config/app-config";
 import { getServerToken } from "./queue-manager";
+import { LOCAL_ONLY_SETTINGS } from "./local-only-settings";
 
 export async function syncProducts(): Promise<
   { id: number; nameRu: string; stock: number }[]
@@ -94,6 +95,9 @@ export async function syncProducts(): Promise<
         isMarked: p.isMarked ?? null,
         productType: p.productType ?? "REGULAR",
         internalCode: p.internalCode ?? null,
+        piecesPerBox: p.piecesPerBox ?? null,
+        boxPrice: p.boxPrice ?? null,
+        boxBarcode: p.boxBarcode ?? null,
         storeProductCode: p.storeProductCode ?? null,
         createdAt: new Date(p.createdAt),
         updatedAt: new Date(p.updatedAt),
@@ -130,6 +134,24 @@ export async function syncProducts(): Promise<
         }
       }
 
+      // Same for boxBarcode: it is UNIQUE locally, so a box code reassigned to another
+      // product on the VPS would otherwise collide with its previous local owner.
+      if (product.boxBarcode) {
+        const conflicting = await prisma.product.findFirst({
+          where: {
+            boxBarcode: String(product.boxBarcode),
+            NOT: { barcode: product.barcode },
+          },
+          select: { id: true },
+        });
+        if (conflicting) {
+          await prisma.product.update({
+            where: { id: conflicting.id },
+            data: { boxBarcode: null },
+          });
+        }
+      }
+
       // Check if a product with the same barcode already exists locally
       const existing = await prisma.product.findUnique({
         where: { barcode: product.barcode },
@@ -161,6 +183,9 @@ export async function syncProducts(): Promise<
               isMarked: product.isMarked ?? null,
               productType: product.productType ?? "REGULAR",
               internalCode: product.internalCode ?? null,
+              piecesPerBox: product.piecesPerBox ?? null,
+              boxPrice: product.boxPrice ?? null,
+              boxBarcode: product.boxBarcode ?? null,
               storeProductCode: product.storeProductCode ?? null,
               updatedAt: new Date(product.updatedAt),
             },
@@ -492,19 +517,6 @@ export async function syncCategories(): Promise<void> {
     throw error;
   }
 }
-
-// Keys that live only on the terminal and must never be overwritten by VPS sync
-const LOCAL_ONLY_SETTINGS = new Set([
-  "server_token",
-  "last_product_sync",
-  "last_sale_sync",
-  "last_upload_sync",
-  "ai_token_limit_daily",
-  // Machine-scoped fiscal secret: encrypted with THIS terminal's safeStorage/DPAPI key. Pulling a
-  // server copy over it writes a blob this machine can't decrypt, so the cashier password silently
-  // falls back to '' on the next sync cycle.
-  "regos_vcr_password_enc",
-]);
 
 export async function syncSettings(): Promise<void> {
   const prisma = getPrismaClient();
