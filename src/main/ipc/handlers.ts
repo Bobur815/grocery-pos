@@ -11,7 +11,7 @@ import { setupMarkingCheckHandlers } from "./marking-check-handlers";
 import { setupFiscalHandlers } from "./fiscal-handlers";
 import { setupUzQrHandlers } from "./uzqr-handlers";
 import { getAppConfig, updateConfig } from "../config/app-config";
-import { getAuthToken, getServerToken } from "../sync/queue-manager";
+import { getAuthToken, getServerToken, clearServerToken } from "../sync/queue-manager";
 import { getPrismaClient, readStoreBootstrap, writeStoreBootstrap } from "../database/sqlite-client";
 import {
   setPrinterConfig,
@@ -877,6 +877,9 @@ function setupAppHandlers(): void {
     "config:updateLocalConfig",
     async (_event, data: { storeId?: string; apiUrl?: string; storeName?: string; terminalId?: string }) => {
       const prisma = getPrismaClient();
+      const previousApiUrl = (
+        await prisma.localConfig.findUnique({ where: { id: "config" }, select: { apiUrl: true } })
+      )?.apiUrl;
       const result = await prisma.localConfig.update({
         where: { id: "config" },
         data,
@@ -884,6 +887,14 @@ function setupAppHandlers(): void {
       if (data.terminalId) updateConfig({ terminalId: data.terminalId });
       if (data.storeId) updateConfig({ storeId: data.storeId });
       if (data.apiUrl) updateConfig({ vpsApiUrl: data.apiUrl });
+
+      // A token minted by the old server is meaningless to the new one, and the terminal keeps
+      // its credential across logouts now — so this is the moment to drop it. The next login
+      // gets one from whichever server the terminal now points at.
+      if (data.apiUrl && data.apiUrl !== previousApiUrl) {
+        clearServerToken();
+        await prisma.systemSetting.deleteMany({ where: { key: 'server_token' } });
+      }
 
       // When storeId changes, write the bootstrap file so the next launch
       // opens the correct per-store SQLite database.

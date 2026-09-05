@@ -398,13 +398,21 @@ export function setupAuthHandlers(): void {
     };
   });
 
+  /**
+   * Ends the person's session — and deliberately keeps the VPS token.
+   *
+   * That token is the terminal's credential for uploading its own sales and shifts, not part of
+   * anyone's session, and only a phone+password login can mint one. Deleting it here meant that
+   * handing the till to the next cashier (switch user = logout, then a PIN login, which can only
+   * restore a stored token) left the terminal unable to sync until an admin typed a password
+   * again — it kept selling and uploaded nothing.
+   *
+   * It is still dropped where it is genuinely invalid: expired or issued for another store
+   * (restorePersistedServerToken, and the sync loop), or when the terminal is repointed at a
+   * different server (config:updateLocalConfig).
+   */
   ipcMain.handle('auth:logout', async () => {
-    const prisma = getPrismaClient();
-
-    // Clear tokens and user
     await clearAuthToken();
-    clearServerToken();
-    await prisma.systemSetting.deleteMany({ where: { key: 'server_token' } });
     currentUser = null;
   });
 
