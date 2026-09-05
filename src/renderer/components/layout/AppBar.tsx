@@ -2,7 +2,7 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
-import { Menu, X, LogIn, LogOut, User } from 'lucide-react';
+import { Menu, X, KeyRound, LogOut, User } from 'lucide-react';
 import { useSidebar } from '../../context/SidebarContext';
 import { useAuthStore } from '../../store/auth-store';
 import { useSync } from '../../hooks/useSync';
@@ -144,33 +144,13 @@ const AppSyncBtn = styled(SyncButton)`
   }
 `;
 
-const LoginBtn = styled.button`
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border: 1px dashed ${({ theme }) => theme.colors.border};
-  border-radius: ${({ theme }) => theme.borderRadius};
-  background: none;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 13px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.15s;
-
-  &:hover {
-    border-color: ${({ theme }) => theme.colors.primary};
-    color: ${({ theme }) => theme.colors.primary};
-  }
-`;
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function AppBar() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { isCollapsed, toggleSidebar, openSmenaModal } = useSidebar();
-  const { user, isPinLogin, logout } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const { status, refreshStatus } = useSync();
   const { mode } = useTheme();
   const toast = useToast();
@@ -213,13 +193,18 @@ export function AppBar() {
     }
   };
 
-  const handleLogin = async () => {
-    await logout();
-    navigate('/login');
-  };
-
   const handleLogout = async () => {
     await logout();
+  };
+
+  /**
+   * Hand the terminal to the next person: end this session and open the login screen already on
+   * the PIN pad, so they are four taps from working. The login page defaults to the phone form
+   * whenever credentials were remembered, hence saying which mode we want rather than trusting it.
+   */
+  const handleSwitchUser = async () => {
+    await logout();
+    navigate('/login', { state: { mode: 'pin' }, replace: true });
   };
 
   const userName = user
@@ -258,28 +243,23 @@ export function AppBar() {
 
       <Divider />
 
-      {/* User section */}
-      {isPinLogin ? (
-        <LoginBtn onClick={handleLogin}>
-          <LogIn size={14} />
-          {t('auth.login')}
-        </LoginBtn>
-      ) : (
-        <>
-          {user && (
-            <UserChip>
-              <User size={15} style={{ color: 'inherit', opacity: 0.6 }} />
-              <UserName>{userName}</UserName>
-              <RoleBadge>
-                {user.role === 'ADMIN' ? t('users.admin') : t('users.cashier')}
-              </RoleBadge>
-            </UserChip>
-          )}
-          <IconBtn onClick={handleLogout} title={t('auth.logout')}>
-            <LogOut size={17} />
-          </IconBtn>
-        </>
+      {/* User section. A PIN login is shown exactly like a password login: the PIN belongs to one
+          person, so the session names them just as reliably. */}
+      {user && (
+        <UserChip>
+          <User size={15} style={{ color: 'inherit', opacity: 0.6 }} />
+          <UserName>{userName}</UserName>
+          <RoleBadge>
+            {user.role === 'ADMIN' ? t('users.admin') : t('users.cashier')}
+          </RoleBadge>
+        </UserChip>
       )}
+      <IconBtn onClick={handleSwitchUser} title={t('auth.switchUser')}>
+        <KeyRound size={17} />
+      </IconBtn>
+      <IconBtn onClick={handleLogout} title={t('auth.logout')}>
+        <LogOut size={17} />
+      </IconBtn>
     </Bar>
   );
 }

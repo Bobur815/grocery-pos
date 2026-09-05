@@ -61,6 +61,16 @@ export class SyncSmenaDto {
   @IsNotEmpty()
   cashierName!: string;
 
+  @ApiPropertyOptional({
+    example: '998901234567',
+    description:
+      'Cashier phone, used to resolve the VPS user id — the terminal may know this cashier ' +
+      'under a different id. Optional: terminals older than this field simply do not send it.',
+  })
+  @IsOptional()
+  @IsString()
+  cashierPhone?: string;
+
   @ApiProperty({ example: '200000', description: 'Cash counted into the drawer at open' })
   @IsString()
   @IsNotEmpty()

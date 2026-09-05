@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import styled from 'styled-components';
@@ -71,6 +71,17 @@ const Form = styled.form`
   gap: ${({ theme }) => theme.spacing.md};
 `;
 
+const PinHint = styled.p`
+  margin: 0 0 ${({ theme }) => theme.spacing.md};
+  font-size: 14px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const PinActions = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.md};
+`;
+
 export function UserSettings() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -83,6 +94,56 @@ export function UserSettings() {
     newPassword: '',
     confirmPassword: '',
   });
+
+  // Quick-login PIN — personal to this account and to this terminal.
+  const [hasPin, setHasPin] = useState(false);
+  const [pinData, setPinData] = useState({ newPin: '', confirmPin: '' });
+
+  useEffect(() => {
+    auth.hasPin()?.then((value) => setHasPin(!!value)).catch(() => {});
+  }, []);
+
+  const onlyDigits = (value: string) => value.replace(/\D/g, '').slice(0, 4);
+
+  const handlePinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (pinData.newPin !== pinData.confirmPin) {
+      toast.error(t('settings.pinMismatch'));
+      return;
+    }
+    if (!/^\d{1,4}$/.test(pinData.newPin)) {
+      toast.error(t('auth.errors.invalid_pin_format'));
+      return;
+    }
+
+    try {
+      await auth.setupPin(pinData.newPin);
+      setPinData({ newPin: '', confirmPin: '' });
+      setHasPin(true);
+      toast.success(t('settings.pinChanged'));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '';
+      if (message.includes('pin_taken')) {
+        toast.error(t('auth.errors.pin_taken'));
+      } else if (message.includes('invalid_pin_format')) {
+        toast.error(t('auth.errors.invalid_pin_format'));
+      } else {
+        toast.error(t('settings.pinChangeFailed'));
+      }
+    }
+  };
+
+  const handlePinRemove = async () => {
+    try {
+      await auth.removePin();
+      setPinData({ newPin: '', confirmPin: '' });
+      setHasPin(false);
+      toast.success(t('settings.pinRemoved'));
+    } catch {
+      toast.error(t('settings.pinChangeFailed'));
+    }
+  };
 
   const handleLanguageChange = (lang: string) => {
     setLanguage(lang);
@@ -183,6 +244,48 @@ export function UserSettings() {
           />
 
           <Button type="submit">{t('settings.updatePassword')}</Button>
+        </Form>
+      </Section>
+
+      <Section>
+        <SectionTitle>{t('settings.pinCode')}</SectionTitle>
+        <PinHint>
+          {hasPin ? t('settings.pinSet') : t('settings.pinNotSet')} — {t('settings.pinHint')}
+        </PinHint>
+
+        <Form onSubmit={handlePinSubmit}>
+          <Input
+            type="password"
+            inputMode="numeric"
+            label={hasPin ? t('settings.newPin') : t('settings.pinCode')}
+            value={pinData.newPin}
+            onChange={(e) =>
+              setPinData((prev) => ({ ...prev, newPin: onlyDigits(e.target.value) }))
+            }
+            required
+          />
+
+          <Input
+            type="password"
+            inputMode="numeric"
+            label={t('settings.confirmPin')}
+            value={pinData.confirmPin}
+            onChange={(e) =>
+              setPinData((prev) => ({ ...prev, confirmPin: onlyDigits(e.target.value) }))
+            }
+            required
+          />
+
+          <PinActions>
+            <Button type="submit">
+              {hasPin ? t('settings.updatePin') : t('settings.setPin')}
+            </Button>
+            {hasPin && (
+              <Button type="button" variant="secondary" onClick={handlePinRemove}>
+                {t('settings.removePin')}
+              </Button>
+            )}
+          </PinActions>
         </Form>
       </Section>
     </Container>

@@ -2344,7 +2344,7 @@ Both `ru.json` and `uz.json` contain the following 18 namespaces:
 | Namespace | Description |
 |-----------|-------------|
 | `common` | save, cancel, delete, edit, search, loading, error, success, close, clear, remove, currency, confirmDelete, etc. |
-| `auth` | login, logout, phone, password, enterPin, usePhoneLogin, switchUser, keyboardHint |
+| `auth` | login, logout, phone, password, enterPin, usePhoneLogin, switchUser |
 | `nav` | pos, products, reports, dailySummary, monthlyReport, analytics, inventory, users, settings, collapse/expand |
 | `pos` | scanBarcode, cart, checkout, payment, receipt, salesHistory, multi-tab, editingSale, printReceipt, etc. |
 | `products` | name, price, stock, category, barcode, productionDate, expiryDate, discountPercent, isOnPromotion, pendingPrice, etc. |

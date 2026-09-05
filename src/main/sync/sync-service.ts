@@ -21,6 +21,19 @@ function decodeTokenStoreId(token: string): string | null | undefined {
   }
 }
 
+/**
+ * True when the JWT says it has expired. An unreadable token is left alone — the store guard
+ * below decides that case, and guessing here would throw away a token that may be fine.
+ */
+function isTokenExpired(token: string): boolean {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString()) as { exp?: number };
+    return !!payload.exp && payload.exp * 1000 <= Date.now();
+  } catch {
+    return false;
+  }
+}
+
 export class SyncService {
   private syncInterval: NodeJS.Timeout | null = null;
   private isSyncing = false;
@@ -59,19 +72,32 @@ export class SyncService {
     this.lastError = null;
 
     try {
-      const token = getServerToken();
-      if (!token) {
-        // Not logged in yet — skip silently until user authenticates
-        return;
-      }
-
-      // Guard: verify the server token is scoped to this terminal's store
       const prisma = getPrismaClient();
       const localConfig = await prisma.localConfig.findUnique({ where: { id: 'config' } });
 
       // An OFFLINE_ONLY store's SQLite is the source of truth and it has no server to sync with.
       // Checked here rather than in start() so a mode learned after launch takes effect at once.
       if (!shouldSync(localConfig)) {
+        return;
+      }
+
+      // Guard: verify the server token is scoped to this terminal's store
+      const token = getServerToken();
+      if (!token) {
+        // Nobody has signed in with a password on this terminal since the last token expired.
+        // A PIN login cannot mint one, so a cashier-only terminal reaches this state on its own
+        // and would otherwise go quiet for a whole shift — say so instead of returning silently.
+        await this.reportMissingServerToken(prisma);
+        return;
+      }
+
+      // A POS terminal runs for days, so the token can die mid-session — the login handlers only
+      // check it as someone signs in. Left in place it turns every upload below into a 401.
+      if (isTokenExpired(token)) {
+        console.warn('[sync] Stored VPS token has expired — dropping it and pausing uploads');
+        clearServerToken();
+        await prisma.systemSetting.deleteMany({ where: { key: 'server_token' } });
+        await this.reportMissingServerToken(prisma);
         return;
       }
 
@@ -174,6 +200,36 @@ export class SyncService {
     } finally {
       this.isSyncing = false;
     }
+  }
+
+  /**
+   * Raise an error only when the missing token is actually costing us something.
+   *
+   * Before anyone logs in there is nothing to upload and nothing to say. Once sales or closed
+   * shifts have queued up, silence is the wrong answer: the terminal looks fine, the cashier
+   * keeps selling, and the money only reaches the server whenever an admin next signs in.
+   */
+  private async reportMissingServerToken(
+    prisma: ReturnType<typeof getPrismaClient>,
+  ): Promise<void> {
+    const [pendingSales, pendingShifts] = await Promise.all([
+      prisma.sale.count({ where: { synced: false } }),
+      prisma.smena.count({ where: { synced: false, status: 'CLOSED' } }),
+    ]);
+
+    if (pendingSales === 0 && pendingShifts === 0) return;
+
+    // An i18n key: the renderer translates it and falls back to the raw text for other errors.
+    this.lastError = 'sync.errors.serverLoginRequired';
+    console.warn(
+      `[sync] No VPS token — ${pendingSales} sale(s) and ${pendingShifts} shift(s) are waiting. ` +
+      'Someone has to sign in with a phone and password to send them.',
+    );
+    this.notifyRenderer('sync:failed', {
+      message: this.lastError,
+      pendingSales,
+      pendingShifts,
+    });
   }
 
   // Fetches server-controlled config keys (e.g. AI token limit) from VPS.

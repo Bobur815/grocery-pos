@@ -252,7 +252,18 @@ const ErrorMessage = styled.div`
   margin-bottom: ${({ theme }) => theme.spacing.sm};
 `;
 
+/**
+ * The column is a size container, so everything inside it adapts to the width it actually gets
+ * — a quarter of the window — instead of to the viewport. A narrow monoblock and a wide desktop
+ * differ here by a hundred pixels or so of column, which viewport breakpoints cannot see, and
+ * that is exactly the range where the three tender buttons stop fitting.
+ *
+ * Deliberately NOT a mobile layout: the POS only ever runs full-screen on a terminal, so these
+ * queries just trim the row down, they never restack the screen.
+ */
 const InputColumn = styled.div`
+  container-type: inline-size;
+  container-name: pos-input;
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.xs};
@@ -268,8 +279,62 @@ const InputRow = styled.div`
 
 const QuickPayRow = styled.div`
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
+  /* minmax(0, …) rather than 1fr: a plain 1fr floors at the content width, so the widest tender
+     (UzQR — wordmark, label and hint) pushed the row past the column instead of shrinking. */
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: ${({ theme }) => theme.spacing.xs};
+`;
+
+/**
+ * The keyboard hint shrinks, then goes — the shortcut keeps working either way, and F9/F11/F12
+ * are printed on the keyboard. Shared with the Pay button above, which is glad of the room too.
+ */
+const ShortcutHint = styled.span`
+  font-size: 14px;
+  opacity: 0.7;
+  font-weight: 500;
+  white-space: nowrap;
+
+  @container pos-input (max-width: 440px) {
+    font-size: 11px;
+  }
+
+  @container pos-input (max-width: 375px) {
+    display: none;
+  }
+`;
+
+/** Tender icon: dropped before the word it decorates, since the word carries the meaning. */
+const QuickPayIcon = styled.span`
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+
+  @container pos-input (max-width: 315px) {
+    display: none;
+  }
+`;
+
+/** Tender name. Last to go — below this the buttons are icon-only and lean on their colour. */
+const QuickPayLabel = styled.span`
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  @container pos-input (max-width: 215px) {
+    display: none;
+  }
+`;
+
+/** UzQR's wordmark says "UzQR" already, so the word goes as soon as space is tight. */
+const UzQrTextLabel = styled(QuickPayLabel)`
+  @container pos-input (max-width: 315px) {
+    display: none;
+  }
+`;
+
+/** The wordmark is this button's icon and its label at once — it never shrinks and never hides. */
+const QuickPayUzQrLogo = styled(UzQrLogo)`
+  flex-shrink: 0;
 `;
 
 /** Cash is the till (green), card the house colour, UzQR its own brand navy. */
@@ -281,6 +346,10 @@ function quickPayColor(theme: DefaultTheme, variant: SaleTender) {
 
 const QuickPayButton = styled.button<{ $variant: SaleTender }>`
   height: 44px;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
   border-radius: ${({ theme }) => theme.borderRadius};
   border: 1px solid ${({ theme, $variant }) => quickPayColor(theme, $variant)};
   background-color: ${({ theme, $variant }) => quickPayColor(theme, $variant)};
@@ -292,7 +361,7 @@ const QuickPayButton = styled.button<{ $variant: SaleTender }>`
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: ${({ theme }) => theme.spacing.sm};
+  gap: 6px;
 
   &:hover {
     opacity: 0.9;
@@ -307,12 +376,17 @@ const QuickPayButton = styled.button<{ $variant: SaleTender }>`
     cursor: not-allowed;
     transform: none;
   }
-`;
 
-const ShortcutHint = styled.span`
-  font-size: 14px;
-  opacity: 0.7;
-  font-weight: 500;
+  /* Measured in Electron's Chromium against the Russian labels, which are the longest: below
+     these widths the row spilled out of the column, so each step buys back what it costs. */
+  @container pos-input (max-width: 440px) {
+    padding: 0 4px;
+    gap: 4px;
+  }
+
+  @container pos-input (max-width: 315px) {
+    font-size: 12px;
+  }
 `;
 
 const SmenaBlock = styled.div`
@@ -1520,22 +1594,32 @@ export function POSScreen() {
               <ShortcutHint>(F10)</ShortcutHint>
             </Button>
             <QuickPayRow>
+              {/* Each button keeps its title, because a narrow column strips it down to its
+                  icon or wordmark and the colour alone should not have to carry the meaning. */}
               <QuickPayButton
                 $variant="cash"
                 onClick={() => handleQuickPay("cash")}
                 disabled={items.length === 0 || isPayingLoading}
+                aria-label={t("pos.cash")}
+                title={t("pos.cash")}
               >
-                <Banknote size={18} />
-                {t("pos.cash")}
+                <QuickPayIcon>
+                  <Banknote size={18} />
+                </QuickPayIcon>
+                <QuickPayLabel>{t("pos.cash")}</QuickPayLabel>
                 <ShortcutHint>(F11)</ShortcutHint>
               </QuickPayButton>
               <QuickPayButton
                 $variant="card"
                 onClick={() => handleQuickPay("card")}
                 disabled={items.length === 0 || isPayingLoading}
+                aria-label={t("pos.card")}
+                title={t("pos.card")}
               >
-                <CreditCard size={18} />
-                {t("pos.card")}
+                <QuickPayIcon>
+                  <CreditCard size={18} />
+                </QuickPayIcon>
+                <QuickPayLabel>{t("pos.card")}</QuickPayLabel>
                 <ShortcutHint>(F12)</ShortcutHint>
               </QuickPayButton>
               <QuickPayButton
@@ -1545,10 +1629,10 @@ export function POSScreen() {
                 aria-label={t("pos.uzqr")}
                 title={t("pos.uzqr")}
               >
-                {/* The wordmark replaces icon + text: the button is already navy, and
-                    three tenders in this row leave no width for a label. */}
-                <UzQrLogo $height={20} />
-                {t("pos.uzqr")}
+                {/* The button is already navy, so the wordmark reads as the tender by itself;
+                    once the column tightens it stands in for the label too. */}
+                <QuickPayUzQrLogo $height={20} />
+                <UzQrTextLabel>{t("pos.uzqr")}</UzQrTextLabel>
                 <ShortcutHint>(F9)</ShortcutHint>
               </QuickPayButton>
             </QuickPayRow>

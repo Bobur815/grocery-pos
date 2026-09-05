@@ -12,6 +12,9 @@ export const auth = {
   getProfile: () => ipc?.auth.getProfile(),
   changePassword: (currentPassword: string, newPassword: string) =>
     ipc?.auth.changePassword(currentPassword, newPassword),
+  hasPin: () => ipc?.auth.hasPin(),
+  setupPin: (pin: string) => ipc?.auth.setupPin(pin),
+  removePin: () => ipc?.auth.removePin(),
 };
 
 export const products = {

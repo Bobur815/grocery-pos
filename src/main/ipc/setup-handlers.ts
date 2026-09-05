@@ -1,5 +1,4 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import * as bcrypt from 'bcryptjs';
 import { getAppConfig, updateConfig } from '../config/app-config';
 import { getPrismaClient, writeStoreBootstrap, closeDatabase, initializeDatabase } from '../database/sqlite-client';
 import { setServerToken } from '../sync/queue-manager';
@@ -15,7 +14,6 @@ interface SetupCompleteData {
   taxRate: string;
   syncInterval: string;
   token: string;
-  pin?: string;
   mode?: string;
   posAdminLocked?: boolean;
 }
@@ -140,16 +138,7 @@ export function setupSetupHandlers(getSetupWindow: () => BrowserWindow | null, o
       create: { key: 'server_token', value: data.token },
     });
 
-    // 8. Hash and save PIN if provided
-    if (data.pin && data.pin.length === 4) {
-      const hashed = await bcrypt.hash(data.pin, 10);
-      await prisma.localConfig.update({
-        where: { id: 'config' },
-        data: { storePin: hashed },
-      });
-    }
-
-    // 9. Update AppConfig to reflect new storeId/terminalId
+    // 8. Update AppConfig to reflect new storeId/terminalId
     updateConfig({ storeId: data.storeId, terminalId: data.terminalId });
 
     return { success: true };

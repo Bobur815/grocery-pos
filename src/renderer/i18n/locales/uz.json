@@ -31,7 +31,8 @@
     "load": "Yuklash",
     "exitApp": "Dasturdan chiqish",
     "exitAppConfirm": "Dasturni yopmoqchimisiz?",
-    "exit": "Chiqish"
+    "exit": "Chiqish",
+    "continue": "Davom etish"
   },
   "auth": {
     "rememberMe": "Meni eslab qol",
@@ -44,22 +45,22 @@
     "password": "Parol",
     "enterPin": "PIN-kodni kiriting",
     "setupPin": "PIN-kodni sozlash",
-    "setupPinSubtitle": "Tez kirish uchun 4 raqamli PIN-kod o'rnating",
+    "setupPinSubtitle": "Tez kirish uchun PIN-kod o'rnating (4 raqamgacha)",
     "confirmPinSubtitle": "Tasdiqlash uchun PIN-kodni qayta kiriting",
     "usePhoneLogin": "Telefon va parol bilan kirish",
-    "switchUser": "Foydalanuvchini almashtirish",
-    "keyboardHint": "Klaviaturadan raqamlarni kiriting",
+    "switchUser": "Foydalanuvchini almashtirish (PIN-kod bilan kirish)",
     "errors": {
       "user_not_found": "Foydalanuvchi topilmadi",
       "user_deactivated": "Foydalanuvchi hisobi o'chirilgan",
       "invalid_password": "Noto'g'ri parol",
       "invalid_pin": "Noto'g'ri PIN-kod",
-      "pin_not_configured": "Do'kon PIN-kodi sozlanmagan",
+      "pin_not_configured": "PIN-kod sozlanmagan",
       "pin_mismatch": "PIN-kodlar mos kelmadi. Qayta urining",
-      "invalid_pin_format": "PIN-kod 4 raqamdan iborат bo'lishi kerak",
+      "invalid_pin_format": "PIN-kod 1 dan 4 gacha raqamdan iborat bo'lishi kerak",
       "no_cashier_found": "Faol kassir hisobi topilmadi",
       "login_failed": "Kirish xatosi",
-      "server_not_configured": "Noto'g'ri Store ID. Server sozlamalarini tekshiring."
+      "server_not_configured": "Noto'g'ri Store ID. Server sozlamalarini tekshiring.",
+      "pin_taken": "Bu PIN-kod boshqa xodimda mavjud"
     },
     "serverSettings": "Server sozlamalari",
     "storeId": "Store ID",
@@ -710,7 +711,11 @@
     "deactivateConfirm": "Bu foydalanuvchini o'chirasizmi? Bu foydalanuvchi sistemaga kira olmaydi, ammo uning ma'lumotlari saqlanadi.",
     "activateConfirm": "Bu foydalanuvchini faollashtirmoqchimisiz? Bu foydalanuvchi sistemaga kira oladi.",
     "passwordRequired": "Parol talab qilinadi",
-    "leaveBlankToKeep": "Joriy parolni saqlash uchun bo'sh qoldiring"
+    "leaveBlankToKeep": "Joriy parolni saqlash uchun bo'sh qoldiring",
+    "pin": "Tez kirish uchun PIN-kod",
+    "pinHint": "Ixtiyoriy — 1 dan 4 gacha raqam",
+    "pinSet": "PIN-kod o'rnatilgan",
+    "removePin": "PIN-kodni o'chirish"
   },
   "settings": {
     "title": "Sozlamalar",
@@ -787,7 +792,20 @@
     "terminalAccessHint": "Do'kon PIN kodini kiriting. PIN belgilanmagan bo'lsa, administrator parolini kiriting.",
     "terminalAccessDenied": "PIN yoki parol noto'g'ri",
     "webAdminOnPhone": "Panelni telefonda ochish",
-    "webAdminHint": "Boshqaruv panelini brauzerda ochish uchun kodni telefoningiz bilan skanerlang."
+    "webAdminHint": "Boshqaruv panelini brauzerda ochish uchun kodni telefoningiz bilan skanerlang.",
+    "pinCode": "PIN-kod",
+    "pinHint": "faqat shu terminalda, 1 dan 4 gacha raqam",
+    "pinSet": "PIN-kod o'rnatilgan",
+    "pinNotSet": "PIN-kod o'rnatilmagan",
+    "newPin": "Yangi PIN-kod",
+    "confirmPin": "PIN-kodni tasdiqlang",
+    "setPin": "PIN-kodni o'rnatish",
+    "updatePin": "PIN-kodni yangilash",
+    "removePin": "PIN-kodni o'chirish",
+    "pinMismatch": "PIN-kodlar mos kelmaydi",
+    "pinChanged": "PIN-kod muvaffaqiyatli o'zgartirildi",
+    "pinRemoved": "PIN-kod o'chirildi",
+    "pinChangeFailed": "PIN-kodni o'zgartirib bo'lmadi"
   },
   "updater": {
     "currentVersion": "Joriy versiya",
@@ -879,7 +897,10 @@
     "syncFailed": "Sinxronizatsiya xatosi",
     "syncing": "Sinxronlanmoqda...",
     "lastSync": "Oxirgi sinxronizatsiya",
-    "notSynced": "Sinxronlanmagan"
+    "notSynced": "Sinxronlanmagan",
+    "errors": {
+      "serverLoginRequired": "Sinxronizatsiya to‘xtadi: serverga kirilmagan. Savdolar va smenalar terminalda saqlanmoqda — ularni yuborish uchun telefon va parol bilan kiring."
+    }
   },
   "categories": {
     "title": "Kategoriyalar",

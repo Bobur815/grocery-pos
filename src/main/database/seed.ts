@@ -18,7 +18,6 @@ export async function seedLocalDatabase(): Promise<void> {
         storeName: process.env.STORE_NAME || '',
         terminalId: process.env.TERMINAL_ID || 'T1',
         apiUrl: process.env.VPS_API_URL || 'https://pos.bobur-dev.uz/api',
-        storePin: null,
       },
     });
   }

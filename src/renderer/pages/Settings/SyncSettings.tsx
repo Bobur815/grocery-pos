@@ -222,7 +222,11 @@ export function SyncSettings() {
           </RowValue>
         </Row>
 
-        {status.lastError && <ErrorText>{status.lastError}</ErrorText>}
+        {status.lastError && (
+          <ErrorText>
+            {t(status.lastError, { defaultValue: status.lastError })}
+          </ErrorText>
+        )}
 
         <Actions>
           <Button

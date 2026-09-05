@@ -56,6 +56,25 @@ const ErrorMessage = styled.div`
   font-size: 14px;
 `;
 
+const PinHint = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  margin-top: ${({ theme }) => theme.spacing.xs};
+  font-size: 13px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const PinClearButton = styled.button`
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 13px;
+  color: ${({ theme }) => theme.colors.error};
+  text-decoration: underline;
+  cursor: pointer;
+`;
+
 export function UserForm() {
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -68,13 +87,18 @@ export function UserForm() {
     nameRu: string;
     nameUz: string;
     role: UserRole;
+    pin: string;
   }>({
     phone: '',
     password: '',
     nameRu: '',
     nameUz: '',
     role: USER_ROLES.USER,
+    pin: '',
   });
+  // Whether this user already has a quick-login PIN. The hash itself never reaches the renderer,
+  // so an empty PIN field on an existing user means "leave it as it is", not "clear it".
+  const [hasPin, setHasPin] = useState(false);
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -93,6 +117,7 @@ export function UserForm() {
         nameRu: string;
         nameUz: string;
         role: UserRole;
+        hasPin?: boolean;
       }>).find((u) => u.id === id);
 
       if (user) {
@@ -103,7 +128,9 @@ export function UserForm() {
           nameRu: user.nameRu,
           nameUz: user.nameUz,
           role: user.role || USER_ROLES.USER,
+          pin: '',
         });
+        setHasPin(!!user.hasPin);
       }
     } catch (error) {
       console.error('Failed to load user:', error);
@@ -117,7 +144,7 @@ export function UserForm() {
 
     try {
       if (isEdit && id) {
-        const updateData: Record<string, string> = {
+        const updateData: Record<string, string | null> = {
           nameRu: formData.nameRu,
           nameUz: formData.nameUz,
           role: formData.role,
@@ -125,6 +152,9 @@ export function UserForm() {
 
         if (formData.password) {
           updateData.password = formData.password;
+        }
+        if (formData.pin) {
+          updateData.pin = formData.pin;
         }
 
         await window.electronAPI.users.update(id, updateData);
@@ -137,6 +167,7 @@ export function UserForm() {
 
         await window.electronAPI.users.create({
           ...formData,
+          pin: formData.pin || undefined,
           phone: '998' + formData.phone,
         });
       }
@@ -151,6 +182,19 @@ export function UserForm() {
 
   const handleChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleRemovePin = async () => {
+    if (!id) return;
+    setError('');
+    try {
+      // Explicit null — an empty field means "keep", so clearing has to be asked for.
+      await window.electronAPI.users.update(id, { pin: null });
+      setFormData((prev) => ({ ...prev, pin: '' }));
+      setHasPin(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('common.error'));
+    }
   };
 
   // Auto-transliterate between Uzbek Latin and Cyrillic
@@ -225,6 +269,25 @@ export function UserForm() {
             <option value="USER">{t('users.cashier')}</option>
             <option value="ADMIN">{t('users.admin')}</option>
           </Select>
+        </FormGroup>
+
+        <FormGroup>
+          <Input
+            label={t('users.pin')}
+            type="password"
+            inputMode="numeric"
+            value={formData.pin}
+            onChange={(e) => handleChange('pin', e.target.value.replace(/\D/g, '').slice(0, 4))}
+            placeholder={hasPin ? t('users.leaveBlankToKeep') : ''}
+          />
+          <PinHint>
+            {hasPin ? t('users.pinSet') : t('users.pinHint')}
+            {hasPin && (
+              <PinClearButton type="button" onClick={handleRemovePin}>
+                {t('users.removePin')}
+              </PinClearButton>
+            )}
+          </PinHint>
         </FormGroup>
 
         {error && <ErrorMessage>{error}</ErrorMessage>}

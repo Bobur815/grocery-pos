@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { useAuthStore } from "../../store/auth-store";
@@ -12,6 +12,7 @@ import { UzbekPhoneInput } from "@renderer/components/common/UzbekPhoneInput";
 import { VirtualKeyboard } from "@renderer/components/common/VirtualKeyboard";
 import { isUzPhoneComplete } from "@shared/utils/phone";
 import { TerminalAccessBar } from "./TerminalAccessBar";
+import { useToast } from "../../context/ToastContext";
 
 type LoginMode = "pin" | "phone";
 
@@ -26,13 +27,20 @@ const Container = styled.div`
 const LeftPanel = styled.div`
   flex: 1;
   position: relative;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
-  padding: ${({ theme }) => theme.spacing.xl};
+  /* 32px (theme.spacing.xl) at 768px of height and above; a shorter screen spends it on the pad
+     instead. Horizontally it never matters — the card is capped at 400px inside a half-window. */
+  padding: clamp(16px, 4.17vmin, ${({ theme }) => theme.spacing.xl});
   background-color: ${({ theme }) => theme.colors.surface};
+
+  /* The safe keyword is what stops a screen too short for the card from eating its top edge:
+     centring overflows in both directions and this panel clips, so plain center cut the logo
+     off. When it cannot fit, alignment falls back to start and the panel scrolls instead. */
+  justify-content: safe center;
+  overflow-x: hidden;
+  overflow-y: auto;
 `;
 
 const RightPanel = styled.div<{ $imageUrl?: string }>`
@@ -70,20 +78,64 @@ const RightSubtitle = styled.p`
   color: rgba(255, 255, 255, 0.85);
 `;
 
+/**
+ * The PIN pad scales with the screen, not with this card — the card is width-capped at 400px, so
+ * it measures the same on a 1024×768 monoblock as on a 1080p desktop and can tell you nothing
+ * about either. Height is the scarce axis here (the card is nearly as tall as a 768px screen),
+ * so the keys are sized from the height left over and the rest from `vmin`.
+ *
+ * Every coefficient is set so the tokens equal today's fixed pixels at 768px of height — the
+ * common monoblock keeps exactly the layout it has. Shorter screens (1024×600, 1280×720) shrink
+ * rather than push the pad off the bottom, and roomier ones grow the keys up to a cap. The
+ * whitespace tokens only ever shrink: a big screen should spend its height on keys, not margins.
+ * Deliberately no mobile step — the POS is a terminal app, never a phone.
+ *
+ * Measured in Electron's Chromium from 1024×600 to 2560×1440: nothing clipped, keys centred,
+ * and 64px keys at 768 exactly as before.
+ */
 const LoginCard = styled.div<{ $kbOpen?: boolean }>`
+  /*
+   * Keys take whatever height is left over. 440px is everything else stacked up — logo, subtitle,
+   * dots, login button, mode switch, terminal bar and the panel's padding — and 5.125 is the pad
+   * in key units (4 rows + 3 gaps of 0.375). So the pad is as large as the screen can actually
+   * show, which at 768px of height works out to exactly today's 64px.
+   *
+   * The constant is shared with SetupPinPage, whose chrome is a little shorter: the two pads are
+   * the same control seen back to back, so they are sized as one and the difference is slack.
+   */
+  --pin-key: clamp(48px, calc((100vh - 440px) / 5.125), 88px);
+  --pin-gap: calc(var(--pin-key) * 0.375);
+  --pin-dot: clamp(16px, 2.6vmin, 26px);
+  /* Whitespace: the big vertical gaps, the mark, and never larger than today's fixed values —
+     a roomier screen should spend its height on the keys, not on the margins. */
+  --pin-rhythm: clamp(16px, 3.125vmin, 32px);
+  --pin-logo: clamp(44px, 9.375vmin, 72px);
+
   width: 100%;
   max-width: 400px;
   text-align: center;
-  margin-top: -60px;
   transform: translateY(${({ $kbOpen }) => ($kbOpen ? "-60px" : "0")});
   transition: transform 0.3s ease;
+
+  /* Sitting above centre is decorative, and a negative margin is not safe in the sense above:
+     it pushes the logo out of the panel on a short screen. Only lift with height to spare. */
+  @media (min-height: 860px) {
+    margin-top: -60px;
+  }
 `;
 
 const LogoBrand = styled.div`
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 6px;
+  /* The mark's size prop is a width/height attribute, which CSS outranks — so it scales too. */
+  svg {
+    width: var(--pin-logo);
+    height: var(--pin-logo);
+  }
+  /* The card centres its text, but that says nothing about flex children: as a row this packs
+     to the start unless the main axis is centred too. */
+  justify-content: center;
+  gap: 10px;
   margin-bottom: ${({ theme }) => theme.spacing.sm};
 `;
 
@@ -96,7 +148,7 @@ const BrandName = styled.span`
 
 const Subtitle = styled.p`
   color: ${({ theme }) => theme.colors.textSecondary};
-  margin-bottom: ${({ theme }) => theme.spacing.xl};
+  margin-bottom: var(--pin-rhythm);
   font-size: 20px;
 `;
 
@@ -104,12 +156,12 @@ const PinDisplay = styled.div`
   display: flex;
   justify-content: center;
   gap: ${({ theme }) => theme.spacing.md};
-  margin-bottom: ${({ theme }) => theme.spacing.xl};
+  margin-bottom: var(--pin-rhythm);
 `;
 
 const PinDot = styled.div<{ $filled: boolean }>`
-  width: 20px;
-  height: 20px;
+  width: var(--pin-dot);
+  height: var(--pin-dot);
   border-radius: 50%;
   border: 2px solid ${({ theme }) => theme.colors.primary};
   background-color: ${({ theme, $filled }) =>
@@ -117,28 +169,40 @@ const PinDot = styled.div<{ $filled: boolean }>`
   transition: all 0.2s ease;
 `;
 
+/**
+ * Tracks are exactly one key wide, so the pad measures its own keys and `justify-content` can
+ * centre the block. With `1fr` tracks the fixed-width keys sat at the left of tracks a third of
+ * a 300px pad wide, which left the whole pad hanging ~30px left of the card it is centred in.
+ */
 const PinPad = styled.div`
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: ${({ theme }) => theme.spacing.md};
-  max-width: 300px;
+  grid-template-columns: repeat(3, var(--pin-key));
+  justify-content: center;
+  gap: var(--pin-gap);
   margin: 0 auto;
 `;
 
 const PinButton = styled.button<{ $variant?: "clear" | "back" }>`
-  width: 64px;
-  height: 64px;
+  width: var(--pin-key);
+  height: var(--pin-key);
   border-radius: 50%;
   border: 2px solid ${({ theme }) => theme.colors.border};
   background-color: ${({ theme }) => theme.colors.surface};
   color: ${({ theme }) => theme.colors.text};
-  font-size: 22px;
+  /* Digits and the lucide icons ride the key size — the factors reproduce today's 22px text and
+     30px icons at the 64px floor. */
+  font-size: calc(var(--pin-key) * 0.34);
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   align-items: center;
   justify-content: center;
+
+  svg {
+    width: calc(var(--pin-key) * 0.47);
+    height: calc(var(--pin-key) * 0.47);
+  }
 
   &:hover {
     background-color: ${({ theme }) => theme.colors.primary}15;
@@ -173,11 +237,9 @@ const PinButton = styled.button<{ $variant?: "clear" | "back" }>`
   `}
 `;
 
-const ErrorMessage = styled.div`
-  color: ${({ theme }) => theme.colors.error};
-  margin-top: ${({ theme }) => theme.spacing.md};
-  font-size: 14px;
-  min-height: 20px;
+const ConfirmRow = styled.div`
+  width: calc(var(--pin-key) * 3 + var(--pin-gap) * 2);
+  margin: ${({ theme }) => theme.spacing.md} auto 0;
 `;
 
 const LoadingOverlay = styled.div`
@@ -193,7 +255,7 @@ const LoadingOverlay = styled.div`
 `;
 
 const SwitchLink = styled.button`
-  margin-top: ${({ theme }) => theme.spacing.xl};
+  margin-top: var(--pin-rhythm);
   background: none;
   border: none;
   color: ${({ theme }) => theme.colors.primary};
@@ -204,12 +266,6 @@ const SwitchLink = styled.button`
   &:hover {
     opacity: 0.8;
   }
-`;
-
-const KeyboardHint = styled.p`
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-size: 12px;
-  margin-top: ${({ theme }) => theme.spacing.md};
 `;
 
 const ContentWrapper = styled.div`
@@ -295,6 +351,8 @@ export function PinLoginPage() {
   const navigate = useNavigate();
   const { loginWithPin, login, isLoading, error, clearError } = useAuthStore();
   const { mode: themeMode } = useTheme();
+  const requestedMode = (useLocation().state as { mode?: LoginMode } | null)?.mode;
+  const toast = useToast();
 
   // null = still checking, true/false = result
   const [pinConfigured, setPinConfigured] = useState<boolean | null>(null);
@@ -322,7 +380,12 @@ export function PinLoginPage() {
   }, []);
 
   const [saved] = useState(loadSaved);
-  const [mode, setMode] = useState<LoginMode>(saved ? "phone" : "pin");
+  // Remembered credentials normally open the phone form, but a caller can ask for a mode — the
+  // app bar's switch-user button hands the terminal over on the PIN pad, not on someone else's
+  // remembered phone number.
+  const [mode, setMode] = useState<LoginMode>(
+    requestedMode ?? (saved ? "phone" : "pin"),
+  );
   const [pin, setPin] = useState("");
 
   // Phone login state
@@ -335,30 +398,46 @@ export function PinLoginPage() {
     "phone",
   );
 
-  // When PIN status loads: if not configured, force phone mode
+  // Logging out redirects here on its own, so this page can already be mounted by the time the
+  // switch-user button's navigation lands. Track the request rather than only seeding state.
   useEffect(() => {
-    if (pinConfigured === false && !saved) {
+    if (requestedMode) {
+      setMode(requestedMode);
+    }
+  }, [requestedMode]);
+
+  // When PIN status loads: if nobody on this terminal has a PIN there is nothing to type, so the
+  // phone form is the only way in — including when the PIN pad was explicitly asked for.
+  useEffect(() => {
+    if (pinConfigured === false) {
       setMode("phone");
     }
-  }, [pinConfigured, saved]);
+  }, [pinConfigured]);
 
+  // Auth failures arrive on the store, not as local state. Show each one once and clear it, so
+  // the same error can be raised again on the next attempt — and so an error left over from a
+  // previous attempt can never be shown twice.
   useEffect(() => {
+    if (!error) return;
+    toast.error(t(error, { defaultValue: error }));
     clearError();
-  }, [clearError]);
+  }, [error, toast, clearError, t]);
 
   const switchMode = (newMode: LoginMode) => {
     setPin("");
     setPhoneDigits("");
     setPassword("");
-    clearError();
     setKeyboardOpen(false);
     setMode(newMode);
   };
 
   // --- PIN logic ---
+  // PINs are 1–4 digits. A full 4 digits submits on its own (the common case, and what the pad
+  // has always done); anything shorter needs the confirm button or Enter, since there is no way
+  // to tell "still typing" from "done" before then.
   const handlePinSubmit = useCallback(
     async (pinValue: string) => {
-      if (pinValue.length !== 4) return;
+      if (pinValue.length < 1 || pinValue.length > 4) return;
 
       const success = await loginWithPin(pinValue);
       if (success) {
@@ -386,43 +465,47 @@ export function PinLoginPage() {
         e.preventDefault();
         if (pin.length < 4) {
           setPin((prev) => prev + e.key);
-          clearError();
         }
       } else if (e.key === "Backspace") {
         e.preventDefault();
         setPin((prev) => prev.slice(0, -1));
-        clearError();
       } else if (e.key === "Escape") {
         e.preventDefault();
         setPin("");
-        clearError();
+      } else if (e.key === "Enter" && pin.length > 0) {
+        e.preventDefault();
+        handlePinSubmit(pin);
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [pin, isLoading, clearError, mode]);
+  }, [pin, isLoading, mode, handlePinSubmit]);
 
   const handleNumberClick = (num: string) => {
     if (pin.length < 4 && !isLoading) {
       setPin((prev) => prev + num);
-      clearError();
     }
   };
 
   const handleBackspace = () => {
     if (!isLoading) {
       setPin((prev) => prev.slice(0, -1));
-      clearError();
     }
   };
 
   const handleClear = () => {
     if (!isLoading) {
       setPin("");
-      clearError();
     }
   };
+
+  // After a password login, offer PIN setup to whoever just signed in — the PIN belongs to the
+  // person now, so "somebody on this terminal has one" says nothing about this account.
+  const goHomeAfterLogin = useCallback(async () => {
+    const hasPin = await window.electronAPI.auth.hasPin().catch(() => true);
+    navigate(hasPin ? "/" : "/setup-pin");
+  }, [navigate]);
 
   // --- Phone login logic ---
   const handlePhoneSubmit = async (e: React.FormEvent) => {
@@ -440,8 +523,8 @@ export function PinLoginPage() {
       } else {
         localStorage.removeItem(SAVED_KEY);
       }
-      // Redirect to PIN setup if PIN not yet configured
-      navigate(pinConfigured === false ? "/setup-pin" : "/");
+      // Redirect to PIN setup if this user has no PIN yet
+      await goHomeAfterLogin();
     }
   };
 
@@ -469,7 +552,7 @@ export function PinLoginPage() {
         isUzPhoneComplete(phoneDigits)
       ) {
         const fullPhone = "998" + phoneDigits;
-        login(fullPhone, password).then((success) => {
+        login(fullPhone, password).then(async (success) => {
           if (success) {
             if (rememberMe) {
               localStorage.setItem(
@@ -479,7 +562,7 @@ export function PinLoginPage() {
             } else {
               localStorage.removeItem(SAVED_KEY);
             }
-            navigate(pinConfigured === false ? "/setup-pin" : "/");
+            await goHomeAfterLogin();
           }
         });
       }
@@ -550,11 +633,17 @@ export function PinLoginPage() {
                 </PinButton>
               </PinPad>
 
-              <ErrorMessage>
-                {error ? t(error, { defaultValue: error }) : ""}
-              </ErrorMessage>
-
-              <KeyboardHint>{t("auth.keyboardHint")}</KeyboardHint>
+              {/* Submits a PIN of any allowed length; a 4th digit still submits on its own.
+                  Dead until there is something to submit, so an empty tap cannot fail a login. */}
+              <ConfirmRow>
+                <Button
+                  onClick={() => handlePinSubmit(pin)}
+                  disabled={isLoading || pin.length === 0}
+                  fullWidth
+                >
+                  {t("auth.login")}
+                </Button>
+              </ConfirmRow>
 
               <SwitchLink onClick={() => switchMode("phone")}>
                 {t("auth.usePhoneLogin")}
@@ -610,11 +699,6 @@ export function PinLoginPage() {
                   />
                   {t("auth.rememberMe")}
                 </RememberRow>
-                {error && (
-                  <ErrorMessage>
-                    {t(error, { defaultValue: error })}
-                  </ErrorMessage>
-                )}
                 <Button
                   type="submit"
                   disabled={isLoading || !isUzPhoneComplete(phoneDigits)}

@@ -7,7 +7,7 @@
     "dev:pos": "cross-env APP_MODE=pos electron-vite dev",
     "dev:server": "nest start --watch",
     "build:icons": "node scripts/build-icons.mjs",
-    "prebuild:pos": "node -e \"const fs=require('fs'),d='dist';if(fs.existsSync(d))fs.readdirSync(d).filter(f=>/\\.(exe|blockmap|yml)$/.test(f)).forEach(f=>fs.unlinkSync(d+'/'+f))\"",
+    "prebuild:pos": "npm run prisma:generate:sqlite && node -e \"const fs=require('fs'),d='dist';if(fs.existsSync(d))fs.readdirSync(d).filter(f=>/\\.(exe|blockmap|yml)$/.test(f)).forEach(f=>fs.unlinkSync(d+'/'+f))\"",
     "build:pos": "cross-env APP_MODE=pos electron-vite build && electron-builder --config electron-builder.config.js",
     "deploy:pos": "npm run build:pos && node scripts/upload-release.js",
     "build:telegram": "tsc --project src/telegram-bot/tsconfig.json",

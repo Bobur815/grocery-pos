@@ -46,11 +46,29 @@ export class SmenaService {
     return { synced, skipped };
   }
 
+  /**
+   * The VPS id for this cashier, resolved by phone.
+   *
+   * A cashier created on a terminal keeps that terminal's id locally, while the VPS may already
+   * know them under an id it minted first (users/sync-bulk keeps the existing row). Sales have
+   * always been remapped this way; shifts were not, so the same person's takings and drawer
+   * counts could land under two different cashier ids. Falls back to the terminal's id, which
+   * is what every terminal that does not send a phone yet will get.
+   */
+  private async resolveCashierId(storeId: string, s: SyncSmenaDto): Promise<string> {
+    if (!s.cashierPhone) return s.cashierId;
+    const user = await this.prisma.user.findUnique({
+      where: { storeId_phone: { storeId, phone: s.cashierPhone } },
+      select: { id: true },
+    });
+    return user?.id ?? s.cashierId;
+  }
+
   private async upsertOne(storeId: string, s: SyncSmenaDto): Promise<void> {
     const data = {
       storeId,
       terminalId: s.terminalId,
-      cashierId: s.cashierId,
+      cashierId: await this.resolveCashierId(storeId, s),
       cashierName: s.cashierName,
       status: 'CLOSED',
       initialCash: new Prisma.Decimal(s.initialCash),

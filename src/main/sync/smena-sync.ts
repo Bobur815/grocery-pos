@@ -105,6 +105,18 @@ export async function syncSmenas(): Promise<SmenaSyncResult> {
     return result;
   }
 
+  // Phone lets the server map this cashier onto its own user id, exactly as the sales sync
+  // does. Without it a cashier created on this terminal has one id here and another on the VPS,
+  // so their shifts and their sales are filed under two different people.
+  const cashierIds = [...new Set(
+    pending.map((s: (typeof pending)[number]) => s.cashierId).filter((id: string | null): id is string => Boolean(id)),
+  )];
+  const cashiers: { id: string; phone: string }[] = await prisma.user.findMany({
+    where: { id: { in: cashierIds } },
+    select: { id: true, phone: true },
+  });
+  const phoneByCashierId = new Map(cashiers.map((u) => [u.id, u.phone]));
+
   const payload = [];
   for (const s of pending) {
     // Defensive: a CLOSED shift with no finalCash would be a local data bug, and uploading it
@@ -119,6 +131,7 @@ export async function syncSmenas(): Promise<SmenaSyncResult> {
       terminalId: config.terminalId || s.terminalId,
       cashierId: s.cashierId,
       cashierName: s.cashierName || s.cashierId,
+      cashierPhone: phoneByCashierId.get(s.cashierId) ?? undefined,
       initialCash: s.initialCash.toString(),
       finalCash: s.finalCash.toString(),
       zReportNumber: s.zReportNumber,

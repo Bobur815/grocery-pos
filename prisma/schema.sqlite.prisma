@@ -21,7 +21,6 @@ model LocalConfig {
   storeName  String   @map("store_name")
   terminalId String   @map("terminal_id")
   apiUrl     String   @map("api_url")
-  storePin   String?  @map("store_pin") // 4-digit PIN (bcrypt hashed) for quick cashier login
   lastSync   DateTime @default(now()) @map("last_sync")
 
   // Cached copy of the store's operating mode, learned at setup and refreshed every sync cycle
@@ -44,6 +43,9 @@ model User {
   nameRu    String   @map("name_ru")
   active    Boolean  @default(true)
   storeId   String?  @map("store_id")
+  // Quick-login PIN, 1–4 digits, bcrypt hashed. Personal to the user and local to this terminal:
+  // it is never synced to or from the VPS, and can only be changed inside the POS app.
+  pin       String?  @map("pin")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

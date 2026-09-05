@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     verifyTerminalAccess: (secret: string) =>
       ipcRenderer.invoke("auth:verifyTerminalAccess", secret),
     setupPin: (pin: string) => ipcRenderer.invoke("auth:setupPin", pin),
+    hasPin: () => ipcRenderer.invoke("auth:hasPin"),
+    removePin: () => ipcRenderer.invoke("auth:removePin"),
   },
 
   // Products
@@ -340,7 +342,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
       taxRate: string;
       syncInterval: string;
       token: string;
-      pin?: string;
       mode?: string;
       posAdminLocked?: boolean;
     }) => ipcRenderer.invoke("setup:complete", data),
@@ -462,6 +463,8 @@ declare global {
         isPinConfigured: () => Promise<boolean>;
         verifyTerminalAccess: (secret: string) => Promise<boolean>;
         setupPin: (pin: string) => Promise<boolean>;
+        hasPin: () => Promise<boolean>;
+        removePin: () => Promise<boolean>;
       };
       products: {
         getAll: (filters?: unknown) => Promise<unknown[]>;
@@ -715,7 +718,6 @@ declare global {
           taxRate: string;
           syncInterval: string;
           token: string;
-          pin?: string;
           mode?: string;
           posAdminLocked?: boolean;
         }) => Promise<{ success: boolean }>;
