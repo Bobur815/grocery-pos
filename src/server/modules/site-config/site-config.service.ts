@@ -13,9 +13,24 @@ export interface SubscriptionPlanPrices {
   vip: number;
 }
 
+/**
+ * How a store pays for its subscription, as shown on the POS login screen.
+ *
+ * `qrPayload` is the raw bank-transfer string; the terminal renders it into a QR itself so the
+ * dialog still works with no network. `paymentUrl` is the self-service Click/Payme/Paynet link
+ * and may contain a `{storeId}` placeholder, substituted per store when it is served.
+ */
+export interface SubscriptionPayment {
+  qrPayload: string;
+  paymentUrl: string;
+  supportPhone: string;
+}
+
 const BANNER_KEY = 'login_banner';
+const PAYMENT_KEY = 'subscription_payment';
 const DEFAULT: LoginBanner = { imageUrl: '', title: '', subtitle: '' };
 const DEFAULT_PRICES: SubscriptionPlanPrices = { starter: 0, pro: 0, vip: 0 };
+const DEFAULT_PAYMENT: SubscriptionPayment = { qrPayload: '', paymentUrl: '', supportPhone: '' };
 
 @Injectable()
 export class SiteConfigService {
@@ -68,5 +83,25 @@ export class SiteConfigService {
       ),
     );
     return prices;
+  }
+
+  async getSubscriptionPayment(): Promise<SubscriptionPayment> {
+    const row = await this.prisma.siteConfig.findUnique({ where: { key: PAYMENT_KEY } });
+    if (!row) return DEFAULT_PAYMENT;
+    try {
+      return { ...DEFAULT_PAYMENT, ...(JSON.parse(row.value) as Partial<SubscriptionPayment>) };
+    } catch {
+      return DEFAULT_PAYMENT;
+    }
+  }
+
+  async setSubscriptionPayment(payment: SubscriptionPayment): Promise<SubscriptionPayment> {
+    const value = JSON.stringify(payment);
+    await this.prisma.siteConfig.upsert({
+      where: { key: PAYMENT_KEY },
+      update: { value },
+      create: { key: PAYMENT_KEY, value },
+    });
+    return payment;
   }
 }

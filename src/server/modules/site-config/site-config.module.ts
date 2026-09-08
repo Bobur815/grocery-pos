@@ -7,5 +7,6 @@ import { PrismaModule } from '../../prisma/prisma.module';
   imports: [PrismaModule],
   controllers: [SiteConfigController],
   providers: [SiteConfigService],
+  exports: [SiteConfigService],
 })
 export class SiteConfigModule {}

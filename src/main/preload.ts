@@ -16,6 +16,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     isPinConfigured: () => ipcRenderer.invoke("auth:isPinConfigured"),
     verifyTerminalAccess: (secret: string) =>
       ipcRenderer.invoke("auth:verifyTerminalAccess", secret),
+    hasSuperAdminPassword: () => ipcRenderer.invoke("auth:hasSuperAdminPassword"),
+    verifySuperAdminPassword: (password: string) =>
+      ipcRenderer.invoke("auth:verifySuperAdminPassword", password),
     setupPin: (pin: string) => ipcRenderer.invoke("auth:setupPin", pin),
     hasPin: () => ipcRenderer.invoke("auth:hasPin"),
     removePin: () => ipcRenderer.invoke("auth:removePin"),
@@ -266,7 +269,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // App info
   app: {
     getVersion: () => ipcRenderer.invoke("app:getVersion"),
-    isOnline: (): Promise<boolean> => ipcRenderer.invoke("app:isOnline"),
+    isOnline: (url?: string): Promise<boolean> =>
+      ipcRenderer.invoke("app:isOnline", url),
     getTerminalId: () => ipcRenderer.invoke("app:getTerminalId"),
     getStoreInfo: () => ipcRenderer.invoke("app:getStoreInfo"),
     quit: () => ipcRenderer.invoke("app:quit"),
@@ -304,6 +308,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
   },
 
+  // Store subscription status + how to pay for it (shown on the login screen)
+  subscription: {
+    get: () => ipcRenderer.invoke("subscription:get"),
+    openPaymentLink: (url: string) =>
+      ipcRenderer.invoke("subscription:openPaymentLink", url),
+  },
+
   // Smena (shift) management
   smena: {
     getCurrent: () => ipcRenderer.invoke("smena:getCurrent"),
@@ -331,6 +342,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       phone: string;
       password: string;
       storeId: string;
+      /** Server the wizard authenticates against; falls back to the compiled-in URL. */
+      serverUrl?: string;
     }) => ipcRenderer.invoke("setup:authenticate", data),
     complete: (data: {
       storeId: string;
@@ -342,6 +355,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
       taxRate: string;
       syncInterval: string;
       token: string;
+      serverUrl?: string;
       mode?: string;
       posAdminLocked?: boolean;
     }) => ipcRenderer.invoke("setup:complete", data),
@@ -462,6 +476,10 @@ declare global {
         ) => Promise<boolean>;
         isPinConfigured: () => Promise<boolean>;
         verifyTerminalAccess: (secret: string) => Promise<boolean>;
+        /** Whether this store has a manager-override password configured at all. */
+        hasSuperAdminPassword: () => Promise<boolean>;
+        /** Check the manager-override password. False when none is set — ask hasSuperAdminPassword first. */
+        verifySuperAdminPassword: (password: string) => Promise<boolean>;
         setupPin: (pin: string) => Promise<boolean>;
         hasPin: () => Promise<boolean>;
         removePin: () => Promise<boolean>;
@@ -646,7 +664,8 @@ declare global {
       };
       app: {
         getVersion: () => Promise<string>;
-        isOnline: () => Promise<boolean>;
+        /** Probes `url` when given, otherwise the production server. */
+        isOnline: (url?: string) => Promise<boolean>;
         getTerminalId: () => Promise<string>;
         getStoreInfo: () => Promise<{ storeId: string; storeName: string }>;
         quit: () => Promise<void>;
@@ -667,6 +686,10 @@ declare global {
         getWebAdminQr: () => Promise<{
           url: string;
           qrDataUrl: string | null;
+          /** True when the dashboard is served by this terminal on the LAN, not by a VPS. */
+          local: boolean;
+          /** Why the local dashboard service is not running, when it is not. */
+          error: string | null;
         } | null>;
         updateLocalConfig: (data: {
           storeId?: string;
@@ -680,6 +703,12 @@ declare global {
             posAdminLocked?: boolean;
           }) => void,
         ) => () => void;
+      };
+      subscription: {
+        get: () => Promise<
+          import("../shared/types/store.types").StoreSubscription
+        >;
+        openPaymentLink: (url: string) => Promise<boolean>;
       };
       smena: {
         getCurrent: () => Promise<unknown | null>;
@@ -703,6 +732,7 @@ declare global {
           phone: string;
           password: string;
           storeId: string;
+          serverUrl?: string;
         }) => Promise<{
           success: boolean;
           token: string;
@@ -718,6 +748,7 @@ declare global {
           taxRate: string;
           syncInterval: string;
           token: string;
+          serverUrl?: string;
           mode?: string;
           posAdminLocked?: boolean;
         }) => Promise<{ success: boolean }>;

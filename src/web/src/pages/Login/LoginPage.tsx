@@ -10,7 +10,20 @@ import { Input } from "@components/common/Input";
 import { UzbekPhoneInput } from "@components/common/UzbekPhoneInput";
 import { isUzPhoneComplete } from "@shared/utils/phone";
 import { Eye, EyeOff, Download } from "lucide-react";
+import { useToast } from "@context/ToastContext";
 import { siteConfig, type LoginBanner } from "../../api/client";
+
+/**
+ * Refusals that are about the store, not the credentials.
+ *
+ * The password was right — the shop simply cannot be managed from here. That deserves a sentence
+ * explaining why and what to do instead, which is more than the one-line field error under the
+ * form is meant to carry, so these get a toast and the inline error is cleared.
+ */
+const STORE_BLOCKED_ERRORS = [
+  "auth.errors.store_inactive",
+  "auth.errors.store_offline_only",
+];
 
 const RELEASES_BASE = "/releases";
 
@@ -131,8 +144,11 @@ const LangRow = styled.div`
 
 const LangButton = styled.button<{ $active?: boolean }>`
   background: none;
-  border: 1px solid ${({ theme, $active }) => $active ? theme.colors.primary : theme.colors.border};
-  color: ${({ theme, $active }) => $active ? theme.colors.primary : theme.colors.textSecondary};
+  border: 1px solid
+    ${({ theme, $active }) =>
+      $active ? theme.colors.primary : theme.colors.border};
+  color: ${({ theme, $active }) =>
+    $active ? theme.colors.primary : theme.colors.textSecondary};
   padding: 4px 12px;
   border-radius: ${({ theme }) => theme.borderRadius};
   cursor: pointer;
@@ -205,18 +221,24 @@ export function LoginPage() {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const { login, isLoading, error, clearError } = useAuthStore();
+  const toast = useToast();
   const { language, setLanguage, theme } = useSettingsStore();
 
   const [phoneDigits, setPhoneDigits] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [storeId, setStoreId] = useState(
-    ENV_STORE_ID ?? localStorage.getItem("last_store_id") ?? ""
+    ENV_STORE_ID ?? localStorage.getItem("last_store_id") ?? "",
   );
-  const [showStoreId, setShowStoreId] = useState(!ENV_STORE_ID && !localStorage.getItem("last_store_id"));
+  const [showStoreId, setShowStoreId] = useState(
+    !ENV_STORE_ID && !localStorage.getItem("last_store_id"),
+  );
   const [rememberMe, setRememberMe] = useState(false);
   const passwordRef = useRef<HTMLInputElement>(null);
-  const [latestRelease, setLatestRelease] = useState<{ version: string; url: string } | null>(null);
+  const [latestRelease, setLatestRelease] = useState<{
+    version: string;
+    url: string;
+  } | null>(null);
   const [banner, setBanner] = useState<LoginBanner | null>(null);
 
   useEffect(() => {
@@ -224,7 +246,11 @@ export function LoginPage() {
     const raw = localStorage.getItem(SAVED_KEY);
     if (raw) {
       try {
-        const saved = JSON.parse(raw) as { phone?: string; password?: string; storeId?: string };
+        const saved = JSON.parse(raw) as {
+          phone?: string;
+          password?: string;
+          storeId?: string;
+        };
         if (saved.phone) setPhoneDigits(saved.phone);
         if (saved.password) setPassword(saved.password);
         if (saved.storeId && !ENV_STORE_ID) {
@@ -232,7 +258,9 @@ export function LoginPage() {
           setShowStoreId(false);
         }
         setRememberMe(true);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
   }, [clearError]);
 
@@ -253,7 +281,10 @@ export function LoginPage() {
   }, []);
 
   useEffect(() => {
-    siteConfig.getLoginBanner().then(setBanner).catch(() => {});
+    siteConfig
+      .getLoginBanner()
+      .then(setBanner)
+      .catch(() => {});
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -262,15 +293,31 @@ export function LoginPage() {
 
     const fullPhone = "998" + phoneDigits;
     const success = await login(fullPhone, password, storeId || undefined);
-    if (success) {
-      if (rememberMe) {
-        localStorage.setItem(SAVED_KEY, JSON.stringify({ phone: phoneDigits, password, storeId: storeId || undefined }));
-      } else {
-        localStorage.removeItem(SAVED_KEY);
+
+    if (!success) {
+      const reason = useAuthStore.getState().error;
+      if (reason && STORE_BLOCKED_ERRORS.includes(reason)) {
+        // Long enough to actually read — it explains where to go instead.
+        toast.error(t(reason), 12000);
+        clearError();
       }
-      if (storeId) localStorage.setItem("last_store_id", storeId);
-      navigate("/");
+      return;
     }
+
+    if (rememberMe) {
+      localStorage.setItem(
+        SAVED_KEY,
+        JSON.stringify({
+          phone: phoneDigits,
+          password,
+          storeId: storeId || undefined,
+        }),
+      );
+    } else {
+      localStorage.removeItem(SAVED_KEY);
+    }
+    if (storeId) localStorage.setItem("last_store_id", storeId);
+    navigate("/");
   };
 
   const handleLanguageChange = (lang: string) => {
@@ -313,7 +360,11 @@ export function LoginPage() {
                 type="button"
                 tabIndex={-1}
                 onClick={() => setShowPassword((v) => !v)}
-                title={showPassword ? t("auth.hidePassword") || "Hide" : t("auth.showPassword") || "Show"}
+                title={
+                  showPassword
+                    ? t("auth.hidePassword") || "Hide"
+                    : t("auth.showPassword") || "Show"
+                }
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </EyeButton>
@@ -325,9 +376,20 @@ export function LoginPage() {
                   <button
                     type="button"
                     onClick={() => setShowStoreId(true)}
-                    style={{ background: "none", border: "none", color: "inherit", opacity: 0.5, fontSize: 13, cursor: "pointer", textAlign: "left", padding: 0 }}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "inherit",
+                      opacity: 0.5,
+                      fontSize: 13,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      padding: 0,
+                    }}
                   >
-                    {storeId ? `${t("common.store")}: ${storeId}` : t("auth.enterStoreId") || "+ Enter store ID"}
+                    {storeId
+                      ? `${t("common.store")}: ${storeId}`
+                      : t("auth.enterStoreId") || "+ Enter store ID"}
                   </button>
                 ) : (
                   <Input
@@ -350,7 +412,9 @@ export function LoginPage() {
             </RememberRow>
 
             {error && (
-              <ErrorMessage>{t(error, { defaultValue: t("auth.errors.login_failed") })}</ErrorMessage>
+              <ErrorMessage>
+                {t(error, { defaultValue: t("auth.errors.login_failed") })}
+              </ErrorMessage>
             )}
 
             <Button
@@ -382,8 +446,9 @@ export function LoginPage() {
           {latestRelease && (
             <DownloadBanner href={latestRelease.url} download>
               <Download size={14} />
-              {language === "uz" ? "Dasturni yuklab olish" : "Скачать приложение"}
-              {" "}
+              {language === "uz"
+                ? "Dasturni yuklab olish"
+                : "Скачать приложение"}{" "}
               <span className="ver">v{latestRelease.version}</span>
             </DownloadBanner>
           )}
@@ -394,7 +459,9 @@ export function LoginPage() {
         {showOverlay && (
           <RightOverlay>
             {banner!.title && <RightTitle>{banner!.title}</RightTitle>}
-            {banner!.subtitle && <RightSubtitle>{banner!.subtitle}</RightSubtitle>}
+            {banner!.subtitle && (
+              <RightSubtitle>{banner!.subtitle}</RightSubtitle>
+            )}
           </RightOverlay>
         )}
       </RightPanel>

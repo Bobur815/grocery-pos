@@ -7,6 +7,7 @@ node_modules/
 dist/
 dist-electron/
 dist-renderer/
+dist-web/
 out/
 build/**
 !build/icons/

@@ -14,6 +14,7 @@ import { seedLocalDatabase } from "./database/seed";
 import { getAppConfig, updateConfig } from "./config/app-config";
 import { getPrismaClient } from "./database/sqlite-client";
 import { getServerToken } from "./sync/queue-manager";
+import { stopLocalServer, syncLocalServerWithMode } from "./local-server";
 import { getCurrentUser } from "./ipc/auth-handlers";
 import { log } from "./logger";
 
@@ -165,6 +166,13 @@ async function launchMainApp(): Promise<void> {
   syncService = new SyncService();
   syncService.start();
 
+  // An OFFLINE_ONLY store's dashboard is served by this terminal on the shop's own network. The
+  // listener is not worth failing startup over, so a bind error is recorded and shown in the QR
+  // dialog rather than thrown here.
+  void syncLocalServerWithMode().catch((err) =>
+    console.error("[local-server] startup failed:", err),
+  );
+
   // REGOS:VCR fiscalization startup (logs resolved config). The periodic background retry worker
   // was removed — fiscalization runs on new-sale, on shift close, and via the manual
   // "Fiscalise all old receipts" admin button.
@@ -242,6 +250,7 @@ app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     syncService?.stop();
     regosVcrService.stop();
+    void stopLocalServer();
     app.quit();
   }
 });
@@ -255,6 +264,8 @@ app.on("activate", () => {
 app.on("before-quit", () => {
   syncService?.stop();
   regosVcrService.stop();
+  // Closing the listener stops the shop network being served by a terminal that is shutting down.
+  void stopLocalServer();
 });
 
 export { mainWindow };

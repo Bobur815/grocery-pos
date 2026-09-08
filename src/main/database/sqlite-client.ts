@@ -8,7 +8,7 @@ import fs from 'fs';
 // app.asar.unpacked/ via asarUnpack and Electron redirects require() transparently.
 const prismaClientPath = path.join(app.getAppPath(), 'src', 'generated', 'prisma-sqlite');
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { PrismaClient } = require(prismaClientPath);
+const { PrismaClient, Prisma } = require(prismaClientPath);
 
 type PrismaClientType = InstanceType<typeof PrismaClient>;
 
@@ -19,6 +19,18 @@ export function getPrismaClient(): PrismaClientType {
     throw new Error('Database not initialized. Call initializeDatabase() first.');
   }
   return prisma;
+}
+
+/**
+ * The generated client's `Prisma` namespace, for `Prisma.Decimal` and friends.
+ *
+ * Reached through the same runtime `require` as the client itself, deliberately: a static import
+ * of `src/generated/prisma-sqlite` would pull the whole generated client — native query engine
+ * references included — into the bundled main process, which is exactly what the computed path
+ * above exists to avoid.
+ */
+export function getPrismaNamespace(): typeof import('../../generated/prisma-sqlite').Prisma {
+  return Prisma;
 }
 
 const BOOTSTRAP_FILE = 'store-bootstrap.json';
@@ -92,13 +104,19 @@ export async function initializeDatabase(): Promise<void> {
   }
 }
 
+/**
+ * Ensure every table this file owns exists.
+ *
+ * Runs unconditionally. It used to return early when `local_config` was present — "tables already
+ * exist" — which quietly meant that any table added here *after* a terminal's database was created
+ * never appeared on that terminal. `audit_logs` shipped that way: present on databases created
+ * after it was added, missing forever on older ones, and the shift panel died with
+ * "no such table: audit_logs" the moment it opened a Z-report.
+ *
+ * Every statement below is `IF NOT EXISTS`, so running them all on every boot is a handful of
+ * no-op DDL parses and removes the divergence between a fresh database and an upgraded one.
+ */
 async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
-  // Check if tables exist using sqlite_master (no error thrown if missing)
-  const rows = await prisma.$queryRaw<{ name: string }[]>`
-    SELECT name FROM sqlite_master WHERE type='table' AND name='local_config'
-  `;
-  if (rows.length > 0) return; // Tables already exist
-
   // Create all tables with updated schema
   await prisma.$executeRaw`
     CREATE TABLE IF NOT EXISTS local_config (
@@ -109,7 +127,8 @@ async function createSchemaIfNeeded(prisma: PrismaClientType): Promise<void> {
       api_url TEXT NOT NULL,
       last_sync DATETIME DEFAULT CURRENT_TIMESTAMP,
       mode TEXT,
-      pos_admin_locked INTEGER DEFAULT 0
+      pos_admin_locked INTEGER DEFAULT 0,
+      super_admin_password TEXT
     )
   `;
 
@@ -682,6 +701,84 @@ async function runMigrations(prisma: PrismaClientType): Promise<void> {
         );
       }
     }
+  }
+
+  // Migration 29: inventarizatsiya (stocktake) on the terminal.
+  //
+  // These tables are web-only on the VPS and never reached a terminal before. They land here so
+  // an OFFLINE_ONLY store can run a stocktake from the dashboard its own terminal serves on the
+  // shop LAN — there is no server to run it on.
+  await prisma.$executeRaw`
+    CREATE TABLE IF NOT EXISTS inventory_counts (
+      id                  TEXT PRIMARY KEY,
+      number              INTEGER NOT NULL UNIQUE,
+      status              TEXT NOT NULL DEFAULT 'DRAFT',
+      scope               TEXT NOT NULL DEFAULT 'FULL',
+      category_id         INTEGER,
+      note                TEXT,
+      created_by_id       TEXT NOT NULL,
+      created_by_name     TEXT NOT NULL,
+      completed_by_id     TEXT,
+      completed_at        DATETIME,
+      total_items         INTEGER NOT NULL DEFAULT 0,
+      counted_items       INTEGER NOT NULL DEFAULT 0,
+      total_difference    DECIMAL NOT NULL DEFAULT 0,
+      total_value_diff    DECIMAL NOT NULL DEFAULT 0,
+      wrote_off_uncounted INTEGER NOT NULL DEFAULT 0,
+      written_off_items   INTEGER NOT NULL DEFAULT 0,
+      write_off_value     DECIMAL NOT NULL DEFAULT 0,
+      created_at          DATETIME NOT NULL DEFAULT (datetime('now')),
+      updated_at          DATETIME NOT NULL DEFAULT (datetime('now'))
+    )
+  `;
+  await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS idx_inventory_counts_status ON inventory_counts(status)`;
+  await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS idx_inventory_counts_created ON inventory_counts(created_at)`;
+
+  await prisma.$executeRaw`
+    CREATE TABLE IF NOT EXISTS inventory_count_items (
+      id              TEXT PRIMARY KEY,
+      count_id        TEXT NOT NULL,
+      product_id      INTEGER NOT NULL,
+      product_name    TEXT NOT NULL,
+      product_name_uz TEXT NOT NULL,
+      barcode         TEXT NOT NULL,
+      unit            TEXT NOT NULL,
+      expected_qty    DECIMAL NOT NULL,
+      cost            DECIMAL,
+      counted_qty     DECIMAL,
+      difference      DECIMAL,
+      counted         INTEGER NOT NULL DEFAULT 0,
+      written_off     INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (count_id) REFERENCES inventory_counts(id) ON DELETE CASCADE
+    )
+  `;
+  await prisma.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS idx_count_items_unique ON inventory_count_items(count_id, product_id)`;
+  await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS idx_count_items_count ON inventory_count_items(count_id)`;
+  await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS idx_count_items_barcode ON inventory_count_items(count_id, barcode)`;
+
+  // When a stocktake last set this product's stock to a physically counted figure.
+  if (!(await columnExists(prisma, 'products', 'stock_counted_at'))) {
+    await prisma.$executeRaw`ALTER TABLE products ADD COLUMN stock_counted_at DATETIME`;
+  }
+
+  // Which categories a supplier delivers. Prisma models this as an implicit many-to-many, whose
+  // table name and column names ("A"/"B", ordered by the related model names) are its convention,
+  // not ours — the generated client queries exactly this shape.
+  await prisma.$executeRaw`
+    CREATE TABLE IF NOT EXISTS _CategoryToSupplier (
+      A INTEGER NOT NULL,
+      B TEXT NOT NULL,
+      FOREIGN KEY (A) REFERENCES categories(id) ON DELETE CASCADE,
+      FOREIGN KEY (B) REFERENCES suppliers(id) ON DELETE CASCADE
+    )
+  `;
+  await prisma.$executeRaw`CREATE UNIQUE INDEX IF NOT EXISTS "_CategoryToSupplier_AB_unique" ON _CategoryToSupplier(A, B)`;
+  await prisma.$executeRaw`CREATE INDEX IF NOT EXISTS "_CategoryToSupplier_B_index" ON _CategoryToSupplier(B)`;
+
+  // Migration 30: manager-override password for sensitive actions, bcrypt hashed. Nullable and
+  // unset, so a terminal that upgrades into this gates nothing until a super admin configures one.
+  if (!(await columnExists(prisma, 'local_config', 'super_admin_password'))) {
+    await prisma.$executeRaw`ALTER TABLE local_config ADD COLUMN super_admin_password TEXT`;
   }
 }
 

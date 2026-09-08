@@ -8,7 +8,7 @@
     "dev:server": "nest start --watch",
     "build:icons": "node scripts/build-icons.mjs",
     "prebuild:pos": "npm run prisma:generate:sqlite && node -e \"const fs=require('fs'),d='dist';if(fs.existsSync(d))fs.readdirSync(d).filter(f=>/\\.(exe|blockmap|yml)$/.test(f)).forEach(f=>fs.unlinkSync(d+'/'+f))\"",
-    "build:pos": "cross-env APP_MODE=pos electron-vite build && electron-builder --config electron-builder.config.js",
+    "build:pos": "npm run build:web && cross-env APP_MODE=pos electron-vite build && electron-builder --config electron-builder.config.js",
     "deploy:pos": "npm run build:pos && node scripts/upload-release.js",
     "build:telegram": "tsc --project src/telegram-bot/tsconfig.json",
     "deploy:telegram": "bash scripts/deploy-telegram.sh",
@@ -30,7 +30,8 @@
     "lint": "eslint src --ext .ts,.tsx",
     "format": "prettier --write \"src/**/*.{ts,tsx,json}\"",
     "test": "jest",
-    "test:watch": "jest --watch"
+    "test:watch": "jest --watch",
+    "build:web": "cd src/web && npm run build && cd ../.. && node scripts/stage-web-for-pos.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^10.0.0",
@@ -51,6 +52,7 @@
     "electron-updater": "^6.8.3",
     "i18next": "^23.0.0",
     "jsbarcode": "^3.12.3",
+    "jsonwebtoken": "^9.0.2",
     "lucide-react": "^0.563.0",
     "mxik": "^1.1.7",
     "passport": "^0.7.0",
@@ -73,6 +75,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/jest": "^30.0.0",
     "@types/jsbarcode": "^3.11.4",
+    "@types/jsonwebtoken": "^9.0.5",
     "@types/node": "^20.0.0",
     "@types/passport-jwt": "^3.0.0",
     "@types/qrcode": "^1.5.6",

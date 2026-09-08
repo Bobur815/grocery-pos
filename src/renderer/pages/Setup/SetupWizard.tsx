@@ -207,6 +207,10 @@ interface WizardData {
   taxRate: string;
   syncInterval: string;
   terminalId: string;
+  // Which server this terminal is being set up against. Chosen here rather than taken from the
+  // build, because a terminal set up against staging must authenticate there — and this is the
+  // only moment to say so, before anything is written.
+  serverUrl: string;
   // Learned from the server during activation and cached locally, so an OFFLINE_ONLY terminal
   // never has to reach the internet again.
   mode: string;
@@ -214,6 +218,9 @@ interface WizardData {
 }
 
 const STEPS: WizardStep[] = ['login', 'storeInfo', 'password'];
+
+/** Last resort if the local config cannot be read — the production server. */
+const DEFAULT_SERVER_URL = 'https://pos.bobur-dev.uz/api';
 
 const STEP_ICONS: Record<WizardStep, React.ReactNode> = {
   login: <KeyRound size={14} />,
@@ -246,6 +253,8 @@ export function SetupWizard() {
     taxRate: '0',
     syncInterval: '5',
     terminalId: 'T1',
+    // Replaced on mount by the URL compiled into this build; editable before logging in.
+    serverUrl: '',
     // Unrestricted until the server says otherwise — a failed prefill must never lock a terminal.
     mode: 'ONLINE',
     posAdminLocked: false,
@@ -256,6 +265,21 @@ export function SetupWizard() {
   const [existingTerminalIds, setExistingTerminalIds] = useState<string[]>([]);
 
   const stepIndex = STEPS.indexOf(currentStep);
+
+  // Seed the server field from the URL this build was compiled with, so the common case is one
+  // fewer thing to type and the uncommon case (staging) is one field to edit.
+  useEffect(() => {
+    window.electronAPI.config
+      .getLocalConfig()
+      .then((config) =>
+        setData((prev) =>
+          prev.serverUrl
+            ? prev
+            : { ...prev, serverUrl: config?.apiUrl || DEFAULT_SERVER_URL },
+        ),
+      )
+      .catch(() => setData((prev) => (prev.serverUrl ? prev : { ...prev, serverUrl: DEFAULT_SERVER_URL })));
+  }, []);
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -269,12 +293,22 @@ export function SetupWizard() {
   const isTerminalIdTaken = (id: string): boolean =>
     existingTerminalIds.some((e) => e.toLowerCase() === id.trim().toLowerCase());
 
+  /** The chosen server, without a trailing slash — every caller appends its own path. */
+  const serverUrl = (): string =>
+    (data.serverUrl.trim() || DEFAULT_SERVER_URL).replace(/\/+$/, '');
+
+  const isServerUrlValid = /^https?:\/\/.+/i.test(data.serverUrl.trim());
+
   // ── Step 1: Login ────────────────────────────────────────────────────────
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isUzPhoneComplete(data.phone) || !data.password || !data.storeId.trim()) {
       setError(t('setup.errors.required_fields'));
+      return;
+    }
+    if (!isServerUrlValid) {
+      setError(t('setup.errors.invalid_server_url'));
       return;
     }
     setError('');
@@ -284,13 +318,13 @@ export function SetupWizard() {
         phone: '998' + data.phone,
         password: data.password,
         storeId: data.storeId.trim(),
+        serverUrl: serverUrl(),
       });
 
       // Pre-fill store info from server (best-effort)
       let prefill: Partial<WizardData> = {};
       try {
-        const config = await window.electronAPI.config.getLocalConfig();
-        const vpsApiUrl = config?.apiUrl || 'https://pos.bobur-dev.uz/api';
+                const vpsApiUrl = serverUrl();
         const res = await fetch(`${vpsApiUrl}/stores/${data.storeId.trim()}`, {
           headers: { Authorization: `Bearer ${result.token}` },
         });
@@ -314,8 +348,7 @@ export function SetupWizard() {
       // Fetch existing terminal IDs to check uniqueness
       let ids: string[] = [];
       try {
-        const config = await window.electronAPI.config.getLocalConfig();
-        const vpsApiUrl = config?.apiUrl || 'https://pos.bobur-dev.uz/api';
+                const vpsApiUrl = serverUrl();
         const res = await fetch(`${vpsApiUrl}/terminals/status`, {
           headers: { Authorization: `Bearer ${result.token}` },
         });
@@ -379,8 +412,7 @@ export function SetupWizard() {
     setError('');
     setIsLoading(true);
     try {
-      const config = await window.electronAPI.config.getLocalConfig();
-      const vpsApiUrl = config?.apiUrl || 'https://pos.bobur-dev.uz/api';
+            const vpsApiUrl = serverUrl();
       await fetch(`${vpsApiUrl}/auth/change-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${data.token}` },
@@ -409,6 +441,7 @@ export function SetupWizard() {
         taxRate: data.taxRate || '0',
         syncInterval: data.syncInterval || '5',
         token: data.token,
+        serverUrl: serverUrl(),
         mode: data.mode,
         posAdminLocked: data.posAdminLocked,
       });
@@ -512,11 +545,27 @@ export function SetupWizard() {
                 placeholder={t('setup.login.storeIdPlaceholder')}
                 required
               />
+              {/* Chosen before logging in, because this is the server the credentials are checked
+                  against — and the one the terminal is pinned to afterwards. */}
+              <Input
+                label={t('setup.login.serverUrl')}
+                value={data.serverUrl}
+                onChange={(e) => setData(prev => ({ ...prev, serverUrl: e.target.value }))}
+                onFocus={() => setActiveField('serverUrl')}
+                placeholder={DEFAULT_SERVER_URL}
+                spellCheck={false}
+                required
+              />
+              <FieldHint $error={!!data.serverUrl && !isServerUrlValid}>
+                {data.serverUrl && !isServerUrlValid
+                  ? t('setup.errors.invalid_server_url')
+                  : t('setup.login.serverUrlHint')}
+              </FieldHint>
               {error && <ErrorMsg>{error}</ErrorMsg>}
               <Actions>
                 <Button
                   type="submit"
-                  disabled={isLoading || !isUzPhoneComplete(data.phone) || !data.password || !data.storeId.trim()}
+                  disabled={isLoading || !isUzPhoneComplete(data.phone) || !data.password || !data.storeId.trim() || !isServerUrlValid}
                   style={{ display: 'flex', alignItems: 'center', gap: 8 }}
                 >
                   {isLoading ? t('setup.login.loading') : t('setup.login.submit')}

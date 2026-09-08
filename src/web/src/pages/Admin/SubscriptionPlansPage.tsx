@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import styled from "styled-components";
 import { RefreshCw, Save } from "lucide-react";
-import { siteConfig, SubscriptionPlanPrices } from "../../api/client";
+import { siteConfig, SubscriptionPlanPrices, SubscriptionPayment } from "../../api/client";
 
 const Page = styled.div`
   padding: 32px;
@@ -110,6 +110,27 @@ const ErrorMsg = styled.div`
   margin-top: 12px;
 `;
 
+const Section = styled.div`
+  margin-top: 40px;
+`;
+
+const SectionTitle = styled.h2`
+  margin: 0 0 4px;
+  font-size: 20px;
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const Field = styled.div`
+  margin-bottom: 18px;
+`;
+
+const FieldHint = styled.div`
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+  margin-top: 6px;
+  line-height: 1.5;
+`;
+
 const PLANS = [
   {
     key: "starter" as keyof SubscriptionPlanPrices,
@@ -136,25 +157,34 @@ const PLANS = [
 
 export function SubscriptionPlansPage() {
   const [prices, setPrices] = useState<SubscriptionPlanPrices>({ starter: 0, pro: 0, vip: 0 });
+  const [payment, setPayment] = useState<SubscriptionPayment>({
+    qrPayload: "",
+    paymentUrl: "",
+    supportPhone: "",
+  });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    siteConfig
-      .getSubscriptionPlans()
-      .then(setPrices)
+    Promise.all([
+      siteConfig.getSubscriptionPlans().then(setPrices),
+      siteConfig.getSubscriptionPayment().then(setPayment),
+    ])
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
+  // Prices and payment details are saved together — they are one page to the super admin, and
+  // splitting the button would leave the POS dialog half-configured after a partial save.
   const handleSave = async () => {
     setSaving(true);
     setSuccess(false);
     setError(null);
     try {
       await siteConfig.setSubscriptionPlans(prices);
+      await siteConfig.setSubscriptionPayment(payment);
       setSuccess(true);
     } catch (e) {
       setError((e as Error).message);
@@ -200,12 +230,61 @@ export function SubscriptionPlansPage() {
             ))}
           </Grid>
 
-          <SaveBtn onClick={handleSave} disabled={saving}>
+          <Section>
+            <SectionTitle>Payment Details</SectionTitle>
+            <Subtitle style={{ marginBottom: 24 }}>
+              Shown on every POS login screen under the subscription button, so stores can pay
+              without calling first.
+            </Subtitle>
+
+            <Card>
+              <Field>
+                <Label>Bank transfer QR payload</Label>
+                <Input
+                  value={payment.qrPayload}
+                  placeholder="Paste the payload your bank app encodes in its transfer QR"
+                  onChange={(e) => setPayment((p) => ({ ...p, qrPayload: e.target.value }))}
+                />
+                <FieldHint>
+                  The terminal renders this into a QR itself, so the dialog still works with no
+                  network. Leave empty to hide the QR.
+                </FieldHint>
+              </Field>
+
+              <Field>
+                <Label>Self-service payment link</Label>
+                <Input
+                  value={payment.paymentUrl}
+                  placeholder="https://my.click.uz/services/pay?service_id=…&store={storeId}"
+                  onChange={(e) => setPayment((p) => ({ ...p, paymentUrl: e.target.value }))}
+                />
+                <FieldHint>
+                  Click, Payme or Paynet link, opened in the cashier's browser. Any{" "}
+                  <code>{"{storeId}"}</code> in the URL is replaced with the paying store's ID.
+                </FieldHint>
+              </Field>
+
+              <Field>
+                <Label>Call centre phone</Label>
+                <Input
+                  value={payment.supportPhone}
+                  placeholder="+998 90 123 45 67"
+                  onChange={(e) => setPayment((p) => ({ ...p, supportPhone: e.target.value }))}
+                />
+                <FieldHint>
+                  Shown next to the instruction to call after a bank transfer, since those are
+                  renewed by hand.
+                </FieldHint>
+              </Field>
+            </Card>
+          </Section>
+
+          <SaveBtn onClick={handleSave} disabled={saving} style={{ marginTop: 24 }}>
             <Save size={16} />
-            {saving ? "Saving…" : "Save Prices"}
+            {saving ? "Saving…" : "Save Changes"}
           </SaveBtn>
 
-          {success && <SuccessMsg>Prices saved successfully.</SuccessMsg>}
+          {success && <SuccessMsg>Saved successfully.</SuccessMsg>}
           {error && <ErrorMsg>{error}</ErrorMsg>}
         </>
       )}

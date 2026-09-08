@@ -44,7 +44,9 @@ export const useAuthStore = create<AuthState>()(
           return true;
         } catch (err) {
           const raw = err instanceof Error ? err.message : '';
-          const match = raw.match(/Error:\s*(auth\.errors\.\S+)/);
+          // The API returns a bare code ("auth.errors.store_inactive"); older paths wrapped it as
+          // "Error: auth.errors.…". Accept either, so a code is not lost to its packaging.
+          const match = raw.match(/(auth\.errors\.[A-Za-z0-9_.]+)/);
           set({
             isLoading: false,
             error: match ? match[1] : 'auth.errors.login_failed',

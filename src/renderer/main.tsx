@@ -4,6 +4,7 @@ import { HashRouter as BrowserRouter } from 'react-router-dom';
 import App from './App';
 import { ThemeProvider } from './theme/ThemeProvider';
 import { ToastProvider } from './context/ToastContext';
+import { SuperAdminGateProvider } from './components/gate/SuperAdminGate';
 import './i18n';
 
 // Forward uncaught renderer errors to the main-process electron-log file
@@ -26,7 +27,9 @@ root.render(
     <BrowserRouter>
       <ThemeProvider>
         <ToastProvider>
-          <App />
+          <SuperAdminGateProvider>
+            <App />
+          </SuperAdminGateProvider>
         </ToastProvider>
       </ThemeProvider>
     </BrowserRouter>

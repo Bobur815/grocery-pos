@@ -6,7 +6,12 @@ import { FileInterceptor } from '@nestjs/platform-express';
 const { diskStorage } = require('multer') as { diskStorage: (opts: any) => any };
 import { extname, join } from 'path';
 import { mkdirSync, existsSync } from 'fs';
-import { SiteConfigService, LoginBanner, SubscriptionPlanPrices } from './site-config.service';
+import {
+  SiteConfigService,
+  LoginBanner,
+  SubscriptionPlanPrices,
+  SubscriptionPayment,
+} from './site-config.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
@@ -30,6 +35,12 @@ class SubscriptionPlanPricesDto {
   @IsNumber() @Min(0) starter!: number;
   @IsNumber() @Min(0) pro!: number;
   @IsNumber() @Min(0) vip!: number;
+}
+
+class SubscriptionPaymentDto {
+  @IsString() qrPayload!: string;
+  @IsString() paymentUrl!: string;
+  @IsString() supportPhone!: string;
 }
 
 @ApiTags('site-config')
@@ -65,6 +76,21 @@ export class SiteConfigController {
   @ApiOperation({ summary: 'Set subscription plan prices (super admin only)' })
   setSubscriptionPlans(@Body() dto: SubscriptionPlanPricesDto): Promise<SubscriptionPlanPrices> {
     return this.siteConfigService.setSubscriptionPlans(dto);
+  }
+
+  @Get('subscription-payment')
+  @ApiOperation({ summary: 'Get subscription payment details — QR payload and pay link (public)' })
+  getSubscriptionPayment(): Promise<SubscriptionPayment> {
+    return this.siteConfigService.getSubscriptionPayment();
+  }
+
+  @Put('subscription-payment')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles('SUPER_ADMIN')
+  @ApiBearerAuth('JWT-auth')
+  @ApiOperation({ summary: 'Set subscription payment details (super admin only)' })
+  setSubscriptionPayment(@Body() dto: SubscriptionPaymentDto): Promise<SubscriptionPayment> {
+    return this.siteConfigService.setSubscriptionPayment(dto);
   }
 
   @Post('upload-image')

@@ -5,6 +5,8 @@ export type {
   StoreCreateInput,
   StoreUpdateInput,
   StoreWithStats,
+  StoreSubscription,
+  SubscriptionPaymentInfo,
 } from './store.types';
 
 export type {

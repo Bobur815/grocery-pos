@@ -54,6 +54,15 @@ export class UpdateStoreDto {
   @IsBoolean()
   posAdminLocked?: boolean;
 
+  @ApiPropertyOptional({
+    example: 'override-1234',
+    description:
+      'Replace the manager-override password. Omit to leave it unchanged; send an empty string to clear it and turn the terminal gate off.',
+  })
+  @IsOptional()
+  @IsString()
+  superAdminPassword?: string;
+
   @ApiPropertyOptional({ type: StoreSettingsDto, description: 'Store settings' })
   @IsOptional()
   @IsObject()

@@ -10,6 +10,7 @@ import { UZQR_BRAND_COLOR, SALE_TENDER_I18N_KEYS, type SaleTender } from '@share
 import { ChevronDown, ChevronRight, Pencil, Printer, Trash2, ShieldCheck, ShieldAlert, RotateCcw, Copy } from 'lucide-react';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { useToast } from '../../context/ToastContext';
+import { useSuperAdminGate } from '../../components/gate/SuperAdminGate';
 
 // Date-range options for the history filter. Lets the cashier reach older receipts so they can
 // be (re-)fiscalized from here — e.g. after enabling the non-VAT-payer mode or fixing an MXIK.
@@ -288,9 +289,16 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
   const [refundingId, setRefundingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
 
+  const gate = useSuperAdminGate();
+
   const formatCurrency = (amount: number) => formatCurrencyBase(amount, i18n.language as 'ru' | 'uz');
 
-  const handleDelete = async () => {
+  // Deleting a receipt removes it from the record and puts its goods back on the shelf, so it is
+  // gated on the manager-override password when the store has one. `require` runs the action
+  // straight through for a store that has not configured one.
+  const handleDelete = () => gate.require(performDelete);
+
+  const performDelete = async () => {
     if (!deleteConfirmId) return;
     const sale = sales.find((s) => s.id === deleteConfirmId);
     // A fiscalized receipt must be reversed on the OFD before the local record is dropped,

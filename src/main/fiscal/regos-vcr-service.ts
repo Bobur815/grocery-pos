@@ -970,12 +970,29 @@ class RegosVcrService {
     // (fiscalizeOldReceipts). A silently-looping retry that hammers the VCR every 30s is gone.
   }
 
+  /**
+   * Strip the password out of a connection string before it reaches a log.
+   *
+   * This diagnostic is uploaded: `flushLogs()` ships it to `POST /logs/upload`, where it lands in
+   * the VPS `terminal_logs` table and the super-admin Logs page. A terminal's own SQLite path is
+   * `file:...` and carries no secret, but the value must be sanitised on the way out regardless —
+   * this line has already leaked a PostgreSQL password once.
+   */
+  private redactConnection(url: string | undefined): string {
+    if (!url) return '(unset)';
+    // Everything between "scheme://" and the LAST "@" of the authority goes, username included.
+    // Greedy on purpose: a password containing an unescaped "@" would otherwise survive in part,
+    // and over-redacting a diagnostic costs nothing while under-redacting a secret costs a lot.
+    // A `file:` URL has no authority and no "@", so a terminal's own path is left readable.
+    return url.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/?#]*@/i, '$1***@');
+  }
+
   private async logStartupConfig(): Promise<void> {
     try {
       const cfg = await this.resolveConfig();
       const passwordRowExists = await hasVcrPassword();
       log.info('[fiscal] resolved config at startup', {
-        db: process.env.DATABASE_URL,
+        db: this.redactConnection(process.env.DATABASE_URL),
         enabled: cfg.enabled,
         url: cfg.url,
         login: cfg.login,

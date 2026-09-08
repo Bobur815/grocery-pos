@@ -18,6 +18,11 @@ module.exports = {
   files: [
     'dist-electron/**/*',
     'dist-renderer/**/*',
+    // The web dashboard, served on the shop LAN by an OFFLINE_ONLY terminal so the owner can
+    // open it on a phone with no internet. Built by `npm run build:web`, which `build:pos` runs.
+    // Staged in dist-web rather than dist/web because `dist` is this config's own output
+    // directory, which electron-builder excludes from `files`.
+    'dist-web/**/*',
     'src/generated/prisma-sqlite/**/*',
     'build/icons/**/*'
   ],

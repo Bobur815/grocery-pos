@@ -30,6 +30,15 @@ model Store {
   subscriptionPlan      String?   @map("subscription_plan") // "STARTER" | "PRO" | "VIP"
   subscriptionExpiresAt DateTime? @map("subscription_expires_at") // null = perpetual (VIP)
 
+  /// Manager-override password for this store's terminals, bcrypt hashed — never plaintext.
+  /// Set by a super admin, delivered to a terminal through GET /store-config, and compared there
+  /// with bcrypt so it still works for an OFFLINE_ONLY store that never reaches this server.
+  /// Null means no override is configured and the terminal gates nothing.
+  ///
+  /// MUST NOT be selected by findAll()/findById() — GET /stores/:id is reachable by a store's own
+  /// ADMIN, who could otherwise crack their own override offline. See stores.service.ts.
+  superAdminPassword String? @map("super_admin_password")
+
   settings String? @db.Text // JSON: tax rate, receipt template, etc.
 
   scheduledDeleteAt DateTime? @map("scheduled_delete_at")

@@ -50,10 +50,14 @@ axiosInstance.interceptors.response.use(
       localStorage.removeItem("auth-storage");
       window.location.href = "/web/login";
     }
+    // Prefer the server's own message. An axios rejection is already an Error, so the previous
+    // `error instanceof Error ? error : ...` always took the first branch and every failure
+    // surfaced as "Request failed with status code N" — the API's message, and with it every
+    // `auth.errors.*` code the UI is meant to translate, was thrown away.
+    const serverMessage = error?.response?.data?.message;
+    const message = Array.isArray(serverMessage) ? serverMessage.join(', ') : serverMessage;
     return Promise.reject(
-      error instanceof Error
-        ? error
-        : new Error(error.response?.data?.message ?? String(error)),
+      message ? new Error(String(message)) : error instanceof Error ? error : new Error(String(error)),
     );
   },
 );
@@ -528,6 +532,8 @@ export interface StoreRecord {
   scheduledDeleteAt: string | null;
   mode: StoreMode;
   posAdminLocked: boolean;
+  /** Whether a manager-override password is set. The password itself is never returned. */
+  hasSuperAdminPassword: boolean;
   createdAt: string;
   updatedAt: string;
   _count?: { users: number; products: number; sales: number; terminalHeartbeats: number };
@@ -562,6 +568,8 @@ export const stores = {
     phone?: string;
     mode?: StoreMode;
     posAdminLocked?: boolean;
+    /** Plaintext; the server hashes it. Omit to configure none. */
+    superAdminPassword?: string;
   }): Promise<StoreRecord> => {
     const { data } = await axiosInstance.post("/stores", payload);
     return data;
@@ -578,6 +586,8 @@ export const stores = {
       subscriptionExpiresAt: string | null;
       mode: StoreMode;
       posAdminLocked: boolean;
+      /** Plaintext; the server hashes it. Omit to leave unchanged, "" to clear. */
+      superAdminPassword: string;
     }>,
   ): Promise<StoreRecord> => {
     const { data } = await axiosInstance.patch(`/stores/${id}`, payload);
@@ -664,6 +674,15 @@ export interface SubscriptionPlanPrices {
   vip: number;
 }
 
+/** How stores pay for their subscription — shown on every POS login screen. */
+export interface SubscriptionPayment {
+  /** Bank-transfer payload; the POS renders it into a QR locally so it works offline. */
+  qrPayload: string;
+  /** Click/Payme/Paynet self-service link. A `{storeId}` placeholder is filled in per store. */
+  paymentUrl: string;
+  supportPhone: string;
+}
+
 export const siteConfig = {
   getLoginBanner: async (): Promise<LoginBanner> => {
     const { data } = await axiosInstance.get('/site-config/login-banner');
@@ -687,6 +706,14 @@ export const siteConfig = {
   },
   setSubscriptionPlans: async (prices: SubscriptionPlanPrices): Promise<SubscriptionPlanPrices> => {
     const { data } = await axiosInstance.put('/site-config/subscription-plans', prices);
+    return data;
+  },
+  getSubscriptionPayment: async (): Promise<SubscriptionPayment> => {
+    const { data } = await axiosInstance.get('/site-config/subscription-payment');
+    return data;
+  },
+  setSubscriptionPayment: async (payment: SubscriptionPayment): Promise<SubscriptionPayment> => {
+    const { data } = await axiosInstance.put('/site-config/subscription-payment', payment);
     return data;
   },
 };

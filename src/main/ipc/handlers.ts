@@ -10,7 +10,10 @@ import { setupMarkingCodesHandlers } from "./marking-codes-handlers";
 import { setupMarkingCheckHandlers } from "./marking-check-handlers";
 import { setupFiscalHandlers } from "./fiscal-handlers";
 import { setupUzQrHandlers } from "./uzqr-handlers";
+import { setupSubscriptionHandlers } from "./subscription-handlers";
 import { getAppConfig, updateConfig } from "../config/app-config";
+import { getLanAddress } from "../network/lan-address";
+import { getLocalServerStatus } from "../local-server";
 import { getAuthToken, getServerToken, clearServerToken } from "../sync/queue-manager";
 import { getPrismaClient, readStoreBootstrap, writeStoreBootstrap } from "../database/sqlite-client";
 import {
@@ -20,6 +23,23 @@ import {
 import { convertUzbekText } from "../../shared/utils/transliterator";
 import { mapPackageNames } from "../../shared/utils/mxik-packages";
 import { findBarcodeMatch } from "../../shared/utils/mxik-lookup";
+
+/** Host probed by `app:isOnline` when the caller names none. */
+const DEFAULT_ONLINE_PROBE_URL = "https://pos.bobur-dev.uz";
+
+/**
+ * Port the web dashboard is served on for an OFFLINE_ONLY store.
+ *
+ * Defaults to the port Vite already uses, so a dashboard started by hand during development is
+ * reachable from the QR without configuring anything.
+ */
+const DEFAULT_LOCAL_WEB_PORT = 5173;
+
+async function getLocalWebPort(prisma: ReturnType<typeof getPrismaClient>): Promise<number> {
+  const setting = await prisma.systemSetting.findUnique({ where: { key: "local_web_port" } });
+  const port = Number(setting?.value);
+  return Number.isInteger(port) && port > 0 && port < 65536 ? port : DEFAULT_LOCAL_WEB_PORT;
+}
 
 export function setupIpcHandlers(): void {
   // Setup all IPC handlers
@@ -41,6 +61,7 @@ export function setupIpcHandlers(): void {
   setupMxikHandlers();
   setupFiscalHandlers();
   setupUzQrHandlers();
+  setupSubscriptionHandlers();
 }
 
 // MXIK catalog lives only in the VPS PostgreSQL, so the renderer proxies through
@@ -818,9 +839,12 @@ function setupAppHandlers(): void {
     return app.getVersion();
   });
 
-  ipcMain.handle("app:isOnline", () => {
+  // Reachability probe. Callers may name the host they actually care about — a terminal pointed
+  // at staging should be judged against staging, not against the production default.
+  ipcMain.handle("app:isOnline", (_event, url?: string) => {
+    const target = /^https?:\/\/.+/i.test(url ?? "") ? (url as string) : DEFAULT_ONLINE_PROBE_URL;
     return new Promise<boolean>((resolve) => {
-      const req = net.request({ method: "HEAD", url: "https://pos.bobur-dev.uz" });
+      const req = net.request({ method: "HEAD", url: target });
       const timer = setTimeout(() => { req.abort(); resolve(false); }, 3000);
       req.on("response", () => { clearTimeout(timer); resolve(true); });
       req.on("error", () => { clearTimeout(timer); resolve(false); });
@@ -853,23 +877,49 @@ function setupAppHandlers(): void {
     return prisma.localConfig.findUnique({ where: { id: "config" } });
   });
 
-  // Web admin dashboard address as a scannable QR, for opening it on a phone.
-  //
-  // Returns null for an OFFLINE_ONLY store: it has no server, so there is no dashboard to point
-  // at. The QR is generated here rather than in the renderer to match how UzQR does it and to
-  // keep the /api -> /web derivation in one place.
+  /**
+   * Web admin dashboard address as a scannable QR, for opening it on a phone.
+   *
+   * An OFFLINE_ONLY store has no VPS, but it does not follow that it has no dashboard: the store's
+   * data is right here in SQLite, and the terminal serves the dashboard on the shop's own network.
+   * So that store gets its own LAN address instead of a server one, and `local` tells the renderer
+   * which of the two it is looking at.
+   *
+   * The QR is generated here rather than in the renderer to match how UzQR does it and to keep the
+   * /api -> /web derivation in one place.
+   */
   ipcMain.handle("config:getWebAdminQr", async () => {
     const prisma = getPrismaClient();
     const localConfig = await prisma.localConfig.findUnique({ where: { id: "config" } });
-    if (!localConfig?.apiUrl || localConfig.mode === "OFFLINE_ONLY") return null;
 
-    const url = `${localConfig.apiUrl.replace(/\/api\/?$/, "")}/web`;
+    let url: string;
+    let error: string | null = null;
+    const local = localConfig?.mode === "OFFLINE_ONLY";
+
+    if (local) {
+      // The terminal serves the dashboard itself for this store, so the QR points at whatever
+      // address that listener actually came up on rather than a guess.
+      const status = getLocalServerStatus();
+      const address = status.address;
+      // No network at all — there is no address a phone could reach, so say nothing rather than
+      // printing a localhost URL that only works on the till itself.
+      if (!address) return null;
+      url = status.url ?? `http://${address}:${await getLocalWebPort(prisma)}/web/`;
+      // The address is still worth showing — during development the port is usually Vite's, and
+      // that does serve the dashboard — but the reason it is not us must be said, or a QR that
+      // leads somewhere unexpected looks like a bug in the phone.
+      if (!status.running) error = status.error ?? "The dashboard service is not running.";
+    } else {
+      if (!localConfig?.apiUrl) return null;
+      url = `${localConfig.apiUrl.replace(/\/api\/?$/, "")}/web`;
+    }
+
     try {
       const qrDataUrl = await QRCode.toDataURL(url, { width: 320, margin: 1 });
-      return { url, qrDataUrl };
+      return { url, qrDataUrl, local, error };
     } catch {
       // Still give the renderer the address so it can show it as text.
-      return { url, qrDataUrl: null };
+      return { url, qrDataUrl: null, local, error };
     }
   });
 

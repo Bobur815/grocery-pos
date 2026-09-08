@@ -29,6 +29,12 @@ model LocalConfig {
   mode           String? @map("mode") // "OFFLINE_ONLY" | "ONLINE"
   posAdminLocked Boolean @default(false) @map("pos_admin_locked")
 
+  // Manager-override password for sensitive actions on this terminal, bcrypt hashed. Learned from
+  // GET /store-config at setup and refreshed each sync cycle. Compared locally, so it works for an
+  // OFFLINE_ONLY store that never reaches the server. Null = no override configured, and the POS
+  // gates nothing — that is what keeps every existing terminal behaving as it does today.
+  superAdminPassword String? @map("super_admin_password")
+
   @@map("local_config")
 }
 
@@ -57,12 +63,15 @@ model User {
 // ==================== PRODUCTS & INVENTORY ====================
 
 model Category {
-  id            Int       @id @default(autoincrement())
-  nameUz        String    @map("name_uz")
-  nameRu        String    @map("name_ru")
-  active        Boolean   @default(true)
-  mxikGroupCode String?   @map("mxik_group_code")
+  id            Int        @id @default(autoincrement())
+  nameUz        String     @map("name_uz")
+  nameRu        String     @map("name_ru")
+  active        Boolean    @default(true)
+  mxikGroupCode String?    @map("mxik_group_code")
   products      Product[]
+  // Which suppliers deliver this category. Mirrors the server's many-to-many so the dashboard's
+  // supplier pages work the same offline; never synced, so an ONLINE store's copy stays empty.
+  suppliers     Supplier[]
 
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
@@ -120,12 +129,17 @@ model Product {
   // VAT % registered for this product's MXIK (e.g. 0, 6 or 12). Null → use global regos_vcr_vat default
   vatRate          Float?  @map("vat_rate")
 
+  // When a stocktake last set this product's stock to a counted figure. Written by completing an
+  // InventoryCount; it marks the point after which stock is known absolutely rather than derived.
+  stockCountedAt DateTime? @map("stock_counted_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  sales              SaleItem[]
-  inventoryMovements InventoryArrival[]
-  preWeighedItems    PreWeighedItem[]
+  sales               SaleItem[]
+  inventoryMovements  InventoryArrival[]
+  preWeighedItems     PreWeighedItem[]
+  inventoryCountItems InventoryCountItem[]
 
   @@index([mxik]) // Fast MXIK lookup
   @@map("products")
@@ -307,6 +321,7 @@ model Supplier {
   arrivals     InventoryArrival[]
   products     Product[]
   transactions SupplierTransaction[]
+  categories   Category[]
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -391,4 +406,78 @@ model SyncQueue {
 
   @@index([entity])
   @@map("sync_queue")
+}
+
+// ==================== INVENTARIZATSIYA (STOCKTAKE) ====================
+// Ported from the PostgreSQL schema so an OFFLINE_ONLY store can run a stocktake from the web
+// dashboard the terminal serves on its own LAN. Two deliberate differences from the server:
+//   - no storeId — one terminal database is one store, so `number` is unique on its own
+//   - status/scope are plain strings, because Prisma has no enum support on SQLite
+// status: DRAFT | IN_PROGRESS | COMPLETED | CANCELLED
+// scope:  FULL | CATEGORY | CUSTOM (CUSTOM is reserved and refused, as on the server)
+
+model InventoryCount {
+  id     String @id @default(cuid())
+  number Int    @unique // human-readable doc №, sequential
+
+  status     String  @default("DRAFT")
+  scope      String  @default("FULL")
+  categoryId Int?    @map("category_id") // set when scope = CATEGORY
+  note       String?
+
+  createdById   String    @map("created_by_id")
+  createdByName String    @map("created_by_name") // denormalized for the list
+  completedById String?   @map("completed_by_id")
+  completedAt   DateTime? @map("completed_at")
+
+  // Summary, filled on completion.
+  totalItems      Int     @default(0) @map("total_items")
+  countedItems    Int     @default(0) @map("counted_items")
+  totalDifference Decimal @default(0) @map("total_difference")
+  totalValueDiff  Decimal @default(0) @map("total_value_diff")
+
+  // Write-off of uncounted lines, chosen at completion. Denormalized like the counters above so
+  // the list page can render a document without loading its items.
+  wroteOffUncounted Boolean @default(false) @map("wrote_off_uncounted")
+  writtenOffItems   Int     @default(0) @map("written_off_items")
+  writeOffValue     Decimal @default(0) @map("write_off_value") // subset of totalValueDiff
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  items InventoryCountItem[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("inventory_counts")
+}
+
+model InventoryCountItem {
+  id      String         @id @default(cuid())
+  countId String         @map("count_id")
+  count   InventoryCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+
+  productId Int     @map("product_id")
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Snapshot taken at document creation — never re-read from the live product.
+  // Both names are stored so the UI renders in either language without a join.
+  productName   String   @map("product_name") // nameRu
+  productNameUz String   @map("product_name_uz")
+  barcode       String
+  unit          String
+  expectedQty   Decimal  @map("expected_qty")
+  cost          Decimal?
+
+  countedQty Decimal? @map("counted_qty") // null = not counted yet
+  difference Decimal? // counted − expected, set on completion
+  counted    Boolean  @default(false)
+  // Set to 0 by a write-off rather than physically counted — `counted` stays false, so this is
+  // what separates "missing, written off" from "counted and found zero".
+  writtenOff Boolean  @default(false) @map("written_off")
+
+  @@unique([countId, productId])
+  @@index([countId])
+  @@index([countId, barcode])
+  @@map("inventory_count_items")
 }

@@ -8,6 +8,7 @@ import { getAppConfig } from '../config/app-config';
 import { getPrismaClient } from '../database/sqlite-client';
 import { getServerToken, clearServerToken } from './queue-manager';
 import { shouldSync, shouldUploadMasterData } from './sync-policy';
+import { syncLocalServerWithMode } from '../local-server';
 import { flushLogs } from '../logger';
 
 function decodeTokenStoreId(token: string): string | null | undefined {
@@ -263,16 +264,43 @@ export class SyncService {
       // live terminal within one sync cycle — no rebuild, and flipping it back is the rollback.
       // Only write fields the server actually sent, so an older server can't silently unlock a
       // terminal by omitting them.
-      const modeUpdate: { mode?: string; posAdminLocked?: boolean } = {};
+      const modeUpdate: {
+        mode?: string;
+        posAdminLocked?: boolean;
+        superAdminPassword?: string | null;
+      } = {};
       if (data.mode === 'OFFLINE_ONLY' || data.mode === 'ONLINE') {
         modeUpdate.mode = data.mode;
       }
       if (typeof data.pos_admin_locked === 'boolean') {
         modeUpdate.posAdminLocked = data.pos_admin_locked;
       }
+      // The manager-override password, so changing it in the dashboard reaches a live terminal
+      // within one cycle instead of waiting for setup to be re-run. Keyed on the field being
+      // present rather than truthy: an explicit null is the super admin clearing the override,
+      // which must take effect, while an older server omits the key entirely and changes nothing.
+      if ('super_admin_password_hash' in data) {
+        const hash = data.super_admin_password_hash;
+        modeUpdate.superAdminPassword = typeof hash === 'string' && hash ? hash : null;
+      }
       if (Object.keys(modeUpdate).length > 0) {
         await prisma.localConfig.update({ where: { id: 'config' }, data: modeUpdate });
-        this.notifyRenderer('config:modeChanged', modeUpdate);
+        // Only the mode fields reach the renderer. The password hash stays in the main process —
+        // the renderer never needs it (it asks main to verify) and sending it would put it in a
+        // browser context, which is exactly what fetching it in main was meant to avoid.
+        this.notifyRenderer('config:modeChanged', {
+          ...(modeUpdate.mode !== undefined ? { mode: modeUpdate.mode } : {}),
+          ...(modeUpdate.posAdminLocked !== undefined
+            ? { posAdminLocked: modeUpdate.posAdminLocked }
+            : {}),
+        });
+        // A store switched to OFFLINE_ONLY gains its own LAN dashboard, and one switched back
+        // loses it — within the same cycle the mode itself lands, so neither needs a restart.
+        if (modeUpdate.mode) {
+          void syncLocalServerWithMode().catch((err) =>
+            console.error('[local-server] mode change failed:', err),
+          );
+        }
       }
     } catch {
       // Offline or endpoint not yet implemented — use cached limit

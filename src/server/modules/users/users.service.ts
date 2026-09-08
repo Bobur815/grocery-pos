@@ -58,6 +58,10 @@ export class UsersService {
         nameRu: true,
         active: true,
         createdAt: true,
+        // Joined rather than fetched separately: `validateUser` runs on every authenticated
+        // request and needs the store's state to keep a deactivated shop out. Pulling it in here
+        // costs no extra round trip.
+        store: { select: { active: true, mode: true } },
       },
     });
 

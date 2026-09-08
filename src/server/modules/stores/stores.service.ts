@@ -9,46 +9,74 @@ import { UpdateStoreDto } from "./dto/update-store.dto";
 import * as bcrypt from "bcryptjs";
 import { UserRole } from "@prisma/client";
 
+/**
+ * Exactly the columns a store may be read back as.
+ *
+ * An allowlist, not a "select everything then delete the secret": these rows are rendered by the
+ * dashboard AND handed to a store's own ADMIN through `GET /stores/:id`, so a new sensitive column
+ * must be invisible here by default rather than leak until someone remembers to strip it.
+ *
+ * `superAdminPassword` is the one deliberately missing field — see `hasSuperAdminPassword` below.
+ */
+const STORE_FIELDS = {
+  id: true,
+  name: true,
+  address: true,
+  phone: true,
+  active: true,
+  aiPlan: true,
+  balance: true,
+  subscriptionPlan: true,
+  subscriptionExpiresAt: true,
+  settings: true,
+  scheduledDeleteAt: true,
+  mode: true,
+  posAdminLocked: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+const STORE_COUNTS = {
+  _count: {
+    select: {
+      users: true,
+      products: true,
+      sales: true,
+      terminalHeartbeats: true,
+    },
+  },
+} as const;
+
+/** What the dashboard needs to know about the override password: whether there is one. */
+type StoreRow = { superAdminPassword?: string | null };
+function withPasswordFlag<T extends StoreRow>(store: T) {
+  const { superAdminPassword, ...rest } = store;
+  return { ...rest, hasSuperAdminPassword: Boolean(superAdminPassword) };
+}
+
 @Injectable()
 export class StoresService {
   constructor(private prisma: PrismaService) {}
 
   async findAll() {
-    return this.prisma.store.findMany({
+    const stores = await this.prisma.store.findMany({
       orderBy: { createdAt: "desc" },
-      include: {
-        _count: {
-          select: {
-            users: true,
-            products: true,
-            sales: true,
-            terminalHeartbeats: true,
-          },
-        },
-      },
+      select: { ...STORE_FIELDS, ...STORE_COUNTS, superAdminPassword: true },
     });
+    return stores.map(withPasswordFlag);
   }
 
   async findById(id: string) {
     const store = await this.prisma.store.findUnique({
       where: { id },
-      include: {
-        _count: {
-          select: {
-            users: true,
-            products: true,
-            sales: true,
-            terminalHeartbeats: true,
-          },
-        },
-      },
+      select: { ...STORE_FIELDS, ...STORE_COUNTS, superAdminPassword: true },
     });
 
     if (!store) {
       throw new NotFoundException("Store not found");
     }
 
-    return store;
+    return withPasswordFlag(store);
   }
 
   private async generateStoreId(): Promise<string> {
@@ -115,6 +143,15 @@ export class StoresService {
           ...(createStoreDto.posAdminLocked !== undefined && {
             posAdminLocked: createStoreDto.posAdminLocked,
           }),
+          // Hashed on the way in; the plaintext never touches a column or a log.
+          ...(createStoreDto.superAdminPassword
+            ? {
+                superAdminPassword: await bcrypt.hash(
+                  createStoreDto.superAdminPassword,
+                  10,
+                ),
+              }
+            : {}),
         },
       });
 
@@ -135,7 +172,9 @@ export class StoresService {
       return s;
     });
 
-    return store;
+    // Read back through findById rather than returning the transaction's row: that row is the
+    // whole record, hash included, and this response goes straight to the dashboard.
+    return this.findById(store.id);
   }
 
   async resetAdminUser(storeId: string, phone: string) {
@@ -204,11 +243,19 @@ export class StoresService {
     if (updateStoreDto.settings !== undefined) {
       data.settings = JSON.stringify(updateStoreDto.settings);
     }
+    // Three distinct intents, so the empty string is meaningful rather than ignored:
+    //   undefined -> leave the current password alone (the dashboard sends a blank field)
+    //   ""        -> clear it, turning the terminal gate off
+    //   a value   -> replace it
+    if (updateStoreDto.superAdminPassword !== undefined) {
+      data.superAdminPassword = updateStoreDto.superAdminPassword
+        ? await bcrypt.hash(updateStoreDto.superAdminPassword, 10)
+        : null;
+    }
 
-    return this.prisma.store.update({
-      where: { id },
-      data,
-    });
+    await this.prisma.store.update({ where: { id }, data });
+    // Read back through findById so the response cannot carry the hash.
+    return this.findById(id);
   }
 
   async activate(id: string) {

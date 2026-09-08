@@ -1,4 +1,4 @@
-import { IsString, IsNotEmpty, IsOptional, IsObject, IsBoolean, IsIn, MaxLength } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, IsObject, IsBoolean, IsIn, MaxLength, MinLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class StoreSettingsDto {
@@ -56,6 +56,16 @@ export class CreateStoreDto {
   @IsOptional()
   @IsBoolean()
   posAdminLocked?: boolean;
+
+  @ApiPropertyOptional({
+    example: 'override-1234',
+    description:
+      'Manager-override password for the terminals of this store. Sent as plaintext, stored bcrypt hashed, and never returned. Omit to configure none.',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(4)
+  superAdminPassword?: string;
 
   @ApiPropertyOptional({ type: StoreSettingsDto, description: 'Store settings' })
   @IsOptional()

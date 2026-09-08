@@ -60,7 +60,9 @@
       "no_cashier_found": "Faol kassir hisobi topilmadi",
       "login_failed": "Kirish xatosi",
       "server_not_configured": "Noto'g'ri Store ID. Server sozlamalarini tekshiring.",
-      "pin_taken": "Bu PIN-kod boshqa xodimda mavjud"
+      "pin_taken": "Bu PIN-kod boshqa xodimda mavjud",
+      "store_inactive": "Do'kon o'chirilgan, shuning uchun boshqaruv paneliga kirib bo'lmaydi. Ishni tiklash uchun qo'llab-quvvatlash xizmatiga murojaat qiling.",
+      "store_offline_only": "Bu do'kon oflayn rejimda ishlaydi: barcha ma'lumotlar serverda emas, terminalning o'zida saqlanadi. Boshqaruv panelini terminalning o'zidan oching — telefoningizni xuddi shu Wi-Fi tarmog'iga ulab, uning kirish ekranidagi QR-kodni skanerlang."
     },
     "serverSettings": "Server sozlamalari",
     "storeId": "Store ID",
@@ -805,7 +807,9 @@
     "pinMismatch": "PIN-kodlar mos kelmaydi",
     "pinChanged": "PIN-kod muvaffaqiyatli o'zgartirildi",
     "pinRemoved": "PIN-kod o'chirildi",
-    "pinChangeFailed": "PIN-kodni o'zgartirib bo'lmadi"
+    "pinChangeFailed": "PIN-kodni o'zgartirib bo'lmadi",
+    "webAdminLocalHint": "Boshqaruv paneli shu terminalda ishlaydi. Telefoningizni xuddi shu Wi-Fi tarmog'iga ulang va kodni skanerlang.",
+    "webAdminUnavailable": "Panelni ochish uchun manzil yo'q. Terminal tarmoqqa ulanganini tekshiring."
   },
   "updater": {
     "currentVersion": "Joriy versiya",
@@ -1146,7 +1150,18 @@
     "perpetual": "Muddatsiz",
     "storeBalanceTitle": "Do'kon balansi",
     "storeBalance": "Balans",
-    "pricePerMonth": "so'm/oy"
+    "pricePerMonth": "so'm/oy",
+    "statusTitle": "Do'kon obunasi",
+    "aiPlan": "AI tarifi",
+    "aiPlanFree": "Bepul",
+    "aiPlanPaid": "Pullik",
+    "offlineHint": "Server bilan aloqa yo'q — oxirgi saqlangan ma'lumotlar ko'rsatilmoqda.",
+    "payAction": "To'lash",
+    "payTitle": "Obunani to'lash",
+    "payScanHint": "Obunani to'lash uchun istalgan mobil bank ilovasi orqali quyidagi QR-kodni skanerlang.",
+    "payCallHint": "To'lovni amalga oshirganingizdan so'ng, albatta, call-markazimizga qo'ng'iroq qiling va to'lov haqida xabar bering, shunda biz obunangizni qo'lda yangilashimiz mumkin bo'ladi.",
+    "payLinkHint": "Agar operatorga qo'ng'iroq qilmasdan obunani avtomatik ravishda uzaytirishni istasangiz, quyidagi havola orqali Click, Payme yoki Paynet ilovalari orqali to'lovni amalga oshiring. To'lovdan so'ng obuna darhol uzaytiriladi.",
+    "payOnline": "Onlayn to'lash"
   },
   "smena": {
     "viewDetails": "Batafsil",
@@ -1231,7 +1246,9 @@
       "storeId": "Do'kon ID",
       "storeIdPlaceholder": "Masalan: 1000",
       "submit": "Kirish",
-      "loading": "Tekshirilmoqda..."
+      "loading": "Tekshirilmoqda...",
+      "serverUrl": "Server manzili",
+      "serverUrlHint": "Ushbu terminal ulanadigan server. Boshqacha ko'rsatilmagan bo'lsa, standart holicha qoldiring."
     },
     "storeInfo": {
       "title": "Do'kon ma'lumotlari",
@@ -1276,7 +1293,13 @@
       "admin_required": "Sozlash uchun administrator hisobi kerak",
       "network_error": "Serverga ulanishda xato",
       "login_failed": "Kirish xatosi",
-      "required_fields": "Barcha majburiy maydonlarni to'ldiring"
+      "required_fields": "Barcha majburiy maydonlarni to'ldiring",
+      "invalid_server_url": "http:// yoki https:// bilan boshlanadigan to'g'ri manzil kiriting"
     }
+  },
+  "superAdmin": {
+    "title": "Administrator tasdig'i",
+    "hint": "Bu amal himoyalangan. Davom etish uchun do'kon administratori parolini kiriting.",
+    "wrongPassword": "Parol noto'g'ri. Agar urinishlar juda ko'p bo'lsa, bir daqiqa kuting."
   }
 }

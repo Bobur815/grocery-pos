@@ -149,6 +149,10 @@ export function StoreFormModal({ store, onClose, onSaved }: Props) {
   const [phoneDigits, setPhoneDigits] = useState(phoneToDigits(store?.phone ?? ""));
   const [mode, setMode] = useState<StoreMode>(store?.mode ?? "ONLINE");
   const [posAdminLocked, setPosAdminLocked] = useState(store?.posAdminLocked ?? false);
+  // Always starts blank — the server never returns the password, only whether one exists. Blank
+  // therefore means "leave as-is", which is why clearing needs its own explicit control.
+  const [superAdminPassword, setSuperAdminPassword] = useState("");
+  const [clearSuperAdminPassword, setClearSuperAdminPassword] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -161,12 +165,18 @@ export function StoreFormModal({ store, onClose, onSaved }: Props) {
     setPhoneDigits(phoneToDigits(store?.phone ?? ""));
     setMode(store?.mode ?? "ONLINE");
     setPosAdminLocked(store?.posAdminLocked ?? false);
+    setSuperAdminPassword("");
+    setClearSuperAdminPassword(false);
   }, [store]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setError("Store name is required.");
+      return;
+    }
+    if (superAdminPassword && superAdminPassword.length < 4) {
+      setError("The manager password must be at least 4 characters.");
       return;
     }
     setSaving(true);
@@ -179,6 +189,13 @@ export function StoreFormModal({ store, onClose, onSaved }: Props) {
         mode,
         // Never persist a lock on an offline store — it would be a no-op the terminal still reads.
         posAdminLocked: lockApplies ? posAdminLocked : false,
+        // Three states, matching what the API expects: omitted leaves the current password alone,
+        // "" clears it, a value replaces it.
+        ...(clearSuperAdminPassword
+          ? { superAdminPassword: "" }
+          : superAdminPassword
+            ? { superAdminPassword }
+            : {}),
       };
       if (isNew) {
         await stores.create(payload);
@@ -258,6 +275,38 @@ export function StoreFormModal({ store, onClose, onSaved }: Props) {
                 ? "Hides stock, suppliers and user management in the Electron app and stops it uploading product, user, supplier, arrival and settings changes. Sales and shifts still sync. Takes effect on the terminal within one sync cycle; unchecking it restores everything."
                 : "Only applies to online stores — an offline store always keeps full local management."}
             </Hint>
+          </Field>
+
+          <Field>
+            <Label>Manager password</Label>
+            <Input
+              type="password"
+              autoComplete="new-password"
+              value={superAdminPassword}
+              disabled={clearSuperAdminPassword}
+              placeholder={
+                store?.hasSuperAdminPassword ? "Set — type to replace" : "Not set"
+              }
+              onChange={(e) => setSuperAdminPassword(e.target.value)}
+            />
+            <Hint>
+              Asked for on the terminal before sensitive actions, such as deleting a receipt. The
+              terminal checks it offline, so it works for an offline-only store too. Leave blank to
+              keep the current password; leave it unset and nothing is gated.
+            </Hint>
+            {store?.hasSuperAdminPassword && (
+              <CheckRow>
+                <input
+                  type="checkbox"
+                  checked={clearSuperAdminPassword}
+                  onChange={(e) => {
+                    setClearSuperAdminPassword(e.target.checked);
+                    if (e.target.checked) setSuperAdminPassword("");
+                  }}
+                />
+                <span>Remove the password (stops gating anything)</span>
+              </CheckRow>
+            )}
           </Field>
 
           {error && <ErrorMsg>{error}</ErrorMsg>}
