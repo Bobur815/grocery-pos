@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import styled from 'styled-components';
-import { Button } from '../../components/common/Button';
-import { Input } from '../../components/common/Input';
-import { UzbekPhoneInput } from '../../components/common/UzbekPhoneInput';
-import { isUzPhoneComplete } from '@shared/utils/phone';
-import { convertUzbekText } from '@shared/utils/transliterator';
-import { USER_ROLES, UserRole} from '@shared/constants';
+import React, { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import styled from "styled-components";
+import { Button } from "../../components/common/Button";
+import { Input } from "../../components/common/Input";
+import { UzbekPhoneInput } from "../../components/common/UzbekPhoneInput";
+import { isUzPhoneComplete } from "@shared/utils/phone";
+import { convertUzbekText } from "@shared/utils/transliterator";
+import { USER_ROLES, UserRole } from "@shared/constants";
 
 const Container = styled.div`
   max-width: 500px;
@@ -89,17 +89,17 @@ export function UserForm() {
     role: UserRole;
     pin: string;
   }>({
-    phone: '',
-    password: '',
-    nameRu: '',
-    nameUz: '',
+    phone: "",
+    password: "",
+    nameRu: "",
+    nameUz: "",
     role: USER_ROLES.USER,
-    pin: '',
+    pin: "",
   });
   // Whether this user already has a quick-login PIN. The hash itself never reaches the renderer,
   // so an empty PIN field on an existing user means "leave it as it is", not "clear it".
   const [hasPin, setHasPin] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
@@ -111,35 +111,39 @@ export function UserForm() {
   const loadUser = async () => {
     try {
       const users = await window.electronAPI.users.getAll();
-      const user = (users as Array<{
-        id: string;
-        phone: string;
-        nameRu: string;
-        nameUz: string;
-        role: UserRole;
-        hasPin?: boolean;
-      }>).find((u) => u.id === id);
+      const user = (
+        users as Array<{
+          id: string;
+          phone: string;
+          nameRu: string;
+          nameUz: string;
+          role: UserRole;
+          hasPin?: boolean;
+        }>
+      ).find((u) => u.id === id);
 
       if (user) {
-        const digits = user.phone.startsWith('998') ? user.phone.slice(3) : user.phone;
+        const digits = user.phone.startsWith("998")
+          ? user.phone.slice(3)
+          : user.phone;
         setFormData({
           phone: digits,
-          password: '',
+          password: "",
           nameRu: user.nameRu,
           nameUz: user.nameUz,
           role: user.role || USER_ROLES.USER,
-          pin: '',
+          pin: "",
         });
         setHasPin(!!user.hasPin);
       }
     } catch (error) {
-      console.error('Failed to load user:', error);
+      console.error("Failed to load user:", error);
     }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setIsLoading(true);
 
     try {
@@ -160,7 +164,7 @@ export function UserForm() {
         await window.electronAPI.users.update(id, updateData);
       } else {
         if (!formData.password) {
-          setError(t('users.passwordRequired'));
+          setError(t("users.passwordRequired"));
           setIsLoading(false);
           return;
         }
@@ -168,13 +172,13 @@ export function UserForm() {
         await window.electronAPI.users.create({
           ...formData,
           pin: formData.pin || undefined,
-          phone: '998' + formData.phone,
+          phone: "998" + formData.phone,
         });
       }
 
-      navigate('/users');
+      navigate("/users");
     } catch (error) {
-      setError(error instanceof Error ? error.message : t('common.error'));
+      setError(error instanceof Error ? error.message : t("common.error"));
     } finally {
       setIsLoading(false);
     }
@@ -186,14 +190,14 @@ export function UserForm() {
 
   const handleRemovePin = async () => {
     if (!id) return;
-    setError('');
+    setError("");
     try {
       // Explicit null — an empty field means "keep", so clearing has to be asked for.
       await window.electronAPI.users.update(id, { pin: null });
-      setFormData((prev) => ({ ...prev, pin: '' }));
+      setFormData((prev) => ({ ...prev, pin: "" }));
       setHasPin(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('common.error'));
+      setError(err instanceof Error ? err.message : t("common.error"));
     }
   };
 
@@ -204,9 +208,10 @@ export function UserForm() {
       return {
         ...prev,
         nameUz: value,
-        nameRu: prev.nameRu === '' || prev.nameRu === convertUzbekText(prev.nameUz)
-          ? converted
-          : prev.nameRu,
+        nameRu:
+          prev.nameRu === "" || prev.nameRu === convertUzbekText(prev.nameUz)
+            ? converted
+            : prev.nameRu,
       };
     });
   };
@@ -217,74 +222,77 @@ export function UserForm() {
       return {
         ...prev,
         nameRu: value,
-        nameUz: prev.nameUz === '' || prev.nameUz === convertUzbekText(prev.nameRu)
-          ? converted
-          : prev.nameUz,
+        nameUz:
+          prev.nameUz === "" || prev.nameUz === convertUzbekText(prev.nameRu)
+            ? converted
+            : prev.nameUz,
       };
     });
   };
 
   return (
     <Container>
-      <Title>{isEdit ? t('users.editUser') : t('users.addUser')}</Title>
+      <Title>{isEdit ? t("users.editUser") : t("users.addUser")}</Title>
 
       <Form onSubmit={handleSubmit}>
         <UzbekPhoneInput
-          label={t('users.phone')}
+          label={t("users.phone")}
           valueDigits={formData.phone}
-          onDigitsChange={(digits) => handleChange('phone', digits)}
+          onDigitsChange={(digits) => handleChange("phone", digits)}
           disabled={isEdit}
           autoFocus
         />
 
         <Input
-          label={isEdit ? t('users.newPassword') : t('users.password')}
+          label={isEdit ? t("users.newPassword") : t("users.password")}
           type="password"
           value={formData.password}
-          onChange={(e) => handleChange('password', e.target.value)}
+          onChange={(e) => handleChange("password", e.target.value)}
           required={!isEdit}
-          placeholder={isEdit ? t('users.leaveBlankToKeep') : ''}
+          placeholder={isEdit ? t("users.leaveBlankToKeep") : ""}
         />
 
         <Input
-          label={t('users.nameUz')}
+          label={t("users.nameUz")}
           value={formData.nameUz}
           onChange={(e) => handleNameUzChange(e.target.value)}
           required
         />
 
         <Input
-          label={t('users.nameRu')}
+          label={t("users.nameRu")}
           value={formData.nameRu}
           onChange={(e) => handleNameRuChange(e.target.value)}
           required
         />
 
         <FormGroup>
-          <Label>{t('users.role')}</Label>
+          <Label>{t("users.role")}</Label>
           <Select
             value={formData.role}
-            onChange={(e) => handleChange('role', e.target.value)}
+            onChange={(e) => handleChange("role", e.target.value)}
           >
-            <option value="USER">{t('users.cashier')}</option>
-            <option value="ADMIN">{t('users.admin')}</option>
+            <option value="USER">{t("users.cashier")}</option>
+            <option value="ADMIN">{t("users.admin")}</option>
           </Select>
         </FormGroup>
 
         <FormGroup>
           <Input
-            label={t('users.pin')}
+            label={t("users.pin")}
             type="password"
             inputMode="numeric"
             value={formData.pin}
-            onChange={(e) => handleChange('pin', e.target.value.replace(/\D/g, '').slice(0, 4))}
-            placeholder={hasPin ? t('users.leaveBlankToKeep') : ''}
+            onChange={(e) =>
+              handleChange("pin", e.target.value.replace(/\D/g, "").slice(0, 4))
+            }
+            placeholder={hasPin ? t("users.leaveBlankToKeep") : ""}
           />
           <PinHint>
-            {hasPin ? t('users.pinSet') : t('users.pinHint')}
+            {hasPin ? t("users.pinSet") : t("users.pinHint")}
             {hasPin && (
               <PinClearButton type="button" onClick={handleRemovePin}>
-                {t('users.removePin')}
+                {t("users.removePin")}
               </PinClearButton>
             )}
           </PinHint>
@@ -293,11 +301,20 @@ export function UserForm() {
         {error && <ErrorMessage>{error}</ErrorMessage>}
 
         <Actions>
-          <Button type="button" variant="secondary" onClick={() => navigate('/users')}>
-            {t('common.cancel')}
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => navigate("/users")}
+          >
+            {t("common.cancel")}
           </Button>
-          <Button type="submit" disabled={isLoading || (!isEdit && !isUzPhoneComplete(formData.phone))}>
-            {isLoading ? t('common.saving') : t('common.save')}
+          <Button
+            type="submit"
+            disabled={
+              isLoading || (!isEdit && !isUzPhoneComplete(formData.phone))
+            }
+          >
+            {isLoading ? t("common.saving") : t("common.save")}
           </Button>
         </Actions>
       </Form>

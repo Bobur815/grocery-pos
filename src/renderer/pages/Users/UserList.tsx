@@ -7,13 +7,15 @@ import { Button } from "../../components/common/Button";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { formatDate } from "../../utils/formatters";
 import type { UserListItem } from "@shared/types";
-import { Edit, Plus, UserCheck, UserX } from "lucide-react";
+import { ArrowLeft, Edit, Plus, UserCheck, UserX } from "lucide-react";
 
 const Container = styled.div`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.md};
 `;
+
+const BackButton = styled(Button)``;
 
 const Header = styled.div`
   display: flex;
@@ -67,7 +69,7 @@ export function UserList() {
       setIsLoading(false);
     }
   };
-  
+
   const handleToggleActive = async (user: UserListItem) => {
     try {
       await window.electronAPI.users.update(user.id, { active: !user.active });
@@ -137,6 +139,13 @@ export function UserList() {
   return (
     <Container>
       <Header>
+        <BackButton
+          variant="secondary"
+          size="small"
+          onClick={() => navigate("/settings")}
+        >
+          <ArrowLeft size={20} />
+        </BackButton>
         <Title>{t("users.title")}</Title>
         <Button onClick={() => navigate("/users/new")}>
           <Plus size={16} />

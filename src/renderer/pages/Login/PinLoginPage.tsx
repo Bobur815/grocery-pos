@@ -93,7 +93,7 @@ const RightSubtitle = styled.p`
  * Measured in Electron's Chromium from 1024×600 to 2560×1440: nothing clipped, keys centred,
  * and 64px keys at 768 exactly as before.
  */
-const LoginCard = styled.div<{ $kbOpen?: boolean }>`
+const LoginCard = styled.div`
   /*
    * Keys take whatever height is left over. 440px is everything else stacked up — logo, subtitle,
    * dots, login button, mode switch, terminal bar and the panel's padding — and 5.125 is the pad
@@ -114,7 +114,6 @@ const LoginCard = styled.div<{ $kbOpen?: boolean }>`
   width: 100%;
   max-width: 400px;
   text-align: center;
-  transform: translateY(${({ $kbOpen }) => ($kbOpen ? "-60px" : "0")});
   transition: transform 0.3s ease;
 
   /* Sitting above centre is decorative, and a negative margin is not safe in the sense above:
@@ -581,7 +580,7 @@ export function PinLoginPage() {
   return (
     <Container>
       <LeftPanel>
-        <LoginCard $kbOpen={keyboardOpen}>
+        <LoginCard >
           <LogoBrand>
             <POSGROIcon theme={themeMode} size={72} />
             <BrandName>POSGRO</BrandName>
