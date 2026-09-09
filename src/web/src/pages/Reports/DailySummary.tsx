@@ -11,6 +11,11 @@ import { Pagination } from "@components/common/Pagination";
 import { DateInput } from "@components/common/DateInput";
 import { usePagination } from "../../hooks/usePagination";
 import { Eraser } from "lucide-react";
+import {
+  SubNav,
+  useReportsSubNav,
+  REPORTS_HIDE_TABS_ON_MOBILE,
+} from "../../components/layout/SubNav";
 
 const Container = styled.div`
   display: flex;
@@ -336,8 +341,13 @@ export function DailySummary() {
     setPaymentFilter("all");
   };
 
+  const subNav = useReportsSubNav();
+
   return (
     <Container>
+      {/* Section tabs — the mobile bar carries sections only, so a section's sibling
+          pages live here. See components/layout/SubNav.tsx. */}
+      <SubNav items={subNav} hideOnMobile={REPORTS_HIDE_TABS_ON_MOBILE} />
       <HeaderRow>
         <Title>{t("reports.receipts")}</Title>
       </HeaderRow>

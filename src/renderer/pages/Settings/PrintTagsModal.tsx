@@ -2,6 +2,12 @@ import React, { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import { Modal } from "../../components/common/Modal";
+import { useVirtualKeyboard } from "../../hooks/useVirtualKeyboard";
+import {
+  KeyboardToggle,
+  KeyboardPanel,
+  KEYBOARD_Z_ABOVE_MODAL,
+} from "../../components/common/VirtualKeyboardControls";
 import type { PriceTagTemplate } from "./PriceTags";
 import type { Product } from "@shared/types";
 
@@ -135,6 +141,19 @@ const PrintButton = styled.button`
   }
 `;
 
+const SearchRow = styled.div`
+  display: flex;
+  align-items: center;
+  gap: ${({ theme }) => theme.spacing.sm};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+
+  /* The input takes the row; the keyboard toggle keeps its natural width beside it. */
+  > input {
+    flex: 1;
+    margin-bottom: 0;
+  }
+`;
+
 export function PrintTagsModal({ template, onClose }: PrintTagsModalProps) {
   const { t, i18n } = useTranslation();
   const [search, setSearch] = useState("");
@@ -200,6 +219,27 @@ export function PrintTagsModal({ template, onClose }: PrintTagsModalProps) {
     });
   };
 
+  // On-screen keyboard. The per-row fields are addressed by product id because there is one pair
+  // of them per selected product, so a fixed field union will not do.
+  type Field = "search" | `amount:${number}` | `quantity:${number}`;
+  const keyboard = useVirtualKeyboard<Field>((field, edit) => {
+    if (field === "search") {
+      setSearch((prev) => edit(prev));
+      return;
+    }
+    const [kind, rawId] = field.split(":");
+    const id = Number(rawId);
+    const entry = selected.get(id);
+    if (!entry) return;
+    if (kind === "amount") {
+      const next = edit(String(entry.amount || ""));
+      updateAmount(id, next === "" ? 0 : parseFloat(next) || 0);
+    } else {
+      const next = edit(String(entry.quantity || ""));
+      updateQuantity(id, next === "" ? 0 : parseInt(next, 10) || 0);
+    }
+  });
+
   const getName = (p: Product) =>
     i18n.language === "uz" ? p.nameUz || p.nameRu : p.nameRu || p.nameUz;
 
@@ -260,12 +300,16 @@ export function PrintTagsModal({ template, onClose }: PrintTagsModalProps) {
 
   return (
     <Modal title={t("priceTags.printTags")} onClose={onClose} width="600px">
-      <SearchInput
-        placeholder={t("common.search")}
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        autoFocus
-      />
+      <SearchRow>
+        <SearchInput
+          placeholder={t("common.search")}
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          {...keyboard.fieldProps("search")}
+          autoFocus
+        />
+        <KeyboardToggle kb={keyboard} />
+      </SearchRow>
 
       <ProductList>
         {filtered.map((p) => {
@@ -301,6 +345,10 @@ export function PrintTagsModal({ template, onClose }: PrintTagsModalProps) {
                         onChange={(e) =>
                           updateAmount(p.id, e.target.value === "" ? 0 : parseFloat(e.target.value))
                         }
+                        {...keyboard.fieldProps(`amount:${p.id}`, {
+                          numeric: true,
+                          clearOnFirstKey: true,
+                        })}
                       />
                     </LabeledInput>
                   )}
@@ -315,6 +363,10 @@ export function PrintTagsModal({ template, onClose }: PrintTagsModalProps) {
                       onChange={(e) =>
                         updateQuantity(p.id, e.target.value === "" ? 0 : parseInt(e.target.value))
                       }
+                      {...keyboard.fieldProps(`quantity:${p.id}`, {
+                        numeric: true,
+                        clearOnFirstKey: true,
+                      })}
                     />
                   </LabeledInput>
                 </InputsGroup>
@@ -338,6 +390,8 @@ export function PrintTagsModal({ template, onClose }: PrintTagsModalProps) {
           {printing ? t("common.processing") : t("priceTags.print")}
         </PrintButton>
       </Footer>
+
+      <KeyboardPanel kb={keyboard} zIndex={KEYBOARD_Z_ABOVE_MODAL} />
     </Modal>
   );
 }

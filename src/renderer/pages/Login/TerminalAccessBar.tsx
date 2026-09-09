@@ -1,7 +1,13 @@
 import { useState } from "react";
 import styled from "styled-components";
 import { useTranslation } from "react-i18next";
-import { CreditCard, ExternalLink, Settings, Smartphone, X } from "lucide-react";
+import {
+  CreditCard,
+  ExternalLink,
+  Settings,
+  Smartphone,
+  X,
+} from "lucide-react";
 import { formatCurrency } from "../../../shared/utils/transformers";
 import { useToast } from "../../context/ToastContext";
 import type { StoreSubscription } from "../../../shared/types/store.types";
@@ -141,8 +147,10 @@ const ActionButton = styled.button<{ $primary?: boolean }>`
   font-weight: 500;
   cursor: pointer;
   border: 1px solid
-    ${({ $primary, theme }) => ($primary ? theme.colors.primary : theme.colors.border)};
-  background: ${({ $primary, theme }) => ($primary ? theme.colors.primary : "transparent")};
+    ${({ $primary, theme }) =>
+      $primary ? theme.colors.primary : theme.colors.border};
+  background: ${({ $primary, theme }) =>
+    $primary ? theme.colors.primary : "transparent"};
   color: ${({ $primary, theme }) => ($primary ? "#fff" : theme.colors.text)};
 
   &:disabled {
@@ -197,7 +205,11 @@ const InfoValue = styled.span<{ $muted?: boolean; $warn?: boolean }>`
   font-weight: 600;
   text-align: right;
   color: ${({ $muted, $warn, theme }) =>
-    $warn ? theme.colors.error : $muted ? theme.colors.textSecondary : theme.colors.text};
+    $warn
+      ? theme.colors.error
+      : $muted
+        ? theme.colors.textSecondary
+        : theme.colors.text};
 `;
 
 /* The pay dialog leads with the QR, so it needs more room than the plain 420px dialogs. */
@@ -264,7 +276,9 @@ export function TerminalAccessBar() {
     error: string | null;
   } | null>(null);
   const [qrLoaded, setQrLoaded] = useState(false);
-  const [subscription, setSubscription] = useState<StoreSubscription | null>(null);
+  const [subscription, setSubscription] = useState<StoreSubscription | null>(
+    null,
+  );
   const [loadingSubscription, setLoadingSubscription] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -324,7 +338,9 @@ export function TerminalAccessBar() {
     // Subscription state only exists on the vendor's server, so there is nothing worth opening
     // without a connection — a dialog of dashes helps nobody. Probe the server this terminal is
     // actually configured against, so a staging terminal is judged against staging.
-    const cfg = await window.electronAPI.config.getLocalConfig().catch(() => null);
+    const cfg = await window.electronAPI.config
+      .getLocalConfig()
+      .catch(() => null);
     if (!(await window.electronAPI.app.isOnline(cfg?.apiUrl))) {
       toast.error(t("errors.noInternet"));
       return;
@@ -336,7 +352,9 @@ export function TerminalAccessBar() {
     setLoadingSubscription(true);
     // A failed read still returns the cached snapshot, so the dialog only ever goes empty on a
     // terminal that has never reached the server.
-    setSubscription(await window.electronAPI.subscription.get().catch(() => null));
+    setSubscription(
+      await window.electronAPI.subscription.get().catch(() => null),
+    );
     setLoadingSubscription(false);
   };
 
@@ -346,11 +364,14 @@ export function TerminalAccessBar() {
   };
 
   const expired =
-    !!subscription?.expiresAt && new Date(subscription.expiresAt).getTime() < Date.now();
+    !!subscription?.expiresAt &&
+    new Date(subscription.expiresAt).getTime() < Date.now();
 
   // Nothing to pay with until the operator has configured a QR payload or a pay link, so the
   // button stays disabled rather than opening an empty dialog.
-  const canPay = !!(subscription?.payment.qrDataUrl || subscription?.payment.paymentUrl);
+  const canPay = !!(
+    subscription?.payment.qrDataUrl || subscription?.payment.paymentUrl
+  );
 
   return (
     <>
@@ -406,7 +427,12 @@ export function TerminalAccessBar() {
               <ActionButton type="button" onClick={close}>
                 {t("common.cancel")}
               </ActionButton>
-              <ActionButton type="button" $primary disabled={busy || !secret} onClick={handleUnlock}>
+              <ActionButton
+                type="button"
+                $primary
+                disabled={busy || !secret}
+                onClick={handleUnlock}
+              >
                 {t("common.confirm")}
               </ActionButton>
             </Actions>
@@ -438,7 +464,12 @@ export function TerminalAccessBar() {
               <ActionButton type="button" onClick={close}>
                 {t("common.cancel")}
               </ActionButton>
-              <ActionButton type="button" $primary disabled={busy} onClick={handleSaveUrl}>
+              <ActionButton
+                type="button"
+                $primary
+                disabled={busy}
+                onClick={handleSaveUrl}
+              >
                 {t("common.save")}
               </ActionButton>
             </Actions>
@@ -457,7 +488,10 @@ export function TerminalAccessBar() {
             </DialogHeader>
             {qr?.qrDataUrl && (
               <QrFrame>
-                <QrImage src={qr.qrDataUrl} alt={t("settings.webAdminOnPhone")} />
+                <QrImage
+                  src={qr.qrDataUrl}
+                  alt={t("settings.webAdminOnPhone")}
+                />
               </QrFrame>
             )}
             {/* A local dashboard is reached over the shop's own Wi-Fi, not the internet, so it
@@ -496,6 +530,15 @@ export function TerminalAccessBar() {
             ) : (
               <>
                 <InfoRow>
+                  <InfoLabel>{t("subscription.store")}</InfoLabel>
+                  <InfoValue $muted={!subscription?.storeName}>
+                    {subscription?.storeName ??
+                      subscription?.storeId ??
+                      t("subscription.unknownStore")}
+                  </InfoValue>
+                </InfoRow>
+
+                <InfoRow>
                   <InfoLabel>{t("subscription.title")}</InfoLabel>
                   <InfoValue $muted={!subscription?.plan}>
                     {subscription?.plan ?? t("subscription.noplan")}
@@ -504,10 +547,7 @@ export function TerminalAccessBar() {
 
                 <InfoRow>
                   <InfoLabel>{t("subscription.expiresAt")}</InfoLabel>
-                  <InfoValue
-                    $muted={!subscription?.plan}
-                    $warn={expired}
-                  >
+                  <InfoValue $muted={!subscription?.plan} $warn={expired}>
                     {!subscription?.plan
                       ? "—"
                       : (formatExpiry(subscription.expiresAt, i18n.language) ??
@@ -536,8 +576,24 @@ export function TerminalAccessBar() {
                   </InfoValue>
                 </InfoRow>
 
-                {/* Say so rather than passing off a cached snapshot as the live state. */}
-                {subscription?.stale && <Hint>{t("subscription.offlineHint")}</Hint>}
+                {/* Say so rather than passing off a cached snapshot as the live state — and say
+                    WHICH failure it was, because each one has a different fix. Dashes with no
+                    explanation are indistinguishable from a store that has no plan. */}
+                {subscription?.stale && (
+                  <Hint>
+                    {subscription.reason === "offline-only-store"
+                      ? t("subscription.offlineOnlyStoreHint", {
+                          phone:
+                            subscription.payment.supportPhone ||
+                            t("subscription.supportUnknown"),
+                        })
+                      : subscription.reason === "no-credential"
+                        ? t("subscription.noCredentialHint")
+                        : subscription.reason === "server-error"
+                          ? t("subscription.serverErrorHint")
+                          : t("subscription.offlineHint")}
+                  </Hint>
+                )}
               </>
             )}
 
@@ -573,7 +629,9 @@ export function TerminalAccessBar() {
 
             {subscription?.payment.qrDataUrl && (
               <>
-                <Hint style={{ margin: "0 0 14px" }}>{t("subscription.payScanHint")}</Hint>
+                <Hint style={{ margin: "0 0 14px" }}>
+                  {t("subscription.payScanHint")}
+                </Hint>
                 <QrFrame>
                   <QrImage
                     src={subscription.payment.qrDataUrl}
@@ -582,7 +640,9 @@ export function TerminalAccessBar() {
                 </QrFrame>
                 <Hint>{t("subscription.payCallHint")}</Hint>
                 {subscription.payment.supportPhone && (
-                  <SupportPhone>{subscription.payment.supportPhone}</SupportPhone>
+                  <SupportPhone>
+                    {subscription.payment.supportPhone}
+                  </SupportPhone>
                 )}
               </>
             )}

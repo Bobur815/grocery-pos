@@ -9,14 +9,22 @@ import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
 import { auth } from '../../api/ipc-client';
 import { useToast } from '../../context/ToastContext';
+import { useVirtualKeyboard } from '../../hooks/useVirtualKeyboard';
+import {
+  KeyboardToggle,
+  KeyboardPanel,
+} from '../../components/common/VirtualKeyboardControls';
+import {
+  SettingsPage,
+  SettingsGrid,
+} from '../../components/common/SettingsLayout';
 
-const Container = styled.div`
-  max-width: 600px;
-`;
+const Container = styled(SettingsPage)``;
 
 const Header = styled.div`
   display: flex;
   align-items: center;
+  margin-bottom: ${({ theme }) => theme.spacing.lg};
   gap: ${({ theme }) => theme.spacing.md};
   padding-left: 25px;
 `;
@@ -32,7 +40,6 @@ const Section = styled.div`
   background-color: ${({ theme }) => theme.colors.surface};
   padding: ${({ theme }) => theme.spacing.lg};
   border-radius: ${({ theme }) => theme.borderRadius};
-  margin-bottom: ${({ theme }) => theme.spacing.lg};
 `;
 
 const SectionTitle = styled.h2`
@@ -98,6 +105,18 @@ export function UserSettings() {
   // Quick-login PIN — personal to this account and to this terminal.
   const [hasPin, setHasPin] = useState(false);
   const [pinData, setPinData] = useState({ newPin: '', confirmPin: '' });
+
+  // On-screen keyboard. The PIN fields keep their digits-only rule here rather than in the hook —
+  // typing a letter into a PIN must be impossible from the panel exactly as it is from a scanner
+  // or a hardware keyboard.
+  type Field = keyof typeof passwordData | keyof typeof pinData;
+  const keyboard = useVirtualKeyboard<Field>((field, edit) => {
+    if (field === 'newPin' || field === 'confirmPin') {
+      setPinData((prev) => ({ ...prev, [field]: onlyDigits(edit(prev[field])) }));
+      return;
+    }
+    setPasswordData((prev) => ({ ...prev, [field]: edit(prev[field]) }));
+  });
 
   useEffect(() => {
     auth.hasPin()?.then((value) => setHasPin(!!value)).catch(() => {});
@@ -184,8 +203,12 @@ export function UserSettings() {
           <ArrowLeft size={20} />
         </BackButton>
         <Title>{t('settings.userSettings')}</Title>
+        <KeyboardToggle kb={keyboard} style={{ marginLeft: 'auto' }} />
       </Header>
 
+      {/* Three short, independent cards — appearance, password, PIN. Nothing about them is
+          sequential, so stacking them in one 600px column was pure scroll on a wide terminal. */}
+      <SettingsGrid>
       <Section>
         <SectionTitle>{t('settings.appearance')}</SectionTitle>
 
@@ -220,6 +243,7 @@ export function UserSettings() {
             onChange={(e) =>
               setPasswordData((prev) => ({ ...prev, currentPassword: e.target.value }))
             }
+            {...keyboard.fieldProps('currentPassword')}
             required
           />
 
@@ -230,6 +254,7 @@ export function UserSettings() {
             onChange={(e) =>
               setPasswordData((prev) => ({ ...prev, newPassword: e.target.value }))
             }
+            {...keyboard.fieldProps('newPassword')}
             required
           />
 
@@ -240,6 +265,7 @@ export function UserSettings() {
             onChange={(e) =>
               setPasswordData((prev) => ({ ...prev, confirmPassword: e.target.value }))
             }
+            {...keyboard.fieldProps('confirmPassword')}
             required
           />
 
@@ -262,6 +288,7 @@ export function UserSettings() {
             onChange={(e) =>
               setPinData((prev) => ({ ...prev, newPin: onlyDigits(e.target.value) }))
             }
+            {...keyboard.fieldProps('newPin', { numeric: true })}
             required
           />
 
@@ -273,6 +300,7 @@ export function UserSettings() {
             onChange={(e) =>
               setPinData((prev) => ({ ...prev, confirmPin: onlyDigits(e.target.value) }))
             }
+            {...keyboard.fieldProps('confirmPin', { numeric: true })}
             required
           />
 
@@ -288,6 +316,9 @@ export function UserSettings() {
           </PinActions>
         </Form>
       </Section>
+      </SettingsGrid>
+
+      <KeyboardPanel kb={keyboard} />
     </Container>
   );
 }

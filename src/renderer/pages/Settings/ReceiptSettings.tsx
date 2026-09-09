@@ -9,6 +9,11 @@ import { Select } from '../../components/common/Select';
 import { buildSampleReceiptHTML } from '../../../shared/receipt-html';
 import type { ReceiptSettings as ReceiptSettingsType } from '../../../shared/receipt-html';
 import { useToast } from '../../context/ToastContext';
+import { useVirtualKeyboard } from '../../hooks/useVirtualKeyboard';
+import {
+  KeyboardToggle,
+  KeyboardPanel,
+} from '../../components/common/VirtualKeyboardControls';
 import {
   ACCEPTED_LOGO_TYPES,
   ReceiptLogoError,
@@ -264,6 +269,13 @@ export function ReceiptSettings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // On-screen keyboard for the free-text receipt fields. The paper width and language are selects,
+  // and the logos are file pickers, so neither is wired.
+  type Field = 'receipt_header' | 'receipt_footer';
+  const keyboard = useVirtualKeyboard<Field>((field, edit) =>
+    setSettings((prev) => ({ ...prev, [field]: edit(prev[field] ?? '') })),
+  );
+
   useEffect(() => {
     (async () => {
       try {
@@ -339,6 +351,7 @@ export function ReceiptSettings() {
           <ArrowLeft size={20} />
         </BackButton>
         <Title>{t('receipt.title')}</Title>
+        <KeyboardToggle kb={keyboard} style={{ marginLeft: 'auto' }} />
       </Header>
 
       <ContentLayout>
@@ -383,6 +396,7 @@ export function ReceiptSettings() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, receipt_header: e.target.value }))
               }
+              {...keyboard.fieldProps('receipt_header')}
             />
             <Input
               label={t('receipt.footer')}
@@ -390,6 +404,7 @@ export function ReceiptSettings() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, receipt_footer: e.target.value }))
               }
+              {...keyboard.fieldProps('receipt_footer')}
             />
 
             <LogoField
@@ -447,6 +462,8 @@ export function ReceiptSettings() {
           </PreviewContainer>
         </Panel>
       </ContentLayout>
+
+      <KeyboardPanel kb={keyboard} />
     </Container>
   );
 }

@@ -1,7 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { Sale, SaleItem } from '@prisma/client';
-import { rankProducts, type ProductPerformanceRow } from './analytics.ranking';
+import {
+  rankProducts,
+  rankingCategories,
+  type ProductPerformanceRow,
+} from './analytics.ranking';
 
 type SaleWithItems = Sale & { items: SaleItem[] };
 
@@ -134,7 +138,18 @@ export class AnalyticsService {
     };
   }
 
-  async getAnalyticsData(storeId: string, startDate: Date, endDate: Date) {
+  /**
+   * @param categoryId Narrow the product rankings to one category. Applied BEFORE the top/bottom
+   *   slice, so "best sellers in Dairy" means the best in Dairy — filtering the finished top-10
+   *   afterwards would instead show whichever of the overall top ten happened to be dairy.
+   *   Everything else in the payload is unfiltered: only the rankings card offers this control.
+   */
+  async getAnalyticsData(
+    storeId: string,
+    startDate: Date,
+    endDate: Date,
+    categoryId?: number,
+  ) {
     const [
       salesTrendRaw,
       salesByCategoryRaw,
@@ -261,11 +276,15 @@ export class AnalyticsService {
           p.id AS "productId",
           p.name_ru AS "nameRu",
           p.name_uz AS "nameUz",
+          p.category_id AS "categoryId",
+          COALESCE(c.name_ru, 'Без категории') AS "categoryRu",
+          COALESCE(c.name_uz, 'Kategoriyasiz') AS "categoryUz",
           COALESCE(agg.quantity, 0)::float AS quantity,
           COALESCE(agg.revenue, 0)::float AS revenue,
           (COALESCE(agg.quantity, 0) * COALESCE(p.cost, 0))::float AS cost,
           (p.cost IS NOT NULL) AS "hasCost"
         FROM products p
+        LEFT JOIN categories c ON c.id = p.category_id
         LEFT JOIN (
           SELECT
             si.product_id,
@@ -289,7 +308,14 @@ export class AnalyticsService {
       hourlyDistribution: hourlyDistributionRaw,
       // Kept as-is: the Electron renderer's own Analytics page still reads this shape.
       topProducts: topProductsRaw,
-      productRanking: rankProducts(productPerformanceRaw),
+      productRanking: rankProducts(
+        categoryId == null
+          ? productPerformanceRaw
+          : productPerformanceRaw.filter((r) => r.categoryId === categoryId),
+      ),
+      // Always the full list, never the filtered one — the dropdown must keep offering every
+      // category once one is selected, or you could not switch back.
+      rankingCategories: rankingCategories(productPerformanceRaw),
       cashierPerformance: cashierPerformanceRaw,
       profitMargins: profitMarginsRaw,
       summary: summaryRaw[0] ?? {

@@ -23,6 +23,41 @@ describe('dashboardLoginBlockReason', () => {
     );
   });
 
+  // The refusal is a DASHBOARD rule. A POS terminal needs a credential for the vendor's shared
+  // services and to read its own billing row — refusing it left such a terminal permanently
+  // without one once its setup token expired, because nothing could ever mint another.
+  it('lets a POS terminal of an OFFLINE_ONLY store in', () => {
+    expect(dashboardLoginBlockReason('ADMIN', 's1', offlineOnly, 'pos')).toBeNull();
+  });
+
+  it('still blocks the dashboard for the same store', () => {
+    expect(dashboardLoginBlockReason('ADMIN', 's1', offlineOnly, 'dashboard')).toBe(
+      'auth.errors.store_offline_only',
+    );
+  });
+
+  // An omitted field must not be the permissive one: anything that does not say it is a terminal
+  // is treated as the browser.
+  it('defaults to the dashboard rule when no client is given', () => {
+    expect(dashboardLoginBlockReason('ADMIN', 's1', offlineOnly)).toBe(
+      'auth.errors.store_offline_only',
+    );
+  });
+
+  // Deactivation is the more fundamental refusal and is not a dashboard-only concern: a store
+  // that has been switched off should not have a working till either.
+  it.each([['pos'], ['dashboard']] as const)('blocks a deactivated store for %s too', (client) => {
+    expect(dashboardLoginBlockReason('ADMIN', 's1', deactivated, client)).toBe(
+      'auth.errors.store_inactive',
+    );
+  });
+
+  it('blocks a POS terminal of a store that is both deactivated and OFFLINE_ONLY', () => {
+    expect(
+      dashboardLoginBlockReason('ADMIN', 's1', { active: false, mode: 'OFFLINE_ONLY' }, 'pos'),
+    ).toBe('auth.errors.store_inactive');
+  });
+
   // Being switched off is the more fundamental problem, and the more actionable message.
   it('reports deactivation ahead of offline mode when a store is both', () => {
     expect(dashboardLoginBlockReason('ADMIN', 's1', { active: false, mode: 'OFFLINE_ONLY' })).toBe(

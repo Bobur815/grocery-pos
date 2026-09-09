@@ -15,6 +15,7 @@ export default defineConfig({
       '@components/common': path.resolve(__dirname, '../../src/renderer/components/common'),
       '@components/products': path.resolve(__dirname, '../../src/renderer/components/products'),
       '@components/suppliers': path.resolve(__dirname, '../../src/renderer/components/suppliers'),
+      '@components/analytics': path.resolve(__dirname, '../../src/renderer/components/analytics'),
       '@theme': path.resolve(__dirname, '../../src/renderer/theme'),
       '@context': path.resolve(__dirname, '../../src/renderer/context'),
       '@i18n': path.resolve(__dirname, '../../src/renderer/i18n'),

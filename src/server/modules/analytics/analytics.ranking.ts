@@ -17,6 +17,33 @@ export interface ProductPerformanceRow {
   cost: number;
   /** False when Product.cost is null — the product is then excluded from profit rankings. */
   hasCost: boolean;
+  /** The product's category, so the rankings can be narrowed to one. */
+  categoryId: number;
+  categoryRu: string;
+  categoryUz: string;
+}
+
+/** A category present among the ranked products, for the UI's filter. */
+export interface RankingCategory {
+  id: number;
+  nameRu: string;
+  nameUz: string;
+}
+
+/**
+ * The categories the ranked products actually belong to, name-sorted.
+ *
+ * Derived from the same rows the rankings are built from rather than fetched separately, so the
+ * filter can never offer a category that would rank empty.
+ */
+export function rankingCategories(rows: ProductPerformanceRow[]): RankingCategory[] {
+  const byId = new Map<number, RankingCategory>();
+  for (const r of rows) {
+    if (!byId.has(r.categoryId)) {
+      byId.set(r.categoryId, { id: r.categoryId, nameRu: r.categoryRu, nameUz: r.categoryUz });
+    }
+  }
+  return [...byId.values()].sort((a, b) => a.nameRu.localeCompare(b.nameRu, 'ru'));
 }
 
 export interface RankedProduct {

@@ -1,4 +1,8 @@
-import { rankProducts, type ProductPerformanceRow } from '../../../server/modules/analytics/analytics.ranking';
+import {
+  rankProducts,
+  rankingCategories,
+  type ProductPerformanceRow,
+} from '../../../server/modules/analytics/analytics.ranking';
 import { db, dateParam, endOfDayParam } from '../helpers';
 import type { Route } from '../router';
 
@@ -170,11 +174,15 @@ export const analyticsRoutes: Route[] = [
           SELECT p.id AS productId,
                  p.name_ru AS nameRu,
                  p.name_uz AS nameUz,
+                 p.category_id AS categoryId,
+                 COALESCE(c.name_ru, 'Без категории') AS categoryRu,
+                 COALESCE(c.name_uz, 'Kategoriyasiz') AS categoryUz,
                  CAST(COALESCE(agg.quantity, 0) AS REAL) AS quantity,
                  CAST(COALESCE(agg.revenue, 0) AS REAL) AS revenue,
                  CAST(COALESCE(agg.quantity, 0) * COALESCE(p.cost, 0) AS REAL) AS cost,
                  (p.cost IS NOT NULL) AS hasCost
           FROM products p
+          LEFT JOIN categories c ON c.id = p.category_id
           LEFT JOIN (
             SELECT si.product_id,
                    SUM(si.quantity * si.pieces_per_unit) AS quantity,
@@ -188,18 +196,32 @@ export const analyticsRoutes: Route[] = [
         `,
       ]);
 
+      // Narrowing the rankings to one category has to happen before rankProducts() slices to
+      // ten, or "best sellers in Dairy" would mean "the dairy items among the overall top ten".
+      // A non-numeric categoryId means "all", so a stray value costs nothing.
+      const categoryId = Number(query.categoryId);
+      const performanceRows = numeric(productPerformance, [
+        'productId',
+        'categoryId',
+        'quantity',
+        'revenue',
+        'cost',
+      ]).map((row) => ({ ...row, hasCost: Boolean(row.hasCost) }));
+      const rankedRows = Number.isInteger(categoryId)
+        ? performanceRows.filter((r) => r.categoryId === categoryId)
+        : performanceRows;
+
       return {
         salesTrend: numeric(salesTrend, ['revenue', 'count']),
         salesByCategory: numeric(salesByCategory, ['revenue', 'quantity']),
         hourlyDistribution: numeric(hourlyDistribution, ['hour', 'revenue', 'count']),
         topProducts: numeric(topProducts, ['quantity', 'revenue']),
-        // SQLite has no boolean type, so the driver hands back 0/1 for `hasCost`.
-        productRanking: rankProducts(
-          numeric(productPerformance, ['productId', 'quantity', 'revenue', 'cost']).map((row) => ({
-            ...row,
-            hasCost: Boolean(row.hasCost),
-          })),
-        ),
+        // SQLite has no boolean type, so the driver hands back 0/1 for `hasCost` — coerced in
+        // performanceRows above, along with the numerics.
+        productRanking: rankProducts(rankedRows),
+        // Always from the UNFILTERED rows: the dropdown has to keep offering every category once
+        // one is picked, or there would be no way back to "all".
+        rankingCategories: rankingCategories(performanceRows),
         cashierPerformance: numeric(cashierPerformance, ['revenue', 'count']),
         profitMargins: numeric(profitMargins, ['revenue', 'cost']),
         summary: numeric(summaryRows, [

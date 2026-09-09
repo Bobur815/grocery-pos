@@ -6,7 +6,7 @@ import { LoginDto } from './dto/login.dto';
 import { JwtPayload, LoginResponse } from './types/auth.types';
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { dashboardLoginBlockReason } from './dashboard-access';
+import { dashboardLoginBlockReason, type LoginClient } from './dashboard-access';
 
 @Injectable()
 export class AuthService {
@@ -37,7 +37,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    await this.assertStoreCanUseDashboard(user.role, user.storeId);
+    await this.assertStoreCanUseDashboard(user.role, user.storeId, loginDto.client);
 
     const deviceName = await this.resolveDeviceName(user.id, ipAddress);
     const session = await this.prisma.userSession.create({
@@ -80,6 +80,7 @@ export class AuthService {
   private async assertStoreCanUseDashboard(
     role: UserRole,
     storeId: string | null,
+    client: LoginClient = 'dashboard',
   ): Promise<void> {
     if (role === UserRole.SUPER_ADMIN || !storeId) return;
 
@@ -88,7 +89,7 @@ export class AuthService {
       select: { active: true, mode: true },
     });
 
-    const reason = dashboardLoginBlockReason(role, storeId, store);
+    const reason = dashboardLoginBlockReason(role, storeId, store, client);
     if (!reason) return;
 
     // 403, not 401: the browser's axios interceptor turns a 401 into a logout and a redirect,

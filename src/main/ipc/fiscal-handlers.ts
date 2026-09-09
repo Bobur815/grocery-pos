@@ -1,5 +1,6 @@
 import { ipcMain } from "electron";
 import { regosVcrService } from "../fiscal/regos-vcr-service";
+import { stats, recentSales, reset } from "../fiscal/fiscal-timing";
 import type { RegosVcrConfigInput } from "../../shared/types/fiscal.types";
 
 export function setupFiscalHandlers(): void {
@@ -18,6 +19,19 @@ export function setupFiscalHandlers(): void {
   ipcMain.handle("fiscal:getStatus", async () =>
     regosVcrService.getQueueStatus(),
   );
+
+  // Fiscalization timings — per-phase aggregates plus the last few per-sale breakdowns. Answers
+  // "why did that receipt take so long" with numbers instead of guesses. In-memory, so it covers
+  // this app session only; the same lines also go to the uploaded logs via electron-log.
+  ipcMain.handle("fiscal:getTimings", async () => ({
+    phases: stats(),
+    recent: recentSales(),
+  }));
+
+  ipcMain.handle("fiscal:resetTimings", async () => {
+    reset();
+    return true;
+  });
 
   ipcMain.handle("fiscal:retrySale", async (_event, saleId: string) =>
     regosVcrService.retrySale(saleId),

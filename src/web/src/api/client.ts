@@ -801,7 +801,12 @@ export const reconciliation = {
 };
 
 export const analytics = {
-  getData: async (filters: { startDate: string; endDate: string }) => {
+  getData: async (filters: {
+    startDate: string;
+    endDate: string;
+    /** Narrows the product rankings only; every other figure stays store-wide. */
+    categoryId?: number;
+  }) => {
     const { data } = await axiosInstance.get("/analytics/data", {
       params: filters,
     });

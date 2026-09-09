@@ -35,38 +35,7 @@ import { productRequiresMarking } from "../../../shared/utils/marking";
 import { boxUnitPrice, isBoxedProduct, PIECE } from "../../../shared/utils/pack";
 import { Modal } from "@renderer/components/common/Modal";
 import { useSidebar } from "@renderer/context/SidebarContext";
-
-function parseSaleError(
-  err: unknown,
-  t: (key: string, params?: Record<string, unknown>) => string,
-): string {
-  const message = err instanceof Error ? err.message : String(err);
-  // Electron wraps IPC errors: "Error invoking remote method '...': Error: {json}"
-  const jsonStart = message.indexOf("{");
-  const jsonStr = jsonStart !== -1 ? message.slice(jsonStart) : "";
-  try {
-    const parsed = JSON.parse(jsonStr);
-    if (parsed.code === "PRODUCT_NOT_FOUND") {
-      return t("errors.productNotFound", { id: parsed.productId });
-    }
-    if (parsed.code === "PRODUCT_INACTIVE") {
-      return t("errors.productInactive", { name: parsed.name });
-    }
-    if (parsed.code === "INSUFFICIENT_STOCK") {
-      return t("errors.insufficientStock", {
-        name: parsed.name,
-        available: parsed.available,
-        requested: parsed.requested,
-      });
-    }
-    if (parsed.code === "NO_SMENA_OPEN") {
-      return t("smena.noOpenSmena");
-    }
-  } catch {
-    // not JSON, fall through
-  }
-  return message || t("common.error");
-}
+import { parseSaleError } from "./saleErrors";
 
 const PageWrapper = styled.div`
   display: flex;
@@ -1120,6 +1089,11 @@ export function POSScreen() {
           markingCodes: items
             .filter((i) => i.markingCode)
             .map((i) => ({ barcode: i.barcode, label: i.markingCode! })),
+          // Quick pay always fiscalizes on the spot. Unlike the checkout modal — where the cashier
+          // can deliberately defer with the "fiscalize" tick — these buttons are the one-tap path
+          // and offer no such choice, so leaving the sale PENDING would strand it: the periodic
+          // retry worker is gone and it would sit un-fiscalized until the shift closes.
+          fiscalize: true,
           // Only set when the UzQR integration confirmed a payment. Its presence makes the sale
           // fiscalize immediately and book against the payment id rather than as a plain card.
           regosPaymentId: uzqrPayment?.vcrPaymentId,

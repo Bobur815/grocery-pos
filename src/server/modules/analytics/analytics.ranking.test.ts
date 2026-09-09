@@ -1,4 +1,9 @@
-import { rankProducts, RANK_LIMIT, type ProductPerformanceRow } from './analytics.ranking';
+import {
+  rankProducts,
+  rankingCategories,
+  RANK_LIMIT,
+  type ProductPerformanceRow,
+} from './analytics.ranking';
 
 function row(over: Partial<ProductPerformanceRow> & { productId: number }): ProductPerformanceRow {
   return {
@@ -8,6 +13,9 @@ function row(over: Partial<ProductPerformanceRow> & { productId: number }): Prod
     revenue: 0,
     cost: 0,
     hasCost: true,
+    categoryId: 1,
+    categoryRu: 'Молочные',
+    categoryUz: 'Sut mahsulotlari',
     ...over,
   };
 }
@@ -112,5 +120,59 @@ describe('rankProducts', () => {
     expect(r.byProfit.bottom).toEqual([]);
     expect(r.neverSoldCount).toBe(0);
     expect(r.totalProducts).toBe(0);
+  });
+});
+
+describe('rankingCategories', () => {
+  const dairy = { categoryId: 1, categoryRu: 'Молочные', categoryUz: 'Sut mahsulotlari' };
+  const bread = { categoryId: 2, categoryRu: 'Хлеб', categoryUz: 'Non' };
+
+  it('lists each category once, whatever how many products it has', () => {
+    const cats = rankingCategories([
+      row({ productId: 1, ...dairy }),
+      row({ productId: 2, ...dairy }),
+      row({ productId: 3, ...bread }),
+    ]);
+
+    expect(cats).toEqual([
+      { id: 1, nameRu: 'Молочные', nameUz: 'Sut mahsulotlari' },
+      { id: 2, nameRu: 'Хлеб', nameUz: 'Non' },
+    ]);
+  });
+
+  it('sorts by name so the filter reads alphabetically', () => {
+    const cats = rankingCategories([
+      row({ productId: 1, ...bread }),
+      row({ productId: 2, ...dairy }),
+    ]);
+
+    expect(cats.map((c) => c.nameRu)).toEqual(['Молочные', 'Хлеб']);
+  });
+
+  it('is empty when there are no products', () => {
+    expect(rankingCategories([])).toEqual([]);
+  });
+
+  /**
+   * The filter is applied to the ROWS, before the top/bottom slice — the property that makes
+   * "best sellers in Bread" mean what it says. Filtering the finished top-10 instead would show
+   * whichever of the overall winners happened to be bread, which is a different question.
+   */
+  it('ranks within a category, not the category members of the overall ranking', () => {
+    const rows = [
+      // Dairy dominates every overall list.
+      ...Array.from({ length: RANK_LIMIT }, (_, i) =>
+        row({ productId: 100 + i, quantity: 1000 + i, ...dairy }),
+      ),
+      row({ productId: 1, quantity: 9, ...bread }),
+      row({ productId: 2, quantity: 4, ...bread }),
+    ];
+
+    const overall = rankProducts(rows);
+    expect(overall.byQuantity.top.some((p) => p.productId === 1)).toBe(false);
+
+    const breadOnly = rankProducts(rows.filter((r) => r.categoryId === 2));
+    expect(breadOnly.byQuantity.top.map((p) => p.productId)).toEqual([1, 2]);
+    expect(breadOnly.totalProducts).toBe(2);
   });
 });

@@ -6,6 +6,7 @@ import { Button } from "../../components/common/Button";
 import { Input } from "../../components/common/Input";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { VirtualKeyboard } from "../../components/common/VirtualKeyboard";
+import { KEYBOARD_Z_ABOVE_MODAL } from "../../components/common/VirtualKeyboardControls";
 import { KbToggle } from "../../components/common/SearchControls";
 import { useSuppliers } from "../../hooks/useSuppliers";
 import { useToast } from "../../context/ToastContext";
@@ -478,6 +479,9 @@ export function SupplierManagementModal({
       {keyboardOpen && view === "form" && (
         <VirtualKeyboard
           fixed
+          // Without this the panel sits at its default z-index 200, underneath the Modal's
+          // full-screen overlay at 1000 — visible only as a darkened strip, and unclickable.
+          zIndex={KEYBOARD_Z_ABOVE_MODAL}
           onKeyPress={handleVirtualKey}
           onClose={() => setKeyboardOpen(false)}
         />

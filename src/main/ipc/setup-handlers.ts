@@ -73,7 +73,14 @@ export function setupSetupHandlers(getSetupWindow: () => BrowserWindow | null, o
       const response = await fetch(`${vpsApiUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ phone: data.phone, password: data.password, storeId: data.storeId }),
+        body: JSON.stringify({
+          phone: data.phone,
+          password: data.password,
+          storeId: data.storeId,
+          // Marks this as a terminal, not the web dashboard: an OFFLINE_ONLY store is refused
+          // a dashboard session but must still be able to activate a till.
+          client: 'pos',
+        }),
       });
 
       if (!response.ok) {

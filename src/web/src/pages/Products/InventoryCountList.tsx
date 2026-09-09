@@ -19,6 +19,7 @@ import {
 } from "../../components/common/MobileCard";
 import { CreateInventoryCountModal } from "./CreateInventoryCountModal";
 import { InventoryCountStatusBadge } from "./InventoryCountStatusBadge";
+import { SubNav, useStockSubNav } from "../../components/layout/SubNav";
 import {
   inventoryCounts,
   type InventoryCountStatus,
@@ -294,8 +295,13 @@ export function InventoryCountList() {
 
   const isEmpty = !isLoading && rows.length === 0 && !appliedSearch && status === "ALL";
 
+  const subNav = useStockSubNav();
+
   return (
     <Container>
+      {/* Section tabs — the mobile bar carries sections only, so a section's sibling
+          pages live here. See components/layout/SubNav.tsx. */}
+      <SubNav items={subNav} />
       <Title>{t("inventoryCount.title")}</Title>
 
       <Toolbar>

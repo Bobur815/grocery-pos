@@ -1,5 +1,6 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useModeStore } from "../../store/mode-store";
 import { useTranslation } from "react-i18next";
 import styled from "styled-components";
 import {
@@ -68,6 +69,10 @@ const CardDescription = styled.p`
 export function SettingsPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  // An OFFLINE_ONLY store has no server to sync with, so the sync page is a dead end: its button
+  // reaches a sync service that returns early for such a store. Hiding the tile is what actually
+  // removes it from the terminal — the toolbar buttons are gated the same way in AppBar/Sidebar.
+  const offlineOnly = useModeStore((s) => s.mode) === "OFFLINE_ONLY";
 
   const settingsSections = [
     {
@@ -100,12 +105,16 @@ export function SettingsPage() {
       description: t("receipt.description"),
       path: "/settings/receipt",
     },
-    {
-      icon: <RefreshCw size={32} />,
-      title: t("settings.syncSettings"),
-      description: t("settings.syncSettingsDescription"),
-      path: "/settings/sync",
-    },
+    ...(offlineOnly
+      ? []
+      : [
+          {
+            icon: <RefreshCw size={32} />,
+            title: t("settings.syncSettings"),
+            description: t("settings.syncSettingsDescription"),
+            path: "/settings/sync",
+          },
+        ]),
     {
       icon: <Tag size={32} />,
       title: t("priceTags.title"),

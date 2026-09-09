@@ -16,9 +16,14 @@ import {
 import { useNavigate } from "react-router-dom";
 import { TopBar } from "./DevicesPage";
 
-const Container = styled.div`
-  max-width: 800px;
-`;
+import {
+  SettingsPage,
+  SettingsGrid,
+  SpanAll,
+  FieldGrid,
+} from "@components/common/SettingsLayout";
+
+const Container = styled(SettingsPage)``;
 const Title = styled.h1`
   margin: 0 0 ${({ theme }) => theme.spacing.lg};
   color: ${({ theme }) => theme.colors.text};
@@ -27,7 +32,6 @@ const Section = styled.div`
   background-color: ${({ theme }) => theme.colors.surface};
   padding: ${({ theme }) => theme.spacing.lg};
   border-radius: ${({ theme }) => theme.borderRadius};
-  margin-bottom: ${({ theme }) => theme.spacing.lg};
 `;
 const SectionTitle = styled.h2`
   margin: 0 0 ${({ theme }) => theme.spacing.md};
@@ -38,14 +42,6 @@ const Form = styled.form`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.md};
-`;
-const Row = styled.div`
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: ${({ theme }) => theme.spacing.md};
-  @media (max-width: 600px) {
-    grid-template-columns: 1fr;
-  }
 `;
 const Actions = styled.div`
   display: flex;
@@ -309,30 +305,34 @@ export function SystemSettings() {
         <Title>{t("settings.systemSettings")}</Title>
       </TopBar>
 
+      {/* The store form is the wide one — it spans the grid and pairs its own fields two-up.
+          The subscription, balance and terminal cards are short and sit beside each other. */}
+      <SettingsGrid>
+      <SpanAll>
       <Section>
         <SectionTitle>{t("settings.storeInformation")}</SectionTitle>
         <Form onSubmit={handleSaveStore}>
-          <Input
-            label={t("settings.storeName")}
-            value={storeSettings.storeName}
-            onChange={(e) =>
-              setStoreSettings((prev) => ({
-                ...prev,
-                storeName: e.target.value,
-              }))
-            }
-          />
-          <Input
-            label={t("settings.storeAddress")}
-            value={storeSettings.storeAddress}
-            onChange={(e) =>
-              setStoreSettings((prev) => ({
-                ...prev,
-                storeAddress: e.target.value,
-              }))
-            }
-          />
-          <Row>
+          <FieldGrid>
+            <Input
+              label={t("settings.storeName")}
+              value={storeSettings.storeName}
+              onChange={(e) =>
+                setStoreSettings((prev) => ({
+                  ...prev,
+                  storeName: e.target.value,
+                }))
+              }
+            />
+            <Input
+              label={t("settings.storeAddress")}
+              value={storeSettings.storeAddress}
+              onChange={(e) =>
+                setStoreSettings((prev) => ({
+                  ...prev,
+                  storeAddress: e.target.value,
+                }))
+              }
+            />
             <Input
               label={t("settings.storePhone")}
               value={storeSettings.storePhone}
@@ -353,8 +353,6 @@ export function SystemSettings() {
                 }))
               }
             />
-          </Row>
-          <Row>
             <Input
               label={t("settings.taxRate")}
               type="number"
@@ -367,8 +365,7 @@ export function SystemSettings() {
                 }))
               }
             />
-            
-          </Row>
+          </FieldGrid>
           <Actions>
             <Button type="submit" disabled={saveStatus === "saving"}>
               {saveStatus === "saving" ? t("common.saving") : t("common.save")}
@@ -379,6 +376,7 @@ export function SystemSettings() {
           </Actions>
         </Form>
       </Section>
+      </SpanAll>
 
       <Section>
         <SectionTitle>
@@ -525,6 +523,7 @@ export function SystemSettings() {
           </PlanCard>
         )}
       </Section>
+      </SettingsGrid>
     </Container>
   );
 }

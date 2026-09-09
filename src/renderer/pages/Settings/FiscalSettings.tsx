@@ -1,20 +1,41 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import styled from 'styled-components';
+import styled, { useTheme } from 'styled-components';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, CheckCircle, XCircle, Keyboard, ChevronDown, ChevronUp, Ban, Loader2 } from 'lucide-react';
+import { ArrowLeft, CheckCircle, XCircle, Ban, Loader2 } from 'lucide-react';
 import { Button } from '../../components/common/Button';
-import { KbToggle } from '../../components/common/SearchControls';
-import { VirtualKeyboard } from '../../components/common/VirtualKeyboard';
+import { useVirtualKeyboard } from '../../hooks/useVirtualKeyboard';
+import {
+  KeyboardToggle,
+  KeyboardPanel,
+} from '../../components/common/VirtualKeyboardControls';
+import {
+  SettingsPage,
+  SettingsGrid,
+  FieldGrid,
+  GroupTitle,
+} from '../../components/common/SettingsLayout';
 import { useToast } from '../../context/ToastContext';
-import type { FiscalConnectionResult, FiscalQueueStatus, FiscalBulkProgress } from '@shared/types';
+import type {
+  FiscalConnectionResult,
+  FiscalQueueStatus,
+  FiscalBulkProgress,
+  FiscalTimings,
+} from '@shared/types';
+import {
+  PHASE_COLOR,
+  phaseBreakdown,
+  vcrBreakdown,
+  stackPercents,
+  slowestPhase,
+  formatMs,
+} from './fiscalTimings';
 import { translateMarkingStatus } from '../POS/markingCirculation';
 
-const Container = styled.div`
+const Container = styled(SettingsPage)`
   display: flex;
   flex-direction: column;
   gap: ${({ theme }) => theme.spacing.lg};
-  max-width: 600px;
 `;
 
 const Header = styled.div`
@@ -161,6 +182,103 @@ const OutList = styled.div`
   padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
 `;
 
+const StackBar = styled.div`
+  display: flex;
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: ${({ theme }) => theme.colors.border};
+`;
+
+const StackSeg = styled.div<{ $pct: number; $color: string }>`
+  width: ${({ $pct }) => $pct}%;
+  background: ${({ $color }) => $color};
+`;
+
+const Legend = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: ${({ theme }) => theme.spacing.sm};
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const LegendItem = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+`;
+
+const Swatch = styled.span<{ $color: string }>`
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: ${({ $color }) => $color};
+  flex-shrink: 0;
+`;
+
+const Table = styled.table`
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  color: ${({ theme }) => theme.colors.text};
+
+  th,
+  td {
+    text-align: right;
+    padding: 3px 0;
+    white-space: nowrap;
+  }
+  th:first-child,
+  td:first-child {
+    text-align: left;
+    width: 100%;
+  }
+  th {
+    font-weight: 600;
+    color: ${({ theme }) => theme.colors.textSecondary};
+    border-bottom: 1px solid ${({ theme }) => theme.colors.border};
+  }
+`;
+
+const NameCell = styled.span`
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+`;
+
+const Headline = styled.div`
+  display: flex;
+  gap: ${({ theme }) => theme.spacing.lg};
+`;
+
+const Stat = styled.div`
+  display: flex;
+  flex-direction: column;
+`;
+
+const StatValue = styled.span`
+  font-size: 18px;
+  font-weight: 700;
+  color: ${({ theme }) => theme.colors.text};
+`;
+
+const StatLabel = styled.span`
+  font-size: 11px;
+  text-transform: uppercase;
+  color: ${({ theme }) => theme.colors.textSecondary};
+`;
+
+const RecentRow = styled.div<{ $slow?: boolean }>`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.sm};
+  font-size: 12px;
+  color: ${({ theme, $slow }) => ($slow ? theme.colors.error : theme.colors.text)};
+`;
+
 const OutItem = styled.div`
   display: flex;
   align-items: center;
@@ -173,6 +291,24 @@ export function FiscalSettings() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const toast = useToast();
+  // Phase colours are read from the theme so the readout follows light/dark like everything else.
+  const theme = useTheme();
+
+  // Units and phase names live here rather than in fiscalTimings.ts because they are pure
+  // presentation — the module holds the arithmetic, this holds the wording.
+  const fmt = (ms: number) =>
+    formatMs(ms, t('fiscalSettings.timings.ms', 'мс'), t('fiscalSettings.timings.sec', 'с'));
+  const phaseLabel = (name: string) =>
+    ({
+      queue: t('fiscalSettings.timings.phase.queue', 'Ожидание очереди'),
+      config: t('fiscalSettings.timings.phase.config', 'Настройки'),
+      load: t('fiscalSettings.timings.phase.load', 'Чтение чека'),
+      zreport: t('fiscalSettings.timings.phase.zreport', 'Z-отчёт'),
+      build: t('fiscalSettings.timings.phase.build', 'Подготовка позиций'),
+      'vcr-sale': t('fiscalSettings.timings.phase.vcrSale', 'Касса REGOS'),
+      persist: t('fiscalSettings.timings.phase.persist', 'Сохранение'),
+      recover: t('fiscalSettings.timings.phase.recover', 'Восстановление чека'),
+    })[name] ?? name;
 
   const [enabled, setEnabled] = useState(false);
   const [url, setUrl] = useState('http://127.0.0.1:22298');
@@ -197,6 +333,7 @@ export function FiscalSettings() {
   const [bulkRunning, setBulkRunning] = useState(false);
   const [progress, setProgress] = useState<FiscalBulkProgress | null>(null);
   const [outList, setOutList] = useState<{ receipt: string; status: string }[]>([]);
+  const [timings, setTimings] = useState<FiscalTimings | null>(null);
 
   // Config load state. The form must NOT show its editable defaults until the real config has
   // loaded — otherwise a transient load failure would display defaults that, if saved, would
@@ -204,28 +341,20 @@ export function FiscalSettings() {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState(false);
 
-  // VirtualKeyboard — writes to whichever text field is focused.
-  type TextField = 'url' | 'login' | 'password' | 'posId';
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [activeField, setActiveField] = useState<TextField | null>(null);
-
+  // On-screen keyboard. Every field here is its own useState, so the setter map is all the
+  // apply step needs — React's updater form does the append/backspace the hook asks for.
+  type TextField = 'url' | 'login' | 'password' | 'posId' | 'uzqrPollMs' | 'uzqrTimeoutMs';
   const fieldSetters: Record<TextField, React.Dispatch<React.SetStateAction<string>>> = {
     url: setUrl,
     login: setLogin,
     password: setPassword,
     posId: setPosId,
+    uzqrPollMs: setUzqrPollMs,
+    uzqrTimeoutMs: setUzqrTimeoutMs,
   };
-
-  const handleVirtualKey = (key: string) => {
-    if (!activeField) return;
-    if (key === 'ENTER') return;
-    const setter = fieldSetters[activeField];
-    if (key === 'BACKSPACE') {
-      setter((prev) => prev.slice(0, -1));
-      return;
-    }
-    setter((prev) => prev + key);
-  };
+  const keyboard = useVirtualKeyboard<TextField>((field, edit) =>
+    fieldSetters[field](edit),
+  );
 
   const loadConfig = useCallback(async () => {
     setLoadError(false);
@@ -253,6 +382,7 @@ export function FiscalSettings() {
 
   useEffect(() => {
     loadConfig();
+    window.electronAPI.fiscal.getTimings().then(setTimings).catch(() => {});
     window.electronAPI.fiscal.getStatus().then(setQueue).catch(() => {});
   }, [loadConfig]);
 
@@ -297,6 +427,19 @@ export function FiscalSettings() {
   const refreshQueue = useCallback(() => {
     window.electronAPI.fiscal.getStatus().then(setQueue).catch(() => {});
   }, []);
+
+  const refreshTimings = useCallback(() => {
+    window.electronAPI.fiscal.getTimings().then(setTimings).catch(() => {});
+  }, []);
+
+  const handleResetTimings = async () => {
+    try {
+      await window.electronAPI.fiscal.resetTimings();
+      refreshTimings();
+    } catch {
+      toast.error(t('common.error'));
+    }
+  };
 
   const handleFiscalizeOld = async () => {
     setProgress(null);
@@ -356,19 +499,7 @@ export function FiscalSettings() {
           <ArrowLeft size={20} />
         </Button>
         <Title>{t('fiscalSettings.title', 'Фискализация (REGOS:VCR)')}</Title>
-        {loaded && (
-          <KbToggle
-            type="button"
-            tabIndex={-1}
-            $active={keyboardOpen}
-            onMouseDown={(e) => e.preventDefault()}
-            onClick={() => setKeyboardOpen((prev) => !prev)}
-            style={{ marginLeft: 'auto' }}
-          >
-            <Keyboard size={18} />
-            {keyboardOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          </KbToggle>
-        )}
+        {loaded && <KeyboardToggle kb={keyboard} style={{ marginLeft: 'auto' }} />}
       </Header>
 
       {!loaded ? (
@@ -396,27 +527,46 @@ export function FiscalSettings() {
           {t('fiscalSettings.enabled', 'Включить фискализацию через REGOS:VCR')}
         </Row>
 
-        <Field>
-          <Label>{t('fiscalSettings.url', 'Адрес виртуальной кассы')}</Label>
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} onFocus={() => setActiveField('url')} placeholder="http://127.0.0.1:22298" />
-        </Field>
+        <GroupTitle>{t('fiscalSettings.groupConnection', 'Подключение')}</GroupTitle>
+        <FieldGrid>
+          <Field>
+            <Label>{t('fiscalSettings.url', 'Адрес виртуальной кассы')}</Label>
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              {...keyboard.fieldProps('url')}
+              placeholder="http://127.0.0.1:22298"
+            />
+          </Field>
 
-        <Field>
-          <Label>{t('fiscalSettings.login', 'Логин кассира')}</Label>
-          <Input value={login} onChange={(e) => setLogin(e.target.value)} onFocus={() => setActiveField('login')} placeholder="cassir" />
-        </Field>
+          <Field>
+            <Label>{t('fiscalSettings.posId', 'ID кассы (pos_id)')}</Label>
+            <Input value={posId} onChange={(e) => setPosId(e.target.value)} {...keyboard.fieldProps('posId')} />
+          </Field>
 
-        <Field>
-          <Label>{t('fiscalSettings.password', 'Пароль кассира')}</Label>
-          <Input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onFocus={() => setActiveField('password')}
-            placeholder={hasPassword ? '•••••••• (сохранён)' : ''}
-          />
-        </Field>
+          <Field>
+            <Label>{t('fiscalSettings.login', 'Логин кассира')}</Label>
+            <Input
+              value={login}
+              onChange={(e) => setLogin(e.target.value)}
+              {...keyboard.fieldProps('login')}
+              placeholder="cassir"
+            />
+          </Field>
 
+          <Field>
+            <Label>{t('fiscalSettings.password', 'Пароль кассира')}</Label>
+            <Input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              {...keyboard.fieldProps('password')}
+              placeholder={hasPassword ? '•••••••• (сохранён)' : ''}
+            />
+          </Field>
+        </FieldGrid>
+
+        <GroupTitle>{t('fiscalSettings.groupVat', 'НДС')}</GroupTitle>
         <Row>
           <input
             type="checkbox"
@@ -425,32 +575,29 @@ export function FiscalSettings() {
           />
           {t('fiscalSettings.nonVatPayer', 'Организация не является плательщиком НДС (отправлять «Без НДС»)')}
         </Row>
+        <FieldGrid>
+          <Field>
+            <Label>{t('fiscalSettings.vat', 'Ставка НДС, %')}</Label>
+            <Select
+              value={vatPercent}
+              onChange={(e) => setVatPercent(e.target.value)}
+              disabled={nonVatPayer}
+            >
+              <option value="0">0%</option>
+              <option value="12">12%</option>
+            </Select>
+            {nonVatPayer && (
+              <Muted>
+                {t(
+                  'fiscalSettings.nonVatPayerHint',
+                  'Для неплательщика НДС ставка игнорируется — во все позиции отправляется «Без НДС».',
+                )}
+              </Muted>
+            )}
+          </Field>
+        </FieldGrid>
 
-        <Field>
-          <Label>{t('fiscalSettings.vat', 'Ставка НДС, %')}</Label>
-          <Select
-            value={vatPercent}
-            onChange={(e) => setVatPercent(e.target.value)}
-            disabled={nonVatPayer}
-          >
-            <option value="0">0%</option>
-            <option value="12">12%</option>
-          </Select>
-          {nonVatPayer && (
-            <Muted>
-              {t(
-                'fiscalSettings.nonVatPayerHint',
-                'Для неплательщика НДС ставка игнорируется — во все позиции отправляется «Без НДС».',
-              )}
-            </Muted>
-          )}
-        </Field>
-
-        <Field>
-          <Label>{t('fiscalSettings.posId', 'ID кассы (pos_id)')}</Label>
-          <Input value={posId} onChange={(e) => setPosId(e.target.value)} onFocus={() => setActiveField('posId')} />
-        </Field>
-
+        <GroupTitle>{t('fiscalSettings.groupBehaviour', 'Печать и маркировка')}</GroupTitle>
         <Row>
           <input
             type="checkbox"
@@ -469,6 +616,7 @@ export function FiscalSettings() {
           {t('fiscalSettings.markingCodeCheck', 'Проверять повторную продажу маркированных товаров (группа 022)')}
         </Row>
 
+        <GroupTitle>{t('fiscalSettings.groupUzqr', 'UzQR')}</GroupTitle>
         {/* UzQR is off by default: stores that already take UzQR through a bank terminal must
             keep the current behaviour until someone deliberately opts in. */}
         <Row>
@@ -488,24 +636,28 @@ export function FiscalSettings() {
                 'Покупатель сканирует QR-код с экрана. Чек создаётся только после подтверждения оплаты. Если выключено — UzQR остаётся обычным способом оплаты без QR-кода.',
               )}
             </Muted>
-            <Field>
-              <Label>{t('fiscalSettings.uzqrPollMs', 'Интервал опроса, мс')}</Label>
-              <Input
-                type="number"
-                value={uzqrPollMs}
-                onChange={(e) => setUzqrPollMs(e.target.value)}
-                placeholder="2000"
-              />
-            </Field>
-            <Field>
-              <Label>{t('fiscalSettings.uzqrTimeoutMs', 'Ожидание оплаты, мс')}</Label>
-              <Input
-                type="number"
-                value={uzqrTimeoutMs}
-                onChange={(e) => setUzqrTimeoutMs(e.target.value)}
-                placeholder="120000"
-              />
-            </Field>
+            <FieldGrid>
+              <Field>
+                <Label>{t('fiscalSettings.uzqrPollMs', 'Интервал опроса, мс')}</Label>
+                <Input
+                  type="number"
+                  value={uzqrPollMs}
+                  onChange={(e) => setUzqrPollMs(e.target.value)}
+                  {...keyboard.fieldProps('uzqrPollMs', { numeric: true, clearOnFirstKey: true })}
+                  placeholder="2000"
+                />
+              </Field>
+              <Field>
+                <Label>{t('fiscalSettings.uzqrTimeoutMs', 'Ожидание оплаты, мс')}</Label>
+                <Input
+                  type="number"
+                  value={uzqrTimeoutMs}
+                  onChange={(e) => setUzqrTimeoutMs(e.target.value)}
+                  {...keyboard.fieldProps('uzqrTimeoutMs', { numeric: true, clearOnFirstKey: true })}
+                  placeholder="120000"
+                />
+              </Field>
+            </FieldGrid>
           </>
         )}
 
@@ -534,6 +686,10 @@ export function FiscalSettings() {
       </Card>
       )}
 
+      {/* The queue card is short and the timings card is tall; side by side they fill the width
+          that used to be empty, and neither pushes the other below the fold. 430px keeps the
+          timings tables readable — below that the pair collapses back to one column. */}
+      <SettingsGrid $min={430}>
       {queue && (
         <Card>
           <Label>{t('fiscalSettings.queueStatus', 'Очередь фискализации')}</Label>
@@ -617,13 +773,175 @@ export function FiscalSettings() {
         </Card>
       )}
 
-      {keyboardOpen && (
-        <VirtualKeyboard
-          fixed
-          onKeyPress={handleVirtualKey}
-          onClose={() => setKeyboardOpen(false)}
-        />
+      {timings && (
+        <Card>
+          <Label>{t('fiscalSettings.timings.title', 'Время фискализации')}</Label>
+
+          {(() => {
+            const total = timings.phases['phase:TOTAL'];
+            const failed = timings.phases['phase:TOTAL_FAILED'];
+            const breakdown = phaseBreakdown(timings.phases);
+            const vcr = vcrBreakdown(timings.phases);
+            const pcts = stackPercents(breakdown);
+
+            if (!total && !failed) {
+              return (
+                <Muted>
+                  {t(
+                    'fiscalSettings.timings.empty',
+                    'Пока нет данных — они появятся после первой фискализации на этом терминале. Счётчики сбрасываются при перезапуске программы.',
+                  )}
+                </Muted>
+              );
+            }
+
+            return (
+              <>
+                <Headline>
+                  <Stat>
+                    <StatValue>{total ? fmt(total.p50Ms) : '—'}</StatValue>
+                    <StatLabel>{t('fiscalSettings.timings.median', 'медиана')}</StatLabel>
+                  </Stat>
+                  <Stat>
+                    <StatValue>{total ? fmt(total.p95Ms) : '—'}</StatValue>
+                    <StatLabel>{t('fiscalSettings.timings.p95', '95-й процентиль')}</StatLabel>
+                  </Stat>
+                  <Stat>
+                    <StatValue>{total ? fmt(total.maxMs) : '—'}</StatValue>
+                    <StatLabel>{t('fiscalSettings.timings.max', 'максимум')}</StatLabel>
+                  </Stat>
+                  <Stat>
+                    <StatValue>
+                      {total?.count ?? 0}
+                      {failed ? ` / ${failed.count}` : ''}
+                    </StatValue>
+                    <StatLabel>
+                      {failed
+                        ? t('fiscalSettings.timings.countWithFailed', 'чеков / ошибок')
+                        : t('fiscalSettings.timings.count', 'чеков')}
+                    </StatLabel>
+                  </Stat>
+                </Headline>
+
+                {pcts.length > 0 && (
+                  <>
+                    <StackBar>
+                      {breakdown.map((p, i) => (
+                        <StackSeg
+                          key={p.name}
+                          $pct={pcts[i]}
+                          $color={theme.colors[PHASE_COLOR[p.name]]}
+                          title={`${phaseLabel(p.name)} — ${fmt(p.meanMs)}`}
+                        />
+                      ))}
+                    </StackBar>
+                    <Legend>
+                      {breakdown.map((p) => (
+                        <LegendItem key={p.name}>
+                          <Swatch $color={theme.colors[PHASE_COLOR[p.name]]} />
+                          {phaseLabel(p.name)}
+                        </LegendItem>
+                      ))}
+                    </Legend>
+                  </>
+                )}
+
+                <Table>
+                  <thead>
+                    <tr>
+                      <th>{t('fiscalSettings.timings.phaseCol', 'Этап')}</th>
+                      <th>{t('fiscalSettings.timings.median', 'медиана')}</th>
+                      <th>{t('fiscalSettings.timings.p95', '95-й процентиль')}</th>
+                      <th>{t('fiscalSettings.timings.max', 'максимум')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {breakdown.map((p) => (
+                      <tr key={p.name}>
+                        <td>
+                          <NameCell>
+                            <Swatch $color={theme.colors[PHASE_COLOR[p.name]]} />
+                            {phaseLabel(p.name)}
+                          </NameCell>
+                        </td>
+                        <td>{fmt(p.stats.p50Ms)}</td>
+                        <td>{fmt(p.stats.p95Ms)}</td>
+                        <td>{fmt(p.stats.maxMs)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+
+                <Muted>
+                  {t(
+                    'fiscalSettings.timings.hint',
+                    'Если основное время в «Касса REGOS» — задержка на стороне кассы. Если в «Ожидание очереди» — чеки становятся в очередь друг за другом. Остальные этапы выполняются на этом компьютере.',
+                  )}
+                </Muted>
+
+                {vcr.length > 0 && (
+                  <>
+                    <Label>{t('fiscalSettings.timings.vcrCalls', 'Запросы к виртуальной кассе')}</Label>
+                    <Table>
+                      <thead>
+                        <tr>
+                          <th>{t('fiscalSettings.timings.methodCol', 'Метод')}</th>
+                          <th>{t('fiscalSettings.timings.calls', 'запросов')}</th>
+                          <th>{t('fiscalSettings.timings.median', 'медиана')}</th>
+                          <th>{t('fiscalSettings.timings.max', 'максимум')}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {vcr.map((v) => (
+                          <tr key={v.method}>
+                            <td>{v.method}</td>
+                            <td>{v.stats.count}</td>
+                            <td>{fmt(v.stats.p50Ms)}</td>
+                            <td>{fmt(v.stats.maxMs)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </Table>
+                  </>
+                )}
+
+                {timings.recent.length > 0 && (
+                  <>
+                    <Label>{t('fiscalSettings.timings.recent', 'Последние чеки')}</Label>
+                    <OutList>
+                      {timings.recent.slice(0, 10).map((r, i) => {
+                        const slowest = slowestPhase(r.phases);
+                        return (
+                          <RecentRow key={`${r.receiptNumber}-${r.at}-${i}`} $slow={!r.ok}>
+                            <span>
+                              #{r.receiptNumber}
+                              {slowest ? ` · ${phaseLabel(slowest.name)}` : ''}
+                              {r.ok ? '' : ` · ${t('fiscalSettings.failed', 'Ошибки')}`}
+                            </span>
+                            <span>{fmt(r.totalMs)}</span>
+                          </RecentRow>
+                        );
+                      })}
+                    </OutList>
+                  </>
+                )}
+              </>
+            );
+          })()}
+
+          <ButtonRow>
+            <Button variant="secondary" onClick={refreshTimings}>
+              {t('fiscalSettings.timings.refresh', 'Обновить')}
+            </Button>
+            <Button variant="secondary" onClick={handleResetTimings}>
+              {t('fiscalSettings.timings.reset', 'Сбросить счётчики')}
+            </Button>
+          </ButtonRow>
+        </Card>
       )}
+      </SettingsGrid>
+
+      <KeyboardPanel kb={keyboard} />
     </Container>
   );
 }

@@ -43,14 +43,24 @@ export class AnalyticsController {
   @ApiOperation({ summary: 'Get full analytics data (Admin only)' })
   @ApiQuery({ name: 'startDate', required: true, type: String })
   @ApiQuery({ name: 'endDate', required: true, type: String })
+  @ApiQuery({ name: 'categoryId', required: false, type: Number })
   async getAnalyticsData(
     @CurrentStore() storeId: string,
     @Query('startDate') startDate: string,
     @Query('endDate') endDate: string,
+    @Query('categoryId') categoryId?: string,
   ) {
     const start = new Date(startDate);
     const end = new Date(endDate);
-    return this.analyticsService.getAnalyticsData(storeId, start, end);
+    // A non-numeric or absent categoryId means "all categories" rather than an error: this only
+    // narrows one card, and a bad value should not cost the caller the whole analytics payload.
+    const category = Number(categoryId);
+    return this.analyticsService.getAnalyticsData(
+      storeId,
+      start,
+      end,
+      Number.isInteger(category) ? category : undefined,
+    );
   }
 
   @Get('product-performance')

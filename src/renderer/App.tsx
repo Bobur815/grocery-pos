@@ -26,7 +26,6 @@ import { PriceTags } from "./pages/Settings/PriceTags";
 import { PrinterSettings } from "./pages/Settings/PrinterSettings";
 import { ReceiptSettings } from "./pages/Settings/ReceiptSettings";
 import { UserList } from "./pages/Users/UserList";
-import { UserForm } from "./pages/Users/UserForm";
 import { SupplierList, SupplierDetails } from "./pages/Suppliers";
 import { WeighedInventoryPage } from "./pages/Inventory/WeighedInventoryPage";
 import { ScaleSettings } from "./pages/Settings/ScaleSettings";
@@ -218,26 +217,6 @@ function App() {
             <RoleGuard allowedRoles={["ADMIN"]}>
               <ModeGuard>
                 <UserList />
-              </ModeGuard>
-            </RoleGuard>
-          }
-        />
-        <Route
-          path="users/new"
-          element={
-            <RoleGuard allowedRoles={["ADMIN"]}>
-              <ModeGuard>
-                <UserForm />
-              </ModeGuard>
-            </RoleGuard>
-          }
-        />
-        <Route
-          path="users/:id/edit"
-          element={
-            <RoleGuard allowedRoles={["ADMIN"]}>
-              <ModeGuard>
-                <UserForm />
               </ModeGuard>
             </RoleGuard>
           }

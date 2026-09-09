@@ -226,3 +226,35 @@ export interface FiscalBulkProgress {
   currentReceipt?: string; // receiptNumber currently being processed
   lastDisabled?: { receipt: string; status: string }; // last out-of-circulation hit, for the list
 }
+
+/**
+ * Timing stats for one measured step, aggregated over this app session. Keys are namespaced by
+ * their source: `vcr:<Method>` is one JSON-RPC round-trip to the device, `phase:<name>` is one
+ * segment of the fiscalization pipeline, `phase:TOTAL` the whole successful thing.
+ */
+export interface FiscalPhaseStats {
+  count: number;
+  totalMs: number;
+  minMs: number;
+  maxMs: number;
+  p50Ms: number;
+  p95Ms: number;
+}
+
+/** One receipt's fiscalization, broken down into the phases it spent its time in. */
+export interface FiscalSaleTiming {
+  at: string;
+  receiptNumber: string;
+  totalMs: number;
+  ok: boolean;
+  phases: Array<{ name: string; ms: number }>;
+}
+
+/**
+ * What `fiscal:getTimings` returns. In-memory and reset on app restart — this is a diagnostic for
+ * "why is fiscalization slow right now", not a historical metrics store.
+ */
+export interface FiscalTimings {
+  phases: Record<string, FiscalPhaseStats>;
+  recent: FiscalSaleTiming[];
+}

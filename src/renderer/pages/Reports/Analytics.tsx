@@ -6,6 +6,9 @@ import {
   Area,
   BarChart,
   Bar,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -16,6 +19,22 @@ import {
 import { Select } from '../../components/common/Select';
 import { DateInput } from '../../components/common/DateInput';
 import { formatCurrency as formatCurrencyBase } from '@shared/utils';
+import {
+  RankList,
+  RankHeading,
+  RankNote,
+  metricValueOf,
+  sliceFor,
+  type RankedProduct,
+  type ProductRanking,
+  type RankingCategory,
+  type RankMetric,
+} from '../../components/analytics/rankings';
+import {
+  CATEGORY_HUES_LIGHT,
+  CATEGORY_HUES_DARK,
+  foldCategorySlices,
+} from '../../components/analytics/categoryPie';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +53,8 @@ interface AnalyticsData {
   salesByCategory: { categoryRu: string; categoryUz: string; revenue: number; quantity: number }[];
   hourlyDistribution: { hour: number; revenue: number; count: number }[];
   topProducts: { name: string; quantity: number; revenue: number }[];
+  productRanking: ProductRanking;
+  rankingCategories: RankingCategory[];
   cashierPerformance: { name: string; revenue: number; count: number }[];
   profitMargins: { categoryRu: string; categoryUz: string; revenue: number; cost: number }[];
   summary: {
@@ -191,6 +212,35 @@ const CardTitle = styled.h3`
   font-size: 16px;
 `;
 
+const CardHead = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: ${({ theme }) => theme.spacing.md};
+  margin-bottom: ${({ theme }) => theme.spacing.sm};
+  flex-wrap: wrap;
+`;
+
+const MetricSelect = styled(Select)`
+  min-width: 150px;
+`;
+
+/**
+ * The filter row above the rankings: category sized to its content, metric taking the rest.
+ *
+ * Stacks below 600px instead of splitting a narrow screen two ways — at that size `auto` and
+ * `2fr` both land near 150px and the category names truncate to nothing useful.
+ */
+const CardControls = styled.div`
+  display: grid;
+  grid-template-columns: auto 2fr;
+  gap: ${({ theme }) => theme.spacing.sm};
+
+  @media (max-width: 600px) {
+    grid-template-columns: 1fr;
+  }
+`;
+
 const NoData = styled.div`
   height: 160px;
   display: flex;
@@ -238,6 +288,12 @@ export function Analytics() {
     { value: 'custom', label: t('reports.custom') },
   ];
 
+  // All three rankings ship in one response, so switching the metric is instant — no refetch.
+  const [rankMetric, setRankMetric] = useState<RankMetric>('quantity');
+  // The category DOES refetch: ranking has to happen within it, and only the main process holds
+  // every product. '' is all categories.
+  const [rankCategory, setRankCategory] = useState<string>('');
+
   const fetchData = useCallback(async () => {
     if (preset === 'custom' && (!customStart || !customEnd)) return;
     setIsLoading(true);
@@ -247,6 +303,7 @@ export function Analytics() {
         startDate: start.toISOString(),
         endDate: end.toISOString(),
         terminalId: terminalId || undefined,
+        ...(rankCategory ? { categoryId: Number(rankCategory) } : {}),
       });
       setData(result as AnalyticsData);
     } catch (err) {
@@ -254,18 +311,46 @@ export function Analytics() {
     } finally {
       setIsLoading(false);
     }
-  }, [preset, customStart, customEnd, terminalId]);
+  }, [preset, customStart, customEnd, terminalId, rankCategory]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   // Prepare localised data
-  const categoryData =
+  const categoryData = foldCategorySlices(
     data?.salesByCategory.map((c) => ({
       name: lang === 'ru' ? c.categoryRu : c.categoryUz,
       revenue: c.revenue,
-    })) ?? [];
+    })) ?? [],
+    t('reports.otherCategories', 'Прочие'),
+  );
+  const categoryTotal = categoryData.reduce((sum, c) => sum + c.revenue, 0);
+
+  const ranking = data?.productRanking;
+  const rankSlice = sliceFor(ranking, rankMetric);
+  const metricValue = (p: RankedProduct): number => metricValueOf(p, rankMetric);
+  const formatMetric = (p: RankedProduct): string =>
+    rankMetric === 'quantity' ? String(p.quantity) : fmt(metricValue(p));
+
+  const metricOptions = [
+    { value: 'quantity', label: t('reports.rankByQuantity', 'По количеству') },
+    { value: 'revenue', label: t('reports.rankByRevenue', 'По выручке') },
+    { value: 'profit', label: t('reports.rankByProfit', 'По прибыли') },
+  ];
+
+  /**
+   * All categories plus an "all" entry. Sourced from the response rather than a separate query
+   * so the list can never offer one that would rank empty — the main process always derives it
+   * from the unfiltered rows, so it survives a narrowed fetch.
+   */
+  const categoryOptions = [
+    { value: '', label: t('reports.allCategories', 'Все категории') },
+    ...(data?.rankingCategories ?? []).map((c) => ({
+      value: String(c.id),
+      label: lang === 'ru' ? c.nameRu : c.nameUz,
+    })),
+  ];
 
   const profitData =
     data?.profitMargins.map((c) => ({
@@ -278,13 +363,14 @@ export function Analytics() {
   const SUCCESS = theme.colors.success;
   const WARNING = theme.colors.warning;
   const ERROR = theme.colors.error;
-  const INFO = theme.colors.info;
   const BORDER = theme.colors.border;
   const TEXT_SEC = theme.colors.textSecondary;
 
   const tickStyle = { fontSize: 11, fill: TEXT_SEC };
 
   const isDark = theme.colors.text === '#ffffff';
+  // Dark mode gets its own validated steps rather than an automatic lightening of the light ones.
+  const CATEGORY_HUES = isDark ? CATEGORY_HUES_DARK : CATEGORY_HUES_LIGHT;
   const tooltipStyle = {
     backgroundColor: theme.colors.surface,
     border: `1px solid ${theme.colors.border}`,
@@ -432,67 +518,130 @@ export function Analytics() {
                 <NoData>{t('reports.noData')}</NoData>
               ) : (
                 <ResponsiveContainer width="100%" height={210}>
-                  <BarChart
-                    data={categoryData}
-                    layout="vertical"
-                    margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke={BORDER} />
-                    <XAxis
-                      type="number"
-                      tickFormatter={(v: number) => fmt(v)}
-                      tick={tickStyle}
-                    />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={110}
-                      tick={tickStyle}
-                    />
+                  <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                    <Pie
+                      data={categoryData}
+                      dataKey="revenue"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={44}
+                      outerRadius={76}
+                      // A 2px ring in the surface colour separates adjacent slices, so two
+                      // neighbouring hues never touch — the gap does the work colour alone
+                      // cannot for a red/green reader.
+                      stroke={theme.colors.surface}
+                      strokeWidth={2}
+                      paddingAngle={1}
+                      // The share, on the slice. The lighter steps fall under 3:1 against a light
+                      // surface, and a visible label is the relief that makes that legal.
+                      label={({ percent }: { percent?: number }) =>
+                        (percent ?? 0) >= 0.05 ? `${Math.round((percent ?? 0) * 100)}%` : ''
+                      }
+                      labelLine={false}
+                      isAnimationActive={false}
+                    >
+                      {categoryData.map((entry, i) => (
+                        <Cell key={entry.name} fill={CATEGORY_HUES[i % CATEGORY_HUES.length]} />
+                      ))}
+                    </Pie>
                     <Tooltip
-                      formatter={(v: number | undefined) => [fmt(v ?? 0), t('reports.revenue')]}
+                      formatter={(v: number | undefined, name: string | undefined) => [
+                        `${fmt(v ?? 0)} · ${
+                          categoryTotal > 0 ? Math.round(((v ?? 0) / categoryTotal) * 100) : 0
+                        }%`,
+                        name ?? '',
+                      ]}
                       contentStyle={tooltipStyle}
-                      cursor={tooltipCursor}
                     />
-                    <Bar dataKey="revenue" fill={INFO} radius={[0, 3, 3, 0]} />
-                  </BarChart>
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      iconSize={8}
+                      formatter={(value: string) => (
+                        <span style={{ fontSize: 11, color: TEXT_SEC }}>{value}</span>
+                      )}
+                    />
+                  </PieChart>
                 </ResponsiveContainer>
               )}
             </Card>
           </TwoCol>
 
-          {/* ── Top Products | Cashier Performance ── */}
-          <TwoCol>
-            <Card>
-              <CardTitle>{t('reports.topSellingProducts')}</CardTitle>
-              {data.topProducts.length === 0 ? (
-                <NoData>{t('reports.noData')}</NoData>
-              ) : (
-                <ResponsiveContainer width="100%" height={210}>
-                  <BarChart
-                    data={data.topProducts}
-                    layout="vertical"
-                    margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke={BORDER} />
-                    <XAxis type="number" tick={tickStyle} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={120}
-                      tick={tickStyle}
-                    />
-                    <Tooltip
-                      formatter={(v: number | undefined) => [v ?? 0, t('reports.items')]}
-                      contentStyle={tooltipStyle}
-                      cursor={tooltipCursor}
-                    />
-                    <Bar dataKey="quantity" fill={SUCCESS} radius={[0, 3, 3, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </Card>
+          {/* ── Product rankings (full width, both filters drive both lists) ── */}
+          <Card>
+            <CardHead>
+              <CardTitle style={{ margin: 0 }}>
+                {t('reports.productRankings', 'Рейтинг товаров')}
+              </CardTitle>
+              <CardControls>
+                {/* Category refetches — the ranking must happen within it, in the main process.
+                    Metric does not: all three ship in the one response. */}
+                <MetricSelect
+                  options={categoryOptions}
+                  value={rankCategory}
+                  onChange={(e) => setRankCategory(e.target.value)}
+                  selectSize="small"
+                />
+                <MetricSelect
+                  options={metricOptions}
+                  value={rankMetric}
+                  onChange={(e) => setRankMetric(e.target.value as RankMetric)}
+                  selectSize="small"
+                />
+              </CardControls>
+            </CardHead>
 
+            {/* What the lists are drawn from. Without this the worst-sellers list looks like a
+                complete answer, when it is ten rows sampled from however many never sold. */}
+            <RankNote>
+              {t('reports.rankScope', {
+                defaultValue:
+                  'Из {{total}} активных товаров. Не продавалось ни разу: {{neverSold}}.',
+                total: ranking?.totalProducts ?? 0,
+                neverSold: ranking?.neverSoldCount ?? 0,
+              })}
+              {rankMetric === 'profit' && (ranking?.noCostCount ?? 0) > 0 && (
+                <>
+                  {' '}
+                  {t('reports.rankNoCost', {
+                    defaultValue: 'Без себестоимости — не учитывается в прибыли: {{count}}.',
+                    count: ranking?.noCostCount ?? 0,
+                  })}
+                </>
+              )}
+            </RankNote>
+
+            <TwoCol>
+              <div>
+                <RankHeading>{t('reports.bestSellers', 'Лучшие 10')}</RankHeading>
+                <RankList
+                  rows={rankSlice?.top ?? []}
+                  lang={lang}
+                  color={SUCCESS}
+                  metricValue={metricValue}
+                  formatMetric={formatMetric}
+                  emptyLabel={t('reports.noData')}
+                />
+              </div>
+              <div>
+                <RankHeading>{t('reports.worstSellers', 'Худшие 10')}</RankHeading>
+                <RankList
+                  rows={rankSlice?.bottom ?? []}
+                  lang={lang}
+                  color={ERROR}
+                  metricValue={metricValue}
+                  formatMetric={formatMetric}
+                  emptyLabel={t('reports.noData')}
+                />
+              </div>
+            </TwoCol>
+          </Card>
+
+          {/* ── Cashier performance (full width — it lost its former row partner to the
+              rankings block above, and a half-width chart beside empty space reads as broken) ── */}
+          <TwoCol>
             <Card>
               <CardTitle>{t('reports.cashierPerformance')}</CardTitle>
               {data.cashierPerformance.length === 0 ? (

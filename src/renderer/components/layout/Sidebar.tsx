@@ -214,6 +214,10 @@ export function Sidebar() {
   const { status, refreshStatus } = useSync();
   const isAdmin = user?.role === "ADMIN";
   const posAdminLocked = useModeStore((s) => s.posAdminLocked);
+  // See AppBar: an OFFLINE_ONLY store has no server to sync with. The whole status line goes with
+  // the button — a permanent "not synced" is worse than saying nothing, because it reads as a
+  // fault on a terminal that is working exactly as intended.
+  const offlineOnly = useModeStore((s) => s.mode) === 'OFFLINE_ONLY';
   const [currentVersion, setCurrentVersion] = useState("");
   const [updateAvailable, setUpdateAvailable] = useState(false);
   const [updateDownloaded, setUpdateDownloaded] = useState(false);
@@ -314,21 +318,23 @@ export function Sidebar() {
         </Nav>
 
         <BottomSection>
-          <SyncStatus $syncing={status.isSyncing}>
-            <span>{status.isSyncing ? "🔄" : "✓"}</span>
-            <SyncText>
-              {status.isSyncing
-                ? t("sync.syncing")
-                : status.lastSyncTime
-                  ? `${t("sync.lastSync")}: ${new Date(status.lastSyncTime).toLocaleTimeString()}`
-                  : t("sync.notSynced")}
-            </SyncText>
-            <SidebarSyncBtn
-              onSync={handleSyncNow}
-              size={15}
-              title={t("settings.syncNow")}
-            />
-          </SyncStatus>
+          {!offlineOnly && (
+            <SyncStatus $syncing={status.isSyncing}>
+              <span>{status.isSyncing ? "🔄" : "✓"}</span>
+              <SyncText>
+                {status.isSyncing
+                  ? t("sync.syncing")
+                  : status.lastSyncTime
+                    ? `${t("sync.lastSync")}: ${new Date(status.lastSyncTime).toLocaleTimeString()}`
+                    : t("sync.notSynced")}
+              </SyncText>
+              <SidebarSyncBtn
+                onSync={handleSyncNow}
+                size={15}
+                title={t("settings.syncNow")}
+              />
+            </SyncStatus>
+          )}
 
           {currentVersion && (
             updateDownloaded ? (

@@ -7,6 +7,11 @@ import { Button as CommonButton } from "../../components/common/Button";
 import { PrintTagsModal } from "./PrintTagsModal";
 import { generateId } from "../../utils/helpers";
 import { useToast } from "../../context/ToastContext";
+import { useVirtualKeyboard } from "../../hooks/useVirtualKeyboard";
+import {
+  KeyboardToggle,
+  KeyboardPanel,
+} from "../../components/common/VirtualKeyboardControls";
 
 export interface PriceTagTemplate {
   id: string;
@@ -419,6 +424,19 @@ export function PriceTags() {
     setEditing({ ...editing, [key]: value });
   };
 
+  // On-screen keyboard for the template editor. It routes through updateField, so the numeric
+  // dimensions come back as numbers and the text fields as strings, exactly as typing does.
+  type Field = "name" | "customText1Value" | "customText2Value" | "widthMm" | "heightMm";
+  const keyboard = useVirtualKeyboard<Field>((field, edit) => {
+    if (!editing) return;
+    const next = edit(String(editing[field] ?? ""));
+    if (field === "widthMm" || field === "heightMm") {
+      updateField(field, next === "" ? 0 : Number(next));
+      return;
+    }
+    updateField(field, next);
+  });
+
   const toggleElement = (key: keyof PriceTagTemplate["elements"]) => {
     if (!editing) return;
     setEditing({
@@ -449,6 +467,7 @@ export function PriceTags() {
               placeholder={t("priceTags.templateName")}
               value={editing.name}
               onChange={(e) => updateField("name", e.target.value)}
+              {...keyboard.fieldProps("name")}
             />
           </FieldGroup>
           <FieldGroup>
@@ -461,6 +480,7 @@ export function PriceTags() {
               onChange={(e) =>
                 updateField("widthMm", e.target.value === "" ? 0 : Number(e.target.value))
               }
+              {...keyboard.fieldProps("widthMm", { numeric: true, clearOnFirstKey: true })}
             />
           </FieldGroup>
           <FieldGroup>
@@ -473,8 +493,10 @@ export function PriceTags() {
               onChange={(e) =>
                 updateField("heightMm", e.target.value === "" ? 0 : Number(e.target.value))
               }
+              {...keyboard.fieldProps("heightMm", { numeric: true, clearOnFirstKey: true })}
             />
           </FieldGroup>
+          <KeyboardToggle kb={keyboard} />
           <Button onClick={handleSave} disabled={!editing.name.trim()}>
             {t("common.save")}
           </Button>
@@ -517,6 +539,7 @@ export function PriceTags() {
                     onChange={(e) =>
                       updateField("customText1Value", e.target.value)
                     }
+                    {...keyboard.fieldProps("customText1Value")}
                     placeholder={t("priceTags.customTextPlaceholder")}
                   />
                 </FieldGroup>
@@ -525,6 +548,7 @@ export function PriceTags() {
                 <FieldGroup style={{ marginTop: 8 }}>
                   <FieldLabel>{t("priceTags.el_customText2")}</FieldLabel>
                   <FieldInput
+                    {...keyboard.fieldProps("customText2Value")}
                     value={editing.customText2Value}
                     onChange={(e) =>
                       updateField("customText2Value", e.target.value)
@@ -578,6 +602,8 @@ export function PriceTags() {
             </PreviewContainer>
           </Panel>
         </EditorLayout>
+
+        <KeyboardPanel kb={keyboard} />
       </Container>
     );
   }

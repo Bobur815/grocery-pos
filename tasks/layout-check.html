@@ -1,0 +1,179 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Settings layout check</title>
+<!--
+  Layout-only mock of the three settings pages. Uses the real theme tokens and the exact grid
+  values from SettingsLayout.tsx, with representative Russian content at realistic lengths.
+  Purpose: check column counts and balance at terminal widths. Not the real components.
+-->
+<style>
+  :root {
+    --primary: #1976d2; --secondary: #dc004e; --bg: #f5f5f5; --surface: #fff;
+    --text: #000; --text2: #666; --border: #e0e0e0; --success: #4caf50;
+    --error: #f44336; --warning: #ff9800; --info: #2196f3;
+    --xs: 4px; --sm: 8px; --md: 16px; --lg: 24px; --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+
+  .ruler { position: sticky; top: 0; z-index: 5; background: #222; color: #fff;
+           padding: 6px 12px; font: 12px ui-monospace, monospace; }
+  .viewport { border-bottom: 3px solid #222; overflow: hidden; }
+  .app { padding: var(--lg); }
+
+  /* --- SettingsLayout.tsx, verbatim --- */
+  .page { max-width: 1180px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+          gap: var(--lg); align-items: start; }
+  .grid.min430 { grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); }
+  .spanall { grid-column: 1 / -1; }
+  .fieldgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+               gap: var(--md); align-items: start; }
+  .grouptitle { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+                color: var(--text2); padding-bottom: var(--xs); border-bottom: 1px solid var(--border);
+                margin-top: var(--sm); }
+  .grouptitle:first-child { margin-top: 0; }
+
+  /* --- page chrome --- */
+  .header { display: flex; align-items: center; gap: var(--md); margin-bottom: var(--lg); padding-left: 25px; }
+  .header h1 { margin: 0; font-size: 26px; }
+  .kb { margin-left: auto; color: var(--text2); border: none; background: none; font-size: 18px; }
+  .card { background: var(--surface); padding: var(--lg); border-radius: var(--radius);
+          box-shadow: 0 1px 3px rgba(0,0,0,.12); display: flex; flex-direction: column; gap: var(--md); }
+  .card h2 { margin: 0 0 var(--md); font-size: 18px; }
+  .field { display: flex; flex-direction: column; gap: var(--xs); }
+  label { font-size: 13px; font-weight: 600; color: var(--text2); }
+  input, select { padding: var(--sm) var(--md); border: 1px solid var(--border);
+                  border-radius: var(--radius); background: var(--bg); font-size: 14px; width: 100%; }
+  .row { display: flex; align-items: center; gap: var(--sm); }
+  .btnrow { display: flex; gap: var(--sm); }
+  button.b { padding: var(--sm) var(--md); border-radius: var(--radius); border: 1px solid var(--border);
+             background: var(--surface); font-size: 14px; }
+  button.b.p { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .muted { font-size: 13px; color: var(--text2); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: right; padding: 3px 0; }
+  th:first-child, td:first-child { text-align: left; width: 100%; }
+  th { font-weight: 600; color: var(--text2); border-bottom: 1px solid var(--border); }
+  .bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--border); }
+  .headline { display: flex; gap: var(--lg); }
+  .stat b { display: block; font-size: 18px; }
+  .stat span { font-size: 11px; text-transform: uppercase; color: var(--text2); }
+</style>
+
+<div id="out"></div>
+
+<script>
+const userSettings = `
+  <div class="header"><button class="b">←</button><h1>Настройки пользователя</h1><button class="kb">⌨</button></div>
+  <div class="grid">
+    <div class="card"><h2>Оформление</h2>
+      <div class="row" style="justify-content:space-between"><label>Язык</label><select style="width:auto"><option>Русский</option></select></div>
+      <div class="row" style="justify-content:space-between"><label>Тема</label><select style="width:auto"><option>Светлая</option></select></div>
+    </div>
+    <div class="card"><h2>Смена пароля</h2>
+      <div class="field"><label>Текущий пароль</label><input type="password"></div>
+      <div class="field"><label>Новый пароль</label><input type="password"></div>
+      <div class="field"><label>Подтвердите пароль</label><input type="password"></div>
+      <button class="b p">Обновить пароль</button>
+    </div>
+    <div class="card"><h2>ПИН-код</h2>
+      <div class="muted">ПИН не установлен — быстрый вход на этом терминале</div>
+      <div class="field"><label>ПИН-код</label><input type="password"></div>
+      <div class="field"><label>Подтвердите ПИН</label><input type="password"></div>
+      <div class="btnrow"><button class="b p">Установить ПИН</button></div>
+    </div>
+  </div>`;
+
+const systemSettings = `
+  <div class="header"><button class="b">←</button><h1>Системные настройки</h1><button class="kb">⌨</button></div>
+  <div class="grid">
+    <div class="spanall"><div class="card"><h2>Информация о магазине</h2>
+      <div class="fieldgrid">
+        <div class="field"><label>Название магазина</label><input value="Продуктовый магазин №7"></div>
+        <div class="field"><label>Адрес</label><input value="г. Ташкент, ул. Амира Темура, 42"></div>
+        <div class="field"><label>Телефон</label><input value="+998 90 123-45-67"></div>
+        <div class="field"><label>ИНН (СТИР)</label><input value="123456789"></div>
+        <div class="field"><label>Ставка налога</label><input value="0"></div>
+      </div>
+      <div class="row"><input type="checkbox" style="width:auto"> Учитывать ставку как скидку</div>
+      <div class="btnrow"><button class="b p">Сохранить</button></div>
+    </div></div>
+    <div class="card"><h2>Подключение</h2>
+      <div class="row" style="gap:var(--lg)">
+        <div><div class="muted" style="font-weight:600">ID магазина</div><div style="font-size:16px">1000</div></div>
+        <div><div class="muted" style="font-weight:600">ID терминала</div><div style="font-size:16px">T126</div></div>
+      </div>
+      <div class="muted">Идентификатор терминала задаётся при установке</div>
+    </div>
+    <div class="card"><h2>ИИ-помощник <span style="font-size:11px;background:var(--primary);color:#fff;padding:2px 8px;border-radius:12px">PRO</span></h2>
+      <div class="muted">Баланс магазина: 250 000 сум</div>
+      <div class="btnrow"><button class="b">Обновить тариф</button></div>
+    </div>
+  </div>`;
+
+const fiscalSettings = `
+  <div class="header"><button class="b">←</button><h1>Фискализация (REGOS:VCR)</h1><button class="kb">⌨</button></div>
+  <div class="card" style="margin-bottom:var(--lg)">
+    <div class="row"><input type="checkbox" checked style="width:auto"> Включить фискализацию через REGOS:VCR</div>
+    <div class="grouptitle">Подключение</div>
+    <div class="fieldgrid">
+      <div class="field"><label>Адрес виртуальной кассы</label><input value="http://127.0.0.1:22298"></div>
+      <div class="field"><label>ID кассы (pos_id)</label><input value="POS1"></div>
+      <div class="field"><label>Логин кассира</label><input value="cassir"></div>
+      <div class="field"><label>Пароль кассира</label><input type="password" placeholder="•••••••• (сохранён)"></div>
+    </div>
+    <div class="grouptitle">НДС</div>
+    <div class="row"><input type="checkbox" checked style="width:auto"> Организация не является плательщиком НДС (отправлять «Без НДС»)</div>
+    <div class="fieldgrid"><div class="field"><label>Ставка НДС, %</label><select disabled><option>12%</option></select>
+      <div class="muted">Для неплательщика НДС ставка игнорируется.</div></div></div>
+    <div class="grouptitle">Печать и маркировка</div>
+    <div class="row"><input type="checkbox" checked style="width:auto"> Чек печатает виртуальная касса (не печатать из POS)</div>
+    <div class="row"><input type="checkbox" checked style="width:auto"> Проверять повторную продажу маркированных товаров (группа 022)</div>
+    <div class="grouptitle">UzQR</div>
+    <div class="row"><input type="checkbox" style="width:auto"> Оплата UzQR через REGOS (QR-код на экране кассы)</div>
+    <div class="btnrow"><button class="b p">Сохранить</button><button class="b">Проверить связь</button></div>
+  </div>
+  <div class="grid min430">
+    <div class="card">
+      <label>Очередь фискализации</label>
+      <div class="muted">Фискализировано: 128 · В ожидании: 0 · Ошибки: 0</div>
+      <div class="muted">Фискализирует все старые чеки с маркированными товарами (группа 022), исправляя QR-метки.</div>
+      <div class="btnrow"><button class="b">Фискализировать все старые чеки</button></div>
+    </div>
+    <div class="card">
+      <label>Время фискализации</label>
+      <div class="headline">
+        <div class="stat"><b>2.4 с</b><span>медиана</span></div>
+        <div class="stat"><b>3.6 с</b><span>95-й процентиль</span></div>
+        <div class="stat"><b>3.6 с</b><span>максимум</span></div>
+        <div class="stat"><b>3</b><span>чеков</span></div>
+      </div>
+      <div class="bar"><i style="width:58%;background:var(--error)"></i><i style="flex:1;background:var(--primary)"></i></div>
+      <div class="muted">■ Ожидание очереди ■ Настройки ■ Чтение чека ■ Z-отчёт ■ Подготовка позиций ■ Касса REGOS ■ Сохранение</div>
+      <table><thead><tr><th>Этап</th><th>медиана</th><th>95-й проц.</th><th>максимум</th></tr></thead>
+        <tbody>
+          <tr><td>Ожидание очереди</td><td>0 мс</td><td>0 мс</td><td>0 мс</td></tr>
+          <tr><td>Z-отчёт</td><td>0 мс</td><td>1.4 с</td><td>1.4 с</td></tr>
+          <tr><td>Касса REGOS</td><td>2.4 с</td><td>2.4 с</td><td>2.4 с</td></tr>
+          <tr><td>Сохранение</td><td>9 мс</td><td>10 мс</td><td>10 мс</td></tr>
+        </tbody></table>
+      <label>Запросы к виртуальной кассе</label>
+      <table><thead><tr><th>Метод</th><th>запросов</th><th>медиана</th><th>максимум</th></tr></thead>
+        <tbody><tr><td>Receipt.Sale</td><td>3</td><td>2.4 с</td><td>2.4 с</td></tr>
+        <tr><td>ZReport.GetInfo</td><td>1</td><td>1.4 с</td><td>1.4 с</td></tr></tbody></table>
+    </div>
+  </div>`;
+
+const pages = { 'UserSettings': userSettings, 'SystemSettings': systemSettings, 'FiscalSettings': fiscalSettings };
+const widths = [1366, 1024];
+let html = '';
+for (const w of widths) {
+  for (const [name, body] of Object.entries(pages)) {
+    html += `<div class="ruler">${name} @ ${w}px</div>
+      <div class="viewport" style="width:${w}px"><div class="app"><div class="page">${body}</div></div></div>`;
+  }
+}
+document.getElementById('out').innerHTML = html;
+</script>

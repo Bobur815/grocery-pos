@@ -489,15 +489,21 @@ export function SalesHistoryModal({ onClose, onEditSale }: SalesHistoryModalProp
                     >
                       <Printer size={16} />
                     </PrintButton>
-                    <EditButton
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onEditSale(sale);
-                      }}
-                      title={t('common.edit')}
-                    >
-                      <Pencil size={16} />
-                    </EditButton>
+{/* A fiscalized receipt (or one with money taken against a REGOS payment) can no
+                        longer be edited — the OFD holds the authoritative copy. sales:update
+                        rejects it too; hiding the button keeps the cashier from finding that out
+                        by hitting an error. The lawful correction is Возврат, offered above. */}
+                    {sale.fiscalStatus !== 'FISCALIZED' && !sale.regosPaymentId && (
+                      <EditButton
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditSale(sale);
+                        }}
+                        title={t('common.edit')}
+                      >
+                        <Pencil size={16} />
+                      </EditButton>
+                    )}
                     <DeleteButton
                       onClick={(e) => {
                         e.stopPropagation();

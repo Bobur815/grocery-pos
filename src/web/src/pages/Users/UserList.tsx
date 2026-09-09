@@ -6,6 +6,7 @@ import { Table } from "@components/common/Table";
 import { Button } from "@components/common/Button";
 import { ConfirmDialog } from "@components/common/ConfirmDialog";
 import { formatDate } from "../../utils/formatters";
+import { UserFormModal } from "./UserFormModal";
 import { users as usersApi } from "../../api/client";
 import { useAuthStore } from "../../store/auth-store";
 import type { UserListItem } from "@shared/types";
@@ -107,6 +108,12 @@ export function UserList() {
   const [users, setUsers] = useState<UserListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [userToToggle, setUserToToggle] = useState<UserListItem | null>(null);
+  // Add and edit both happen in a modal over this list, matching the POS terminal and supplier
+  // management. `user` undefined means "create".
+  const [formState, setFormState] = useState<{
+    open: boolean;
+    user?: UserListItem;
+  }>({ open: false });
 
   useEffect(() => {
     loadUsers();
@@ -176,7 +183,7 @@ export function UserList() {
             size="small"
             variant="secondary"
             tooltip={t("common.edit")}
-            onClick={() => navigate(`/users/${user.id}/edit`)}
+            onClick={() => setFormState({ open: true, user })}
           >
             <Edit size={18} />
           </Button>
@@ -246,7 +253,7 @@ export function UserList() {
                   size="small"
                   variant="secondary"
                   tooltip={t("common.edit")}
-                  onClick={() => navigate(`/users/${user.id}/edit`)}
+                  onClick={() => setFormState({ open: true, user })}
                 >
                   <Edit size={18} />
                 </Button>
@@ -312,7 +319,18 @@ export function UserList() {
           onCancel={() => setUserToToggle(null)}
         />
       )}
-      <FAB onClick={() => navigate("/users/new")}>
+      {formState.open && (
+        <UserFormModal
+          // Remount on target change so the form rebuilds from the user being edited rather than
+          // carrying state over from whoever was open before.
+          key={formState.user?.id ?? "new"}
+          user={formState.user}
+          onClose={() => setFormState({ open: false })}
+          onSaved={loadUsers}
+        />
+      )}
+
+      <FAB onClick={() => setFormState({ open: true })}>
         <Plus size={38} />
       </FAB>
     </Container>

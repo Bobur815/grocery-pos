@@ -408,6 +408,7 @@ describe('reports', () => {
       'hourlyDistribution',
       'productRanking',
       'profitMargins',
+      'rankingCategories',
       'salesByCategory',
       'salesTrend',
       'summary',
@@ -415,6 +416,55 @@ describe('reports', () => {
     ]);
     // The section the POS's own analytics handler omits entirely.
     expect(json.productRanking).toHaveProperty('byProfit');
+    expect(json.productRanking.totalProducts).toBeGreaterThan(0);
+  });
+
+  /**
+   * This endpoint — not the VPS one — is what an OFFLINE_ONLY store's dashboard actually calls.
+   * The two implementations are separate code, so a field added to the Nest service reaches this
+   * shop only if it is added here too; the dashboard silently rendered an empty filter until it
+   * was. Hence a test per behaviour rather than a shape assertion alone.
+   */
+  it('offers the categories its ranked products belong to', async () => {
+    const { json } = await api(
+      'GET',
+      '/analytics/data?startDate=2020-01-01&endDate=2030-01-01',
+    );
+
+    expect(Array.isArray(json.rankingCategories)).toBe(true);
+    expect(json.rankingCategories.length).toBeGreaterThan(0);
+    for (const c of json.rankingCategories) {
+      expect(typeof c.id).toBe('number');
+      expect(typeof c.nameRu).toBe('string');
+      expect(typeof c.nameUz).toBe('string');
+    }
+  });
+
+  it('ranks within a category when one is given, and still lists them all', async () => {
+    const all = await api('GET', '/analytics/data?startDate=2020-01-01&endDate=2030-01-01');
+    const categoryId = all.json.rankingCategories[0].id;
+
+    const { status, json } = await api(
+      'GET',
+      `/analytics/data?startDate=2020-01-01&endDate=2030-01-01&categoryId=${categoryId}`,
+    );
+
+    expect(status).toBe(200);
+    // Narrowed: never more products considered than the store has in total.
+    expect(json.productRanking.totalProducts).toBeLessThanOrEqual(
+      all.json.productRanking.totalProducts,
+    );
+    // The dropdown must keep every option, or there is no way back to "all categories".
+    expect(json.rankingCategories).toEqual(all.json.rankingCategories);
+  });
+
+  it('treats a nonsense categoryId as "all" rather than erroring', async () => {
+    const { status, json } = await api(
+      'GET',
+      '/analytics/data?startDate=2020-01-01&endDate=2030-01-01&categoryId=not-a-number',
+    );
+
+    expect(status).toBe(200);
     expect(json.productRanking.totalProducts).toBeGreaterThan(0);
   });
 

@@ -6,15 +6,25 @@ import { ArrowLeft, RefreshCw } from "lucide-react";
 import { Button } from "../../components/common/Button";
 import { Input } from "../../components/common/Input";
 import { useToast } from "../../context/ToastContext";
+import { useVirtualKeyboard } from "../../hooks/useVirtualKeyboard";
+import {
+  KeyboardToggle,
+  KeyboardPanel,
+} from "../../components/common/VirtualKeyboardControls";
+import {
+  SettingsPage,
+  SettingsGrid,
+  SpanAll,
+  FieldGrid,
+} from "../../components/common/SettingsLayout";
 
-const Container = styled.div`
-  max-width: 800px;
-`;
+const Container = styled(SettingsPage)``;
 
 const Header = styled.div`
   display: flex;
   align-items: center;
   gap: ${({ theme }) => theme.spacing.md};
+  margin-bottom: ${({ theme }) => theme.spacing.lg};
   padding-left: 25px;
 `;
 
@@ -29,7 +39,6 @@ const Section = styled.div`
   background-color: ${({ theme }) => theme.colors.surface};
   padding: ${({ theme }) => theme.spacing.lg};
   border-radius: ${({ theme }) => theme.borderRadius};
-  margin-bottom: ${({ theme }) => theme.spacing.lg};
 `;
 
 const SectionTitle = styled.h2`
@@ -129,6 +138,13 @@ export function SystemSettings() {
     taxRateAsDiscount: false,
     syncInterval: "5",
   });
+
+  // On-screen keyboard for the store-information form. Only the text fields are wired; the
+  // read-only connection details and the checkbox have nothing to type into.
+  type Field = "storeName" | "storeAddress" | "storePhone" | "storeStir" | "taxRate";
+  const keyboard = useVirtualKeyboard<Field>((field, edit) =>
+    setSettings((prev) => ({ ...prev, [field]: edit(prev[field]) })),
+  );
 
   const [terminalId, setTerminalId] = useState("");
   const [storeId, setStoreId] = useState("");
@@ -239,32 +255,40 @@ export function SystemSettings() {
           <ArrowLeft size={20} />
         </BackButton>
         <Title>{t("settings.systemSettings")}</Title>
+        <KeyboardToggle kb={keyboard} style={{ marginLeft: "auto" }} />
       </Header>
 
+      {/* The store form is the wide one — it spans the grid and pairs its own fields two-up.
+          Connection details and the AI panel are short and sit beside each other below it. */}
+      <SettingsGrid>
+      <SpanAll>
       <Section>
         <SectionTitle>{t("settings.storeInformation")}</SectionTitle>
         <Form onSubmit={handleSaveStore}>
-          <Input
-            label={t("settings.storeName")}
-            value={settings.storeName}
-            onChange={(e) =>
-              setSettings((prev) => ({ ...prev, storeName: e.target.value }))
-            }
-          />
-          <Input
-            label={t("settings.storeAddress")}
-            value={settings.storeAddress}
-            onChange={(e) =>
-              setSettings((prev) => ({ ...prev, storeAddress: e.target.value }))
-            }
-          />
-          <Row>
+          <FieldGrid>
+            <Input
+              label={t("settings.storeName")}
+              value={settings.storeName}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, storeName: e.target.value }))
+              }
+              {...keyboard.fieldProps("storeName")}
+            />
+            <Input
+              label={t("settings.storeAddress")}
+              value={settings.storeAddress}
+              onChange={(e) =>
+                setSettings((prev) => ({ ...prev, storeAddress: e.target.value }))
+              }
+              {...keyboard.fieldProps("storeAddress")}
+            />
             <Input
               label={t("settings.storePhone")}
               value={settings.storePhone}
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, storePhone: e.target.value }))
               }
+              {...keyboard.fieldProps("storePhone", { numeric: true })}
             />
             <Input
               label={t("settings.storeStir")}
@@ -272,9 +296,8 @@ export function SystemSettings() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, storeStir: e.target.value }))
               }
+              {...keyboard.fieldProps("storeStir", { numeric: true })}
             />
-          </Row>
-          <Row>
             <Input
               label={t("settings.taxRate")}
               type="number"
@@ -283,8 +306,9 @@ export function SystemSettings() {
               onChange={(e) =>
                 setSettings((prev) => ({ ...prev, taxRate: e.target.value }))
               }
+              {...keyboard.fieldProps("taxRate", { numeric: true })}
             />
-          </Row>
+          </FieldGrid>
           <CheckRow>
             <input
               type="checkbox"
@@ -300,6 +324,7 @@ export function SystemSettings() {
           </Actions>
         </Form>
       </Section>
+      </SpanAll>
 
       <Section>
         <SectionTitle>{t("settings.connection")}</SectionTitle>
@@ -374,6 +399,10 @@ export function SystemSettings() {
           </Button>
         </Actions>
       </Section>
+
+      </SettingsGrid>
+
+      <KeyboardPanel kb={keyboard} />
     </Container>
   );
 }

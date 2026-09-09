@@ -4,14 +4,106 @@ import { getCurrentUser } from './auth-handlers';
 import { getAppConfig } from '../config/app-config';
 import { getServerToken } from '../sync/queue-manager';
 import { regosVcrService } from '../fiscal/regos-vcr-service';
+import { printReceipt } from '../printer/thermal-printer';
 import { savePendingMarkingCodes } from './marking-codes-handlers';
 import { format } from 'date-fns';
 import { randomUUID } from 'node:crypto';
 import { toPieces } from '../../shared/utils/pack';
+import {
+  rankProducts,
+  rankingCategories,
+  type ProductPerformanceRow,
+} from '../../server/modules/analytics/analytics.ranking';
 import type { Sale, SaleItem as PrismaSaleItem } from '../../generated/prisma-sqlite';
 
 function ipcSafe<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
+}
+
+/**
+ * Print the paper receipt for a freshly created sale — unless the virtual cash register prints it
+ * itself ("Чек печатает виртуальная касса" in Fiscal settings), in which case the POS printing one
+ * too would hand the customer two receipts for one sale.
+ *
+ * When the sale is being fiscalized right now, this waits for that round-trip first: printReceipt()
+ * reads sale.regosQrCodeUrl off the row, so printing any earlier yields paper with no Soliq QR and
+ * no cashback for the customer. A FAILED fiscalization still prints — the customer leaves with a
+ * receipt (minus the QR) and the sale stays queued for a later retry, which is strictly better than
+ * handing them nothing.
+ *
+ * printReceipt() is a no-op returning true when no printer is configured, so this stays quiet on
+ * terminals that have none.
+ */
+async function printSaleReceipt(saleId: string, fiscalizing: Promise<void> | null): Promise<void> {
+  if (await regosVcrService.vcrPrintsReceipt()) return;
+  if (fiscalizing) await fiscalizing;
+  await printReceipt(saleId);
+}
+
+/**
+ * Everything that happens to a sale once its rows are written: mark it for the fiscal queue, kick
+ * the OFD round-trip if this sale fiscalizes now, and print the paper receipt.
+ *
+ * Shared by sales:create and sales:update so an edited receipt goes through exactly the same
+ * pipeline a new one does — the previous split (create only) is why editing a sale left it
+ * un-fiscalized and unprinted.
+ *
+ * Never throws and never blocks: the OFD round-trip and the printer both run in the background so
+ * the cashier gets the sale back immediately. A failure leaves the sale PENDING/FAILED for a later
+ * retry, which is the whole point of the offline-first design.
+ */
+async function finalizeSale(
+  saleId: string,
+  data: { fiscalize?: boolean; regosPaymentId?: string },
+  regosLabels: string | null,
+): Promise<void> {
+  const prisma = getPrismaClient();
+  // Set when the OFD round-trip was kicked off, so the receipt print can wait for it and put the
+  // fiscal QR on the paper. Already .catch()-ed — awaiting it never throws.
+  let fiscalizing: Promise<void> | null = null;
+  try {
+    if (await regosVcrService.isEnabled()) {
+      await prisma.sale.update({
+        where: { id: saleId },
+        // fiscalAttempts/fiscalError are cleared, not just carried over. On create they are
+        // already empty; on an edit the contents just changed, so failures recorded against the
+        // previous version no longer apply — leaving the count would let an edited sale start
+        // at or over MAX_ATTEMPTS and be skipped by processPending forever.
+        data: { fiscalStatus: 'PENDING', regosLabels, fiscalAttempts: 0, fiscalError: null },
+      });
+      // A UzQR sale fiscalizes NOW regardless of the checkbox: REGOS forbids reusing a
+      // Payment.Create payment across receipts, so deferring would strand the payment_id and
+      // the buyer's money with it.
+      if (data.fiscalize || data.regosPaymentId) {
+        fiscalizing = regosVcrService.fiscalizeSale(saleId).catch((e) =>
+          console.error('[fiscal] immediate fiscalize failed (will retry):', e instanceof Error ? e.message : e),
+        );
+      }
+    } else {
+      await prisma.sale.update({
+        where: { id: saleId },
+        data: { fiscalStatus: 'DISABLED', regosLabels },
+      });
+    }
+  } catch (e) {
+    console.error('[fiscal] enqueue failed:', e instanceof Error ? e.message : e);
+  }
+
+  printSaleReceipt(saleId, fiscalizing).catch((e) =>
+    console.error('[printer] auto receipt print failed:', e instanceof Error ? e.message : e),
+  );
+}
+
+/**
+ * The marking labels scanned for a sale, serialized for sale.regosLabels — the authoritative
+ * sale→marking-code link that markingCodes:removeForSale reads to free the SoldMarkingCode rows
+ * when the receipt is later deleted or refunded.
+ */
+function serializeMarkingLabels(
+  markingCodes: Array<{ barcode: string; label: string }> | undefined,
+): { labels: Array<{ barcode: string; label: string }>; json: string | null } {
+  const labels = markingCodes?.filter((l) => l?.barcode && l?.label) ?? [];
+  return { labels, json: labels.length ? JSON.stringify(labels) : null };
 }
 
 export function setupSalesHandlers(): void {
@@ -173,39 +265,15 @@ export function setupSalesHandlers(): void {
     // code). Persisting it synchronously here — rather than relying on the fire-and-forget
     // savePendingMarkingCodes below — also avoids a race where a quick delete runs before that
     // pending row is written.
-    const markingLabels = (data.markingCodes as Array<{ barcode: string; label: string }> | undefined)
-      ?.filter((l) => l?.barcode && l?.label) ?? [];
-    const regosLabels = markingLabels.length ? JSON.stringify(markingLabels) : null;
+    const { labels: markingLabels, json: regosLabels } = serializeMarkingLabels(
+      data.markingCodes as Array<{ barcode: string; label: string }> | undefined,
+    );
 
-    // REGOS:VCR fiscalization — opt-in per sale. The sale is always saved as PENDING; it is only
-    // sent to the OFD now when the cashier ticked "fiscalize" at checkout (data.fiscalize). Otherwise
-    // it stays PENDING (un-fiscalized) and can be fiscalized later from Sales History. When fiscalizing,
-    // the OFD round-trip runs in the BACKGROUND so the cashier is not blocked; the fiscal QR is
-    // persisted when it completes, and on failure the sale stays PENDING/FAILED.
-    try {
-      if (await regosVcrService.isEnabled()) {
-        await prisma.sale.update({
-          where: { id: sale.id },
-          data: { fiscalStatus: 'PENDING', regosLabels },
-        });
-        // A UzQR sale fiscalizes NOW regardless of the checkbox: REGOS forbids reusing a
-        // Payment.Create payment across receipts, so deferring would strand the payment_id and
-        // the buyer's money with it.
-        if (data.fiscalize || data.regosPaymentId) {
-          // Fire-and-forget: kick the device immediately but do not await the OFD round-trip.
-          regosVcrService.fiscalizeSale(sale.id).catch((e) =>
-            console.error('[fiscal] immediate fiscalize failed (will retry):', e instanceof Error ? e.message : e),
-          );
-        }
-      } else {
-        await prisma.sale.update({
-          where: { id: sale.id },
-          data: { fiscalStatus: 'DISABLED', regosLabels },
-        });
-      }
-    } catch (e) {
-      console.error('[fiscal] enqueue failed:', e instanceof Error ? e.message : e);
-    }
+    // REGOS:VCR fiscalization + paper receipt. Opt-in per sale: the sale is always saved as
+    // PENDING and only sent to the OFD now when the caller asked (data.fiscalize — quick pay
+    // always does, the checkout modal follows its checkbox). Otherwise it stays PENDING and can be
+    // fiscalized later from Sales History.
+    await finalizeSale(sale.id, data, regosLabels);
 
     // Capture the sale's group-022 marking codes for later REGOS:VCR out-of-circulation
     // fiscalization (no VCR connected yet). No asl-belgisi lookup happens here — circulation is
@@ -325,6 +393,22 @@ export function setupSalesHandlers(): void {
       throw new Error('Unauthorized');
     }
 
+    // A fiscalized receipt is not ours to rewrite. The OFD holds the authoritative copy under this
+    // sale's id, and REGOS uses that id as the idempotency `code` — re-sending edited contents is
+    // rejected as a duplicate and tryRecoverByCode would then adopt the OLD receipt, leaving the
+    // local row silently disagreeing with the fiscal one. The lawful correction is Возврат (full
+    // refund) followed by a fresh sale, which the Sales History screen already offers.
+    if (existingSale.fiscalStatus === 'FISCALIZED') {
+      throw new Error(JSON.stringify({ code: 'SALE_ALREADY_FISCALIZED' }));
+    }
+
+    // Likewise a receipt with money already taken against a REGOS payment id: editing it would
+    // move the total away from the amount the buyer actually paid, and that payment cannot be
+    // re-booked onto a different receipt.
+    if (existingSale.regosPaymentId) {
+      throw new Error(JSON.stringify({ code: 'SALE_HAS_PAYMENT' }));
+    }
+
     // Restore stock from old items (in pieces — a box line held piecesPerUnit of them)
     for (const oldItem of existingSale.items) {
       await prisma.product.update({
@@ -435,6 +519,21 @@ export function setupSalesHandlers(): void {
           },
         });
       }
+    }
+
+    // Same fiscal + print pipeline a new sale gets. The edit replaced the contents, so the labels
+    // are re-snapshotted from what was just scanned rather than carried over from the old version.
+    const { labels: markingLabels, json: regosLabels } = serializeMarkingLabels(
+      data.markingCodes as Array<{ barcode: string; label: string }> | undefined,
+    );
+    await finalizeSale(saleId, data, regosLabels);
+
+    if (markingLabels.length > 0) {
+      savePendingMarkingCodes(
+        markingLabels.map((m) => ({ code: m.label, productBarcode: m.barcode, saleId })),
+      ).catch((e) =>
+        console.error('[marking] savePending failed:', e instanceof Error ? e.message : e),
+      );
     }
 
     return ipcSafe(updatedSale);
@@ -577,10 +676,21 @@ export function setupSalesHandlers(): void {
   });
 }
 
+/**
+ * The POS's own analytics screen.
+ *
+ * This is the THIRD implementation of the same report — the others are the Nest service (an ONLINE
+ * store's dashboard) and local-server/routes/analytics.ts (an OFFLINE_ONLY store's LAN dashboard).
+ * They must agree on the response shape, because one page renders all three. `rankProducts()` and
+ * `rankingCategories()` are imported rather than reimplemented for exactly that reason: the
+ * ordering rules around missing cost prices are subtle enough that a third copy would drift.
+ */
 ipcMain.handle('analytics:getData', async (_event, filters: {
   startDate: string;
   endDate: string;
   terminalId?: string;
+  /** Narrows the product rankings only; every other figure stays whole-store. */
+  categoryId?: number;
 }) => {
   const prisma = getPrismaClient();
   // Prisma/SQLite stores DateTime as integer milliseconds since epoch
@@ -592,7 +702,7 @@ ipcMain.handle('analytics:getData', async (_event, filters: {
   // Same clause prefixed for join queries where sales table is aliased as 's'
   const terminalClauseS = filters.terminalId ? ` AND s.terminal_id = '${filters.terminalId.replace(/'/g, "''")}'` : '';
 
-  const [salesTrend, salesByCategory, hourlyDist, topProducts, cashierPerf, profitMargins, summary] = await Promise.all([
+  const [salesTrend, salesByCategory, hourlyDist, topProducts, cashierPerf, profitMargins, summary, productPerformance] = await Promise.all([
     prisma.$queryRawUnsafe(`
       SELECT DATE(datetime(created_at/1000, 'unixepoch', 'localtime')) as date,
              CAST(SUM(final_amount) AS REAL) as revenue,
@@ -674,9 +784,62 @@ ipcMain.handle('analytics:getData', async (_event, filters: {
       FROM sales
       WHERE created_at >= ? AND created_at <= ?${terminalClause}
     `, startMs, endMs),
+
+    // Drives the top/bottom rankings. Starts from `products`, not `sale_items`, so a product
+    // that sold NOTHING still appears with zeros and can rank as a worst seller — which is the
+    // whole point of a worst-sellers list. The period filter stays inside the subquery: moved
+    // outside it would turn the LEFT JOIN back into an inner one and drop exactly those rows.
+    //
+    // Unlike the other queries here this one is NOT terminal-scoped: a product's ranking is a
+    // property of the shop's catalogue, and slicing it per till would make "never sold" mean
+    // "never sold on this till".
+    prisma.$queryRawUnsafe(`
+      SELECT p.id AS productId,
+             p.name_ru AS nameRu,
+             p.name_uz AS nameUz,
+             p.category_id AS categoryId,
+             COALESCE(c.name_ru, 'Без категории') AS categoryRu,
+             COALESCE(c.name_uz, 'Kategoriyasiz') AS categoryUz,
+             CAST(COALESCE(agg.quantity, 0) AS REAL) AS quantity,
+             CAST(COALESCE(agg.revenue, 0) AS REAL) AS revenue,
+             CAST(COALESCE(agg.quantity, 0) * COALESCE(p.cost, 0) AS REAL) AS cost,
+             (p.cost IS NOT NULL) AS hasCost
+      FROM products p
+      LEFT JOIN categories c ON c.id = p.category_id
+      LEFT JOIN (
+        SELECT si.product_id,
+               SUM(si.quantity * si.pieces_per_unit) AS quantity,
+               SUM(si.subtotal) AS revenue
+        FROM sale_items si
+        JOIN sales s ON si.sale_id = s.id
+        WHERE s.created_at >= ? AND s.created_at <= ?
+        GROUP BY si.product_id
+      ) agg ON agg.product_id = p.id
+      WHERE p.active = 1
+    `, startMs, endMs),
   ]);
 
   const summaryRow = (summary as any[])[0] || {};
+
+  // SQLite has no boolean type, so `hasCost` arrives as 0/1.
+  const performanceRows: ProductPerformanceRow[] = (productPerformance as any[]).map((r) => ({
+    productId: Number(r.productId || 0),
+    nameRu: String(r.nameRu || ''),
+    nameUz: String(r.nameUz || ''),
+    categoryId: Number(r.categoryId || 0),
+    categoryRu: String(r.categoryRu || ''),
+    categoryUz: String(r.categoryUz || ''),
+    quantity: Number(r.quantity || 0),
+    revenue: Number(r.revenue || 0),
+    cost: Number(r.cost || 0),
+    hasCost: Boolean(r.hasCost),
+  }));
+  // Narrowed BEFORE the top/bottom slice, or "best in this category" would instead mean "the
+  // members of this category that made the overall top ten".
+  const rankedRows =
+    filters.categoryId == null
+      ? performanceRows
+      : performanceRows.filter((r) => r.categoryId === filters.categoryId);
 
   return ipcSafe({
     salesTrend: (salesTrend as any[]).map(r => ({
@@ -700,6 +863,9 @@ ipcMain.handle('analytics:getData', async (_event, filters: {
       quantity: Number(r.quantity || 0),
       revenue: Number(r.revenue || 0),
     })),
+    productRanking: rankProducts(rankedRows),
+    // Always the unfiltered list, so the dropdown keeps every option once one is chosen.
+    rankingCategories: rankingCategories(performanceRows),
     cashierPerformance: (cashierPerf as any[]).map(r => ({
       name: String(r.name || ''),
       revenue: Number(r.revenue || 0),

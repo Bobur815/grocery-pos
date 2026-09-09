@@ -10,6 +10,7 @@ import { POSGROIcon } from '../../branding';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useToast } from '../../context/ToastContext';
 import { SyncButton } from '../common/SyncButton';
+import { useModeStore } from '../../store/mode-store';
 
 export const APP_BAR_HEIGHT = 48;
 
@@ -177,6 +178,12 @@ export function AppBar() {
     };
   }, [checkSmena]);
 
+  // An OFFLINE_ONLY store has no server to sync with — sync-service already returns early for
+  // one, so the button could only ever report success for work it never did, and then reload the
+  // page for nothing. Gate on the explicit mode: null (not yet hydrated, or a terminal that was
+  // never activated) keeps the button, matching mode-store's "default to permissive" rule.
+  const offlineOnly = useModeStore((s) => s.mode) === 'OFFLINE_ONLY';
+
   const handleSync = async () => {
     const online = await window.electronAPI.app.isOnline();
     if (!online) {
@@ -234,12 +241,14 @@ export function AppBar() {
         </SmenaIndicator>
       )}
 
-      {/* Sync button */}
-      <AppSyncBtn
-        onSync={handleSync}
-        size={17}
-        title={t('settings.syncNow')}
-      />
+      {/* Sync button — hidden for an OFFLINE_ONLY store, which has nothing to sync with. */}
+      {!offlineOnly && (
+        <AppSyncBtn
+          onSync={handleSync}
+          size={17}
+          title={t('settings.syncNow')}
+        />
+      )}
 
       <Divider />
 

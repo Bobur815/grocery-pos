@@ -1,236 +1,188 @@
-# Task — Subscription status + payment QR on the login screen
+# Task — The terminal's Analytics page, matched to the dashboard's
 
-Add two buttons to `src/renderer/pages/Login/TerminalAccessBar.tsx`:
-1. **Subscription status** — plan, expiry date, AI plan, store balance.
-2. **Pay subscription** — a scannable UzQR for a bank transfer plus a self-service
-   Click/Payme/Paynet link (modelled on `~/Pictures/pay_qrcode.png`).
+## What the two pages now share
 
-The login screen is unauthenticated, so the data comes from the VPS token the terminal already
-keeps across logouts (the same credential `receipt:getPlan` uses), and is cached locally so the
-dialog still shows something offline.
+Both screens render the same report from **three different backends**:
 
-## Steps
+| page | backend |
+|---|---|
+| web dashboard, ONLINE store | `analytics.service.ts` (Nest + PostgreSQL) |
+| web dashboard, OFFLINE_ONLY store | `local-server/routes/analytics.ts` (terminal HTTP + SQLite) |
+| POS terminal | `analytics:getData` IPC (raw SQLite) |
 
-### Server
-- [x] `site-config.service.ts` — `SubscriptionPayment` ({ qrPayload, paymentUrl, supportPhone })
-      stored under the `subscription_payment` siteConfig key, with getter + setter.
-- [x] `site-config.controller.ts` — public GET / super-admin PUT `subscription-payment`.
-- [x] `site-config.module.ts` — export `SiteConfigService`; `stores.module.ts` imports it.
-- [x] `store-config.controller.ts` — `GET /store-config/subscription` returning the current
-      store's plan, expiry, aiPlan and balance plus the payment block ({storeId} substituted).
+Presentation was the one thing with no excuse to differ, so it moved out rather than being copied
+a third time — the last two bugs in this area were both "the same endpoint implemented twice, and
+only one got the change".
 
-### Electron main
-- [x] `src/main/ipc/subscription-handlers.ts` — `subscription:get` (live fetch → cache →
-      offline fallback, QR rendered locally) and `subscription:openPaymentLink`.
-- [x] Register in `handlers.ts`; expose via `preload.ts`.
+- `components/analytics/rankings.tsx` — `RankList`, `RankHeading`, `RankNote`, the shared
+  types, and `metricValueOf`/`sliceFor`. Pure: no fetching, no routing.
+- `components/analytics/categoryPie.ts` — the validated hue sets and `foldCategorySlices()`.
+- Web imports them through a new `@components/analytics` alias (vite + tsconfig), the same way it
+  already borrows `@components/common` from the renderer.
 
-### Renderer
-- [x] `TerminalAccessBar.tsx` — CreditCard button → status dialog → payment dialog.
-- [x] i18n keys in `ru.json` / `uz.json` under the existing `subscription` namespace.
+The web page went 955 → 744 lines with identical output, verified in the built bundle.
 
-### Web dashboard
-- [x] `client.ts` + `SubscriptionPlansPage.tsx` — a card for the super admin to set the QR
-      payload, payment link and support phone (without it the POS dialog has nothing to show).
+## The terminal page
 
-## Review
+- **Sales by category is a pie**, same hues, same "Other" fold, same 2px surface ring between
+  slices and % labels.
+- **Top-selling-products bar chart → the product rankings block** — best/worst ten with an inline
+  proportional bar, a metric filter and a category filter, and the scope note saying what the
+  lists are drawn from.
+- Cashier performance moved up into the row the old chart vacated.
 
-Done. Two buttons on the login screen, both hidden for an OFFLINE_ONLY store:
+## The third backend had no rankings at all
 
-- **Card icon → subscription status.** Plan, expiry date, AI plan and store balance. An expired
-  date is shown in the error colour; a plan with no expiry reads as "perpetual" (VIP).
-- **Pay button inside it → payment dialog.** Bank-transfer QR, the call-centre instruction and
-  phone, then the Click/Payme/Paynet link, in the order the reference screenshot uses.
+`analytics:getData` returned seven sections and no `productRanking`, so the page had nothing to
+render. It now runs the same product-performance query the other two do, and imports
+`rankProducts()`/`rankingCategories()` rather than reimplementing them — a third copy of the
+missing-cost ordering rules would drift.
 
-Design notes worth keeping:
+Two deliberate differences from the sibling queries, both commented in place:
 
-- The login screen is unauthenticated, so `subscription:get` reuses the VPS token the terminal
-  keeps from the last password login. `getServerToken()` is only armed by a login, so on a cold
-  start the handler falls back to reading the persisted `server_token` row — a read of the
-  store's own billing state, so it deliberately does not re-arm the global token from there.
-- Every reply is cached in the `store_subscription` system setting with the QR already rendered.
-  Offline, the dialog shows the last known figures and says so, rather than going blank.
-- The QR is generated on the terminal from a payload string, not fetched as an image, so the
-  payment dialog works with no network.
-- The pay link is re-validated as http(s) in the main process before `shell.openExternal` — the
-  URL comes from the server and must not be able to launch a local file or custom protocol.
-- The super admin sets the payload, link and phone on the existing Subscription Plans page;
-  without that config the Pay button stays disabled instead of opening an empty dialog.
-
-Verified: `tsc --noEmit` clean on both tsconfigs (0 errors), `nest build` clean,
-`electron-vite build` clean, 149/149 jest tests pass.
-
-Not done: `npm run lint` cannot run in this repo — ESLint 9 finds no `eslint.config.js` (the
-project still has the v8 `.eslintrc` format). Pre-existing, unrelated to this change.
-
-The version in `package.json` was left at 1.26.1 — per the standing convention it gets bumped
-once at deploy time, not per change.
-
----
-
-# Follow-up — OFFLINE_ONLY must not lose these buttons
-
-Both buttons were hidden for an OFFLINE_ONLY store on the reasoning that it "has no server, so
-there is no dashboard to point at". Wrong twice over: such a store still has a subscription with
-the vendor, and its dashboard does not need the VPS — the data is already in the terminal's
-SQLite, so the terminal can serve it on the shop's own Wi-Fi.
-
-Agreed to land in two steps. **Step 1 is done** (below). Step 2 — the embedded LAN server — is
-designed in the approved plan and will be built and reviewed on its own.
-
-## Step 1 — done
-
-- [x] `src/main/network/lan-address.ts` — rank this machine's IPv4 addresses, best first. Private
-      ranges in shop-LAN order, and virtual adapters (VirtualBox / WSL / Docker / Hyper-V /
-      Tailscale) demoted below every real one, because the OS may well list one of those first and
-      a phone cannot reach it.
-- [x] `config:getWebAdminQr` no longer returns null for OFFLINE_ONLY. It returns
-      `http://<lan-ip>:<port>/web/` instead, where port is the `local_web_port` system setting,
-      defaulting to 5173 — the port `cd src/web && npm run dev` already uses. The reply gained a
-      `local` flag so the renderer picks its wording from the payload rather than re-reading mode.
-- [x] `app:isOnline` takes an optional URL, defaulting to today's hardcoded production host, so
-      existing callers are unaffected and the subscription button can probe the server this
-      terminal is actually configured against.
-- [x] `TerminalAccessBar.tsx` — all three buttons always render. The subscription button probes
-      first and raises the existing `errors.noInternet` toast instead of opening a dialog of
-      dashes. The QR dialog explains a LAN address differently from a hosted one, and says so when
-      there is no address at all.
-- [x] `settings.webAdminLocalHint` / `settings.webAdminUnavailable` in ru + uz.
-- [x] `src/main/network/lan-address.test.ts` — 10 cases over the ranking rules.
-
-Verified: `tsc --noEmit` 0 errors, `electron-vite build` clean, 159/159 jest tests pass (149
-before, +10 new). Ran the real `getLanAddress()` against this machine's interfaces: it returns
-`192.168.1.7`, the same address `npm run dev` reports, so the QR matches the workflow it replaces.
-
-Still not verified by me: scanning the QR from an actual phone.
-
-## Step 2 — done: the terminal serves the dashboard on the shop LAN
-
-An OFFLINE_ONLY terminal now runs an HTTP server on `0.0.0.0:5173` serving the built dashboard at
-`/web/` and a local `/api` backed by its own SQLite. New module `src/main/local-server/`.
-
-### Shape of the thing
-
-- `index.ts` lifecycle + request dispatch, `router.ts`, `auth.ts`, `static-files.ts`,
-  `helpers.ts`, `stocktake-plan.ts`, and `routes/` (one file per NestJS controller mirrored).
-- Started only for an OFFLINE_ONLY store, from `launchMainApp()`, and re-evaluated whenever a
-  sync cycle reports a changed mode — so flipping a store either way needs no restart. Closed on
-  quit. A failure to bind is recorded and shown in the QR dialog, never thrown into startup.
-- `config:getWebAdminQr` now points at the address the listener actually came up on.
-
-### The decision that shaped every route
-
-**Mirror the NestJS service, not the Electron IPC handler.** The IPC handlers run
-`serializeProduct()` — Decimals to numbers, `active` renamed to `isActive`, nulls dropped — which
-is the POS renderer's convention. The dashboard was built against the server's raw Prisma rows.
-Returning raw rows gets this right for free, since a Prisma `Decimal` serializes to a JSON string
-on both providers. There is a test asserting exactly this (`active` present, `isActive` absent,
-`price` a string).
-
-### Full parity, and where it genuinely stops
-
-Served properly: auth, products, categories, sales, users, settings, inventory arrivals,
-low-stock, suppliers + transactions, analytics, stocktake, money reconciliation, store identity,
-site config, invoice line matching, MXIK code proxy, marking-code verification.
-
-- **Stocktake** needed new local tables — `inventory_counts` / `inventory_count_items` are
-  web-only on the VPS. Added to the SQLite schema *and* to the hand-written schema in
-  `sqlite-client.ts` (migration 29), plus `products.stock_counted_at` and the supplier↔category
-  join table. The repo's own `sqlite-schema.test.ts` caught the omission before I did — the POS
-  never runs `prisma migrate`, so a Prisma-only column is a P2022 on every terminal at once.
-- **Analytics** is a port of the server's seven queries to the SQLite dialect, not a reuse of
-  `analytics:getData`: that handler omits `productRanking` entirely, sorts `topProducts` by
-  quantity instead of revenue, and caps the category breakdowns at ten rows. `rankProducts()` is
-  imported from the server module — pure, already tested, too subtle to copy.
-- **Goods reconciliation** returns `ledgerEnabled: false` with empty lines. Not laziness: the
-  `StockMovement` ledger is off by default on the VPS too, and the server's own empty-ledger path
-  reports every counted product as a surplus and every stocked product as drifting. Porting it
-  faithfully would ship a screen of false shortages.
-- **Money reconciliation** is served from *better* inputs than the server has — cash taken,
-  pay-ins, pay-outs and refunds derived from the shift's own rows, where the VPS can only read
-  pre-computed totals because it hard-deletes refunded sales.
-- **Genuinely impossible offline**, each answering 503 with a reason rather than failing oddly:
-  AI invoice scanning (needs the vendor's key), the MXIK catalogue (a Postgres-only reference
-  table), banner image upload. Terminal logs and super-admin store management return empty or
-  synthesised results — a local login can only be ADMIN or USER anyway.
-
-### Security
-
-Binding to `0.0.0.0` puts the shop's database on the Wi-Fi, so: every route but login is guarded;
-tokens carry an audience so a POS session token cannot authenticate a browser and vice versa;
-login is throttled per phone (8 tries, 5 min); path traversal is blocked and tested; internal
-errors never reach the network. One deliberate divergence — the VPS's `GET /users/:id` returns
-the bcrypt hash, and this does not. Behind TLS and a super-admin session that is defensible; over
-plain HTTP on a shop LAN it is not.
-
-### Packaging
-
-`dist-web`, not `dist/web`: `dist` is electron-builder's own output directory, which it excludes
-from `files`. `npm run build:web` builds the SPA and stages a copy; `build:pos` now runs it first.
-`jsonwebtoken` was an undeclared transitive dependency that main already relied on — now explicit.
-
-### Verified
-
-- `tsc --noEmit` 0 errors; `electron-vite build` clean; the generated Prisma client confirmed
-  *not* bundled into the main process (it must stay a runtime require).
-- 240 jest tests pass, 81 of them new: router matching, stocktake arithmetic, static file serving
-  and traversal, and a 43-case integration test that boots the real HTTP server against a real
-  SQLite database and exercises login, CRUD, a full stocktake, analytics and reconciliation.
-- `electron-builder --dir`: confirmed `dist-web/index.html`, its hashed assets and
-  `node_modules/jsonwebtoken` are all inside `resources/app`.
-
-Not verified by me: opening the dashboard from an actual phone on the shop Wi-Fi, and the
-dashboard's own screens rendering against these responses end to end.
-
----
-
-# Per-store super-admin password (manager override)
-
-A super admin sets a password per store in the dashboard; the terminal caches its bcrypt hash and
-demands it before a sensitive action. Verified locally, so it works for an OFFLINE_ONLY store.
-
-## Done
-
-- [x] `Store.superAdminPassword` (bcrypt hash) + migration `20260908000001_...`.
-- [x] `superAdminPassword` on the create and update DTOs — plaintext in, hashed in the service.
-      Three intents: absent = unchanged, `""` = clear, a value = replace.
-- [x] **Leak fix.** `findAll()`/`findById()` had no `select` and returned every column, and
-      `GET /stores/:id` is reachable by a store's own ADMIN — a hash there would have let them
-      crack their own override offline. Both now use an explicit allowlist and expose only
-      `hasSuperAdminPassword: boolean`. An allowlist, not a strip, so the *next* sensitive column
-      is invisible by default too.
-- [x] `GET /store-config` returns the hash. The one endpoint that does, scoped by the caller's
-      own JWT.
-- [x] `LocalConfig.superAdminPassword` + **migration 30** in `sqlite-client.ts`.
-- [x] `setup:complete` fetches it **in the main process**, so the hash never enters the renderer.
-      Best-effort: a failure never breaks setup.
-- [x] `syncStoreConfig()` refreshes it each cycle. Keyed on the field being *present*, so an
-      explicit null (the super admin clearing it) applies while an older server changes nothing.
-      The `config:modeChanged` event deliberately does not carry it.
-- [x] `auth:hasSuperAdminPassword` / `auth:verifySuperAdminPassword`, side-effect-free like
-      `auth:verifyTerminalAccess`. Throttled via `AttemptThrottle` (5 tries / 60s, in memory —
-      persisting it would let anyone lock the manager out of their own till).
-- [x] `SuperAdminGateProvider` + `useSuperAdminGate().require(action)`. **No password set → the
-      action just runs**, which is what keeps every existing terminal behaving as it does today.
-- [x] Reference use: deleting a receipt (`SalesHistoryModal`).
-- [x] Dashboard field in `StoreFormModal` (serves both create and edit), with an explicit
-      "remove the password" checkbox since blank means "leave unchanged".
-
-## Notes
-
-- The gate lives in `components/gate/`, not `context/` — `src/web/tsconfig.json` compiles
-  `src/renderer/context/**`, and this file uses `window.electronAPI`, which the web build has no
-  type for. Anything POS-only must stay out of the directories that include list names.
-- **What this buys:** it deters a cashier at the till. It does not stop someone who owns the
-  machine — the hash is in the terminal's SQLite and can be attacked offline. bcrypt cost 10 makes
-  that slow, not impossible. Every admin password on the terminal is already stored the same way,
-  so this adds no new exposure, but it should not be sold as more than it is.
+- The rankings query is **not** terminal-scoped, unlike every other query in that handler. A
+  product's ranking is a property of the shop's catalogue; slicing it per till would make "never
+  sold" mean "never sold on this till".
+- `categoryId` filters the rows **before** `rankProducts()` slices to ten, so "best in this
+  category" means what it says.
 
 ## Verified
 
-0 type errors on both tsconfigs; `nest build`, `electron-vite build` and the web build all clean;
-295/295 jest tests (25 new). The new tests cover the leak (including asserting the serialized JSON
-contains no `$2b$`), the throttle's timing on a driven clock, and a real-database check that an
-unconfigured terminal stays open while a configured one accepts only the right password.
+`tsc` clean. Full suite **377 → 385** (30 suites) — eight new tests on `foldCategorySlices`,
+covering that it never loses revenue, never returns more slices than there are hues, keeps the
+biggest categories, and does not mutate its input. `nest build`, `electron-vite build` and
+`npm run build:web` all clean, and I grepped both shipped bundles for the new code rather than
+trusting the build output.
 
-Not verified by me: the dashboard field and the POS prompt end to end in a running app. The
-PostgreSQL migration has not been applied anywhere — per CLAUDE.md it goes to `dev`/staging first.
+**Not seen rendered.** Worth a look on the terminal: whether the pie legend fits under a 210px
+chart, and whether the rankings block reads well at the POS's window width.
+
+**This one needs an app restart**, not just a reload — the IPC handler is main-process code.
+
+---
+
+# Task — Web dashboard: Users modal, SystemSettings layout, and a mobile nav that fits
+
+## 1. Web Users → modal, like the terminal
+
+`UserFormModal.tsx` mirrors the POS one minus the virtual keyboard (no touch screen here). Both the
+desktop table's edit button and the mobile card's now open it; the FAB creates. Keyed on the target
+user so the form rebuilds instead of carrying state from whoever was open before.
+
+Routes `users/new` and `users/:id/edit` removed, `UserForm.tsx` deleted.
+
+Same partial-edit rules, documented on the component: phone is the login identifier and fixed after
+creation, an empty password means "leave as is" — the hash never reaches the browser, so there is
+nothing to prefill and no way to tell "unchanged" from "blank" otherwise.
+
+## 2. Web SystemSettings → the same responsive grid
+
+Reuses `@components/common/SettingsLayout` — the primitives added for the terminal, which the web
+app already aliases from the renderer, so there is one definition rather than two.
+
+Was an 800px column. Now the store form spans the grid and pairs its five fields two-up
+(`FieldGrid`), and the subscription, balance and terminal cards sit beside each other below it.
+`Section` lost its `margin-bottom` since the grid owns the gaps, and the now-redundant `Row` style
+went with it.
+
+## 3. Mobile nav — 5 sections + in-page tabs
+
+The bar was carrying 8 icons (Products, Stock, Stocktake, Reconciliation, Suppliers, Daily,
+Settings, Logout) and Analytics would have made 9.
+
+**The bar now holds sections, never individual pages:**
+
+| | Products | Stock | Suppliers | Reports | Settings |
+|---|---|---|---|---|---|
+
+Each section's sub-pages became tabs at the top of its own pages, via a new
+`components/layout/SubNav.tsx`:
+
+- **Stock** → Приходы · Инвентаризация · Сверка
+- **Reports** → Дневной отчет · Месячный отчет · **Аналитика** — *desktop only*
+
+**On a phone, Reports is Analytics alone.** The daily and monthly reports are dense tables that
+belong on a real screen, so the Reports tab goes straight to `/reports/analytics` and the tab
+strip is hidden below 767px (`REPORTS_HIDE_TABS_ON_MOBILE`) — offering tabs to pages the bar no longer
+leads to would just advertise dead ends. All three stay on desktop, and the pages remain reachable
+by URL. A cashier cannot open Analytics (admin-only), so their Reports tab is the daily summary,
+their only report.
+
+The 767px breakpoint deliberately matches `MobileBottomNav`'s, so the bar and the tabs never
+disagree about which layout is showing. The bar itself needs no media query — it only ever renders
+on a phone, so it can name the mobile destination outright.
+
+Analytics was already routed at `/reports/analytics` but unreachable from mobile. It is now the
+Reports destination there.
+
+Details worth knowing:
+
+- **Tabs render at every width by default.** The desktop sidebar still lists the sub-pages, but
+  showing the group in-page is what makes the hierarchy legible — you can see a page's siblings
+  without going back to the nav. Reports opts out on mobile; Stock keeps its three tabs there.
+- **Role filtering lives in the hooks** (`useStockSubNav`, `useReportsSubNav`), so a cashier is
+  never shown a tab that would bounce them off an admin-only route. A group left with one visible
+  tab renders nothing — a lone tab is decoration, not navigation.
+- **Icons gained labels.** At 8 icons there was no room; at 5 there is, and an unlabelled icon row
+  is a guessing game.
+- **Fixed a latent bug:** the old bar sent everyone to `/settings`, which is admin-only — a cashier
+  tapping it bounced. The Settings tab now goes to `/settings/user` for non-admins.
+- **Logout moved off the bar** into the account page (`/settings/user`), reachable by every role.
+  A destructive action does not belong one thumb-slip from the Reports tab.
+- The tab strip scrolls horizontally rather than wrapping, so a long group never pushes content
+  down.
+
+### One thing I changed beyond the ask
+
+Removing the mobile logout button orphaned the confirm dialog it was the only trigger for — the
+desktop sidebar logged out immediately with no confirmation. Rather than delete working code, the
+desktop button now goes through that same dialog. Signing out of a till mid-shift is worth one tap
+to confirm; say the word if you would rather have it back as one click.
+
+## Verified
+
+Web `tsc --noEmit` clean and `npm run build` clean. Root repo unaffected: `tsc` clean, **370 tests
+still passing**, `electron-vite build` clean. Tag-balance check across every restructured file.
+
+**Not verified by me: none of this has been seen rendered**, and mobile layout in particular is
+something only a real viewport settles. Worth checking on a phone: whether five labelled icons fit
+without truncating in Russian (`Поставщики` is the long one — it ellipsizes rather than wrapping),
+and that the tab strip does not crowd the page headers that already sit at the top of these pages.
+
+`npm run lint` is still broken repo-wide and unrelated: ESLint 9 finds no `eslint.config.js`.
+
+## Not done
+
+`WriteOffList.tsx` has no route, so it is not in the Stock group. If it is meant to be reachable it
+needs a route first — say so and it becomes a fourth Stock tab.
+
+---
+
+# Earlier in this session
+
+**OFFLINE_ONLY credential trap** — the VPS refused `/auth/login` for such a store, so once the
+setup token expired and was auto-dropped, nothing could mint another; subscription and every other
+VPS-backed feature were dead there. The refusal is now scoped to the dashboard via a `client: 'pos'`
+marker (**needs a server deploy** to take effect), and the dialog explains the state instead of
+giving advice nobody could follow.
+
+**Subscription dialog** — the server sends `store_id`/`store_name` and the terminal was parsing both
+away; now displayed, with failures named rather than collapsed into one blank.
+
+**Sync UI removed for OFFLINE_ONLY** — AppBar button, Sidebar status line, Settings tile.
+
+**Settings UI** — `useVirtualKeyboard` across six terminal pages, Users add/edit in a modal,
+responsive card grid on the three narrow settings pages (`tasks/layout-check.html` previews it).
+
+**Fiscalization timing (awaiting real-terminal data)** — 2.4 s median per receipt, of which REGOS's
+`Receipt.Sale` is 2.4 s and our code ~15 ms; device round-trips cut 3 → 1. **Open:** REGOS:VCR
+prints its own receipt synchronously inside `Receipt.Sale`; the "Чек печатает виртуальная касса"
+toggle needs confirming end to end. Also open: refund-and-reissue for editing a fiscalized sale.
+
+Version not bumped — bump once at deploy time, then `npm run deploy:pos`. The auth change also
+needs a server deploy.
+
+**Build the dashboard with `npm run build:web` from the repo root — never `npm run build` inside
+`src/web`.** The inner build only writes `dist/web` (what the NestJS server serves); the terminal's
+LAN dashboard serves `dist-web`, which only the root script stages. Getting this wrong looks like a
+clean build and silently ships nothing. See tasks/lessons.md.

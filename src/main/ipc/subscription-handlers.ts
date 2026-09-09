@@ -3,7 +3,11 @@ import QRCode from 'qrcode';
 import { getAppConfig } from '../config/app-config';
 import { getServerToken } from '../sync/queue-manager';
 import { getPrismaClient } from '../database/sqlite-client';
-import type { StoreSubscription } from '../../shared/types/store.types';
+import { log } from '../logger';
+import type {
+  StoreSubscription,
+  SubscriptionFailureReason,
+} from '../../shared/types/store.types';
 
 /**
  * Subscription status for the login screen.
@@ -19,6 +23,8 @@ const REQUEST_TIMEOUT_MS = 8000;
 
 /** Shape of GET /store-config/subscription. */
 interface SubscriptionResponse {
+  store_id: string | null;
+  store_name: string | null;
   subscription_plan: string | null;
   subscription_expires_at: string | null;
   ai_plan: string;
@@ -32,6 +38,8 @@ interface SubscriptionResponse {
 
 /** What gets cached — the QR is stored already rendered so an offline open costs nothing. */
 interface CachedSubscription {
+  storeId: string | null;
+  storeName: string | null;
   plan: string | null;
   expiresAt: string | null;
   aiPlan: string;
@@ -62,8 +70,14 @@ async function renderQr(payload: string): Promise<string | null> {
   }
 }
 
-function toResult(cached: CachedSubscription, stale: boolean): StoreSubscription {
+function toResult(
+  cached: CachedSubscription,
+  stale: boolean,
+  reason?: SubscriptionFailureReason,
+): StoreSubscription {
   return {
+    storeId: cached.storeId,
+    storeName: cached.storeName,
     plan: cached.plan,
     expiresAt: cached.expiresAt,
     aiPlan: cached.aiPlan,
@@ -74,10 +88,13 @@ function toResult(cached: CachedSubscription, stale: boolean): StoreSubscription
       supportPhone: cached.supportPhone,
     },
     stale,
+    ...(reason ? { reason } : {}),
   };
 }
 
 const EMPTY: CachedSubscription = {
+  storeId: null,
+  storeName: null,
   plan: null,
   expiresAt: null,
   aiPlan: 'free',
@@ -102,9 +119,22 @@ export function setupSubscriptionHandlers(): void {
     const prisma = getPrismaClient();
     const config = getAppConfig();
 
+    // Set as each failure mode is ruled out, so the renderer can say what to do about a blank
+    // dialog instead of showing dashes with no explanation.
+    let reason: SubscriptionFailureReason = 'unreachable';
     try {
       const token = await readServerToken(prisma);
-      if (!token) throw new Error('NO_SERVER_TOKEN');
+      if (!token) {
+        // An OFFLINE_ONLY store cannot get one. The server refuses /auth/login for such a store
+        // (403 auth.errors.store_offline_only), so the setup token is the only one it ever holds
+        // and nothing can replace it once it expires and is dropped. Telling this shop to "sign in
+        // with a password" would be advice they cannot follow, so name the real situation.
+        const localConfig = await prisma.localConfig
+          .findUnique({ where: { id: 'config' } })
+          .catch(() => null);
+        reason = localConfig?.mode === 'OFFLINE_ONLY' ? 'offline-only-store' : 'no-credential';
+        throw new Error('NO_SERVER_TOKEN');
+      }
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -117,10 +147,16 @@ export function setupSubscriptionHandlers(): void {
       } finally {
         clearTimeout(timer);
       }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (!response.ok) {
+        // It answered, so the network is fine — an expired token (401) or an older server.
+        reason = 'server-error';
+        throw new Error(`HTTP ${response.status}`);
+      }
 
       const data = (await response.json()) as SubscriptionResponse;
       const fresh: CachedSubscription = {
+        storeId: data.store_id ?? null,
+        storeName: data.store_name ?? null,
         plan: data.subscription_plan ?? null,
         expiresAt: data.subscription_expires_at ?? null,
         aiPlan: data.ai_plan ?? 'free',
@@ -138,9 +174,15 @@ export function setupSubscriptionHandlers(): void {
       });
 
       return toResult(fresh, false);
-    } catch {
-      // Offline, no credential, or an older server without the endpoint — show what we last saw.
-      return toResult(await readCache(prisma), true);
+    } catch (e) {
+      // Offline, no credential, or an older server without the endpoint — show what we last saw,
+      // and say which it was. Logged too: this is uploaded, so a store reporting an empty dialog
+      // can be diagnosed without a remote session. An OFFLINE_ONLY store is the expected steady
+      // state rather than a fault, so it logs at info — a warning per button press would be noise.
+      const line = `[subscription] live read failed (${reason}): ${e instanceof Error ? e.message : e}`;
+      if (reason === 'offline-only-store') log.info(line);
+      else log.warn(line);
+      return toResult(await readCache(prisma), true, reason);
     }
   });
 

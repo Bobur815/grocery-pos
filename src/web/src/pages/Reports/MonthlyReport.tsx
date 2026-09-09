@@ -8,6 +8,11 @@ import { useSales } from "../../hooks/useSales";
 import { formatCurrency as formatCurrencyBase } from "@shared/utils";
 import { UZQR_BRAND_COLOR } from "@shared/constants";
 import { formatDateTime } from "../../utils/formatters";
+import {
+  SubNav,
+  useReportsSubNav,
+  REPORTS_HIDE_TABS_ON_MOBILE,
+} from "../../components/layout/SubNav";
 
 const Container = styled.div`
   display: flex;
@@ -217,8 +222,13 @@ export function MonthlyReport() {
   const totalItemsSold = sales.reduce((sum, s) => sum + s.items.length, 0);
   const avgTransaction = sales.length > 0 ? totalRevenue / sales.length : 0;
 
+  const subNav = useReportsSubNav();
+
   return (
     <Container>
+      {/* Section tabs — the mobile bar carries sections only, so a section's sibling
+          pages live here. See components/layout/SubNav.tsx. */}
+      <SubNav items={subNav} hideOnMobile={REPORTS_HIDE_TABS_ON_MOBILE} />
       <Title>{t("reports.monthlyReport")}</Title>
 
       <FilterRow>

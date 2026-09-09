@@ -16,7 +16,6 @@ import { DailySummary } from './pages/Reports/DailySummary';
 import { MonthlyReport } from './pages/Reports/MonthlyReport';
 import { Analytics } from './pages/Reports/Analytics';
 import { UserList } from './pages/Users/UserList';
-import { UserForm } from './pages/Users/UserForm';
 import { SettingsPage } from './pages/Settings/SettingsPage';
 import { SystemSettings } from './pages/Settings/SystemSettings';
 import { UserSettings } from './pages/Settings/UserSettings';
@@ -103,8 +102,6 @@ export function App() {
 
           {/* Users (admin only, not for super admin) */}
           <Route path="users" element={<PrivateRoute adminOnly excludeSuperAdmin><UserList /></PrivateRoute>} />
-          <Route path="users/new" element={<PrivateRoute adminOnly excludeSuperAdmin><UserForm /></PrivateRoute>} />
-          <Route path="users/:id/edit" element={<PrivateRoute adminOnly excludeSuperAdmin><UserForm /></PrivateRoute>} />
 
           {/* Settings */}
           <Route path="settings" element={<PrivateRoute adminOnly><SettingsPage /></PrivateRoute>} />

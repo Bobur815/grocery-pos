@@ -11,6 +11,7 @@ import { Spinner } from "@renderer/components/common/Spinner";
 import { useToast } from "@context/ToastContext";
 import { formatCurrency } from "@shared/utils";
 import { formatDateTime } from "../../utils/formatters";
+import { SubNav, useStockSubNav } from "../../components/layout/SubNav";
 import {
   uztDaysAgoString,
   uztEndOf,
@@ -209,8 +210,13 @@ export function ReconciliationPage() {
   // found nothing wrong". The summary cards must not report a clean zero variance in that case.
   const hasCount = goods?.countId != null;
 
+  const subNav = useStockSubNav();
+
   return (
     <Container>
+      {/* Section tabs — the mobile bar carries sections only, so a section's sibling
+          pages live here. See components/layout/SubNav.tsx. */}
+      <SubNav items={subNav} />
       <Title>
         <Scale size={22} />
         {t("reconciliation.title", "Сверка")}

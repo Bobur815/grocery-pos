@@ -37,6 +37,7 @@ import {
   DesktopOnly,
 } from "../../components/common/MobileCard";
 import { BarcodeScannerModal } from "../../components/common/BarcodeScannerModal";
+import { SubNav, useStockSubNav } from "../../components/layout/SubNav";
 
 const Container = styled.div`
   display: flex;
@@ -414,8 +415,13 @@ export function StockManagement() {
     },
   ];
 
+  const subNav = useStockSubNav();
+
   return (
     <Container>
+      {/* Section tabs — the mobile bar carries sections only, so a section's sibling
+          pages live here. See components/layout/SubNav.tsx. */}
+      <SubNav items={subNav} />
       <Header>
         <Title>{t("inventory.stockManagement")}</Title>
         {user?.role === "ADMIN" && (

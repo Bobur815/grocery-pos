@@ -164,7 +164,7 @@ export function setupAuthHandlers(): void {
         const serverRes = await fetch(`${vpsApiUrl}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ storeId, phone, password }),
+          body: JSON.stringify({ storeId, phone, password, client: 'pos' }),
         });
         console.log(`[auth:login] VPS response status: ${serverRes.status}`);
         if (serverRes.ok) {
@@ -237,7 +237,7 @@ export function setupAuthHandlers(): void {
         const serverRes = await fetch(`${vpsApiUrl}/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ storeId, phone, password }),
+          body: JSON.stringify({ storeId, phone, password, client: 'pos' }),
         });
         if (serverRes.ok) {
           const { token: sToken } = await serverRes.json() as { token: string };
@@ -288,7 +288,7 @@ export function setupAuthHandlers(): void {
       const serverRes = await fetch(`${vpsApiUrl}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeId, phone, password }),
+        body: JSON.stringify({ storeId, phone, password, client: 'pos' }),
       });
       if (serverRes.ok) {
         const { token: sToken } = await serverRes.json() as { token: string };

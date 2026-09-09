@@ -6,7 +6,9 @@ import { Input } from "@components/common/Input";
 import { useTheme } from "@theme/ThemeProvider";
 import { auth as authApi } from "../../api/client";
 import { TopBar } from "./DevicesPage";
-import { ArrowLeft } from "lucide-react";
+import { ConfirmDialog } from "@components/common/ConfirmDialog";
+import { useAuthStore } from "../../store/auth-store";
+import { ArrowLeft, LogOut } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
 const Container = styled.div`
@@ -128,6 +130,9 @@ export function UserSettings() {
     }
   };
 
+  const { logout } = useAuthStore();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
   return (
     <Container>
       <TopBar>
@@ -215,6 +220,26 @@ export function UserSettings() {
           <Button type="submit">{t("settings.updatePassword")}</Button>
         </Form>
       </Section>
+      <Section>
+        <SectionTitle>{t("auth.logout")}</SectionTitle>
+        {/* Signing out lives here rather than in the mobile bar: five section tabs is the limit,
+            and a destructive action does not belong one thumb-slip from the Reports tab. */}
+        <Button variant="danger" onClick={() => setShowLogoutConfirm(true)}>
+          <LogOut size={16} /> {t("auth.logout")}
+        </Button>
+      </Section>
+
+      {showLogoutConfirm && (
+        <ConfirmDialog
+          title={t("auth.logout")}
+          message={t("auth.logoutConfirm")}
+          confirmLabel={t("auth.logout")}
+          cancelLabel={t("common.cancel")}
+          variant="danger"
+          onConfirm={logout}
+          onCancel={() => setShowLogoutConfirm(false)}
+        />
+      )}
     </Container>
   );
 }

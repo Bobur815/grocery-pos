@@ -68,4 +68,10 @@ export interface UserListItem {
   role: UserRole;
   active: boolean;
   createdAt: string;
+  /**
+   * Whether a quick-login PIN is set. The hash itself never leaves the main process — auth-handlers
+   * maps the stored pin to this boolean — so an empty PIN field on an edit form means "leave it as
+   * it is", never "clear it".
+   */
+  hasPin?: boolean;
 }

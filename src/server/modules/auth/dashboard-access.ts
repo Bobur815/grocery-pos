@@ -18,6 +18,12 @@ export interface DashboardStore {
 export type BlockReason = 'auth.errors.store_inactive' | 'auth.errors.store_offline_only' | null;
 
 /**
+ * Which client is asking. Defaults to 'dashboard' everywhere, so anything that does not say
+ * otherwise keeps the stricter rule — the safe direction for an omitted field.
+ */
+export type LoginClient = 'dashboard' | 'pos';
+
+/**
  * Two refusals, for different reasons:
  *
  *  - **Deactivated store** — its people should not keep working in the dashboard after it has
@@ -33,14 +39,31 @@ export type BlockReason = 'auth.errors.store_inactive' | 'auth.errors.store_offl
  *
  * A store that cannot be found is treated as inactive rather than allowed: failing closed is the
  * right side to err on when the row backing the session is missing.
+ *
+ * The OFFLINE_ONLY refusal is scoped to the DASHBOARD, which is the only thing it was ever about.
+ * A POS terminal asking for a token is a different case: it is not going to browse a stale store,
+ * it needs a credential to read its own store's billing row and to reach the vendor's shared
+ * services (marking codes, MXIK, invoice AI). Refusing it left such a terminal permanently without
+ * a credential once its setup token expired — setup-handlers.ts already assumed a VPS login stayed
+ * possible for exactly this reason.
+ *
+ * Deactivation still blocks BOTH: a store that has been switched off should not have a working
+ * till either, and that is the more fundamental refusal.
+ *
+ * The client field is a hint the caller supplies, so it is not an authorization boundary and is not
+ * treated as one — the password check above it is. What it changes is which of two *product*
+ * rules applies, and the token it yields carries exactly the same claims either way.
  */
 export function dashboardLoginBlockReason(
   role: string,
   storeId: string | null,
   store: DashboardStore | null,
+  client: LoginClient = 'dashboard',
 ): BlockReason {
   if (role === SUPER_ADMIN || !storeId) return null;
   if (!store || !store.active) return 'auth.errors.store_inactive';
-  if (store.mode === 'OFFLINE_ONLY') return 'auth.errors.store_offline_only';
+  if (store.mode === 'OFFLINE_ONLY' && client !== 'pos') {
+    return 'auth.errors.store_offline_only';
+  }
   return null;
 }

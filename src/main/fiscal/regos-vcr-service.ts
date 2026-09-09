@@ -7,6 +7,7 @@ import { getPrismaClient } from '../database/sqlite-client';
 import { getAppConfig } from '../config/app-config';
 import { getVcrPassword, hasVcrPassword, setVcrPassword } from './secret-store';
 import { log } from '../logger';
+import { FiscalTimer } from './fiscal-timing';
 import { normalizePollOptions } from './uzqr-poll';
 import {
   RegosVcrClient,
@@ -38,6 +39,7 @@ import { isCodeOutOfCirculation } from '../marking/circulation-check';
 const MAX_ATTEMPTS = 5; // cap retries for hard (business) failures
 const FISCAL_DEBUG = process.env.FISCAL_DEBUG === 'true'; // verbose position/payment logs
 const ERR_ZREPORT_EMPTY = 704020; // VCR: can't close an empty Z-report — benign no-op for us
+const ERR_ZREPORT_NOT_OPEN = 704010; // VCR: no open Z-report — recoverable, we re-open and retry
 // UZ statutory VAT rate. Used when neither the product's own vatRate nor the store-wide
 // regos_vcr_vat setting is configured. A 0% fallback would send vat_value=0 for goods that
 // are registered as VAT-able at soliq → REGOS rejects with 701003 "Ставка НДС не найдена".
@@ -53,6 +55,16 @@ const NON_VAT_PAYER_VAT_VALUE = -1;
 interface PositionMeta {
   productId: number;
   rate: number;
+}
+
+/** The product fields a fiscal position is built from. See buildPositions(). */
+interface FiscalProduct {
+  id: number;
+  mxik: string | null;
+  vatRate: number | null;
+  unit: string;
+  packageCode: string | null;
+  category: { nameRu: string } | null;
 }
 
 interface ResolvedConfig {
@@ -89,6 +101,18 @@ class RegosVcrService {
   private worker: NodeJS.Timeout | null = null;
   private running = false;
   private vcrChain: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Cached "the device's Z-report is open". A Z-report spans the whole shift, so asking the device
+   * before every single receipt cost one full round-trip per sale on a single-threaded device for
+   * an answer that changes twice a day.
+   *
+   * Safe to cache because the belief is verified where it matters: Receipt.Sale fails with 704010
+   * when it is wrong, and fiscalizeSaleImpl treats that as recoverable — it clears this flag,
+   * re-opens for real, and retries once. So a stale `true` costs one extra round-trip on the sale
+   * that discovers it, never a lost receipt. Set only after the device has confirmed or opened it.
+   */
+  private zReportOpen = false;
 
   /**
    * Serialize all VCR interactions — the device is single-threaded and the docs
@@ -189,6 +213,17 @@ class RegosVcrService {
     return (await this.resolveConfig()).enabled;
   }
 
+  /**
+   * True when the REGOS:VCR device prints the paper receipt itself, so the POS must NOT print a
+   * second one. Mirrors the "Чек печатает виртуальная касса" checkbox in Fiscal settings.
+   *
+   * Read straight from the settings row rather than through getConfig(), which also probes the
+   * stored password and logs about it — irrelevant work on the sale hot path.
+   */
+  async vcrPrintsReceipt(): Promise<boolean> {
+    return (await this.resolveConfig()).vcrPrintsReceipt;
+  }
+
   private buildClient(cfg: ResolvedConfig): RegosVcrClient | null {
     if (!cfg.password) return null;
     return new RegosVcrClient(cfg.url, cfg.login, cfg.password);
@@ -243,7 +278,18 @@ class RegosVcrService {
   }
 
   // ── Shift (Z-report) mapping ────────────────────────────────────────────────
-  private async ensureZReportOpen(client: RegosVcrClient, smenaId: string | null): Promise<void> {
+  /**
+   * Make sure the device has an open Z-report, skipping the check when we already know it does.
+   *
+   * `force` re-asks the device regardless — used by the manual Z-report actions, where the point
+   * is to read real state, and by the 704010 recovery, where our cached belief was just disproven.
+   */
+  private async ensureZReportOpen(
+    client: RegosVcrClient,
+    smenaId: string | null,
+    force = false,
+  ): Promise<void> {
+    if (this.zReportOpen && !force) return;
     const info = await client.zGetInfo(false);
     const isOpen = Boolean(info.OpenTime?.trim()) && !info.CloseTime?.trim();
     if (!isOpen) {
@@ -255,6 +301,7 @@ class RegosVcrService {
         }).catch(() => {});
       }
     }
+    this.zReportOpen = true;
   }
 
   /** Ensure a VCR Z-report is open for a new shift (called from smena:open). Best-effort. */
@@ -279,6 +326,8 @@ class RegosVcrService {
     const client = this.buildClient(cfg);
     if (!client) return;
     await this.runExclusive(async () => {
+      // Whatever happens next, our cached belief that a Z-report is open is no longer trustworthy.
+      this.zReportOpen = false;
       try {
         await client.zClose();
       } catch (e) {
@@ -301,6 +350,8 @@ class RegosVcrService {
       try {
         const z = await client.zGetInfo(false);
         const open = Boolean(z.OpenTime?.trim()) && !z.CloseTime?.trim();
+        // An authoritative read we are making anyway — resync the cache from it.
+        this.zReportOpen = open;
         return {
           enabled: true,
           open,
@@ -336,7 +387,9 @@ class RegosVcrService {
     });
     return this.runExclusive(async () => {
       try {
-        await this.ensureZReportOpen(client, smena?.id ?? null);
+        // Manual action: re-ask the device rather than trusting the cache, since the reason to
+        // press this button is usually that the cached state and the device disagree.
+        await this.ensureZReportOpen(client, smena?.id ?? null, true);
         return { ok: true };
       } catch (e) {
         return { ok: false, error: this.errText(e) };
@@ -351,6 +404,7 @@ class RegosVcrService {
     const client = this.buildClient(cfg);
     if (!client) return { ok: false, error: 'Пароль кассира не задан' };
     return this.runExclusive(async () => {
+      this.zReportOpen = false;
       try {
         await client.zClose();
         return { ok: true };
@@ -374,13 +428,22 @@ class RegosVcrService {
     const orderDiscount = Number(sale.discountAmount) || 0;
     const totalSubtotal = sale.items.reduce((s, it) => s + Number(it.subtotal), 0) || 1;
 
+    // One query for every line's product instead of one per line. This runs inside the VCR lock,
+    // so N sequential SQLite round-trips (each joining category) delayed the device call itself —
+    // and a big receipt paid for it linearly.
+    const productIds = [...new Set(sale.items.map((it) => Number(it.productId)))];
+    // The generated SQLite client is require()d, so its delegates are untyped — this annotation is
+    // what documents which product fields a fiscal position actually depends on.
+    const productRows: FiscalProduct[] = await prisma.product.findMany({
+      where: { id: { in: productIds } },
+      include: { category: true },
+    });
+    const productById = new Map(productRows.map((p) => [p.id, p] as const));
+
     const positions: VcrPosition[] = [];
     const meta: PositionMeta[] = [];
     for (const item of sale.items) {
-      const product = await prisma.product.findUnique({
-        where: { id: Number(item.productId) },
-        include: { category: true },
-      });
+      const product = productById.get(Number(item.productId));
       const subtotal = Number(item.subtotal);
       const amount = Math.round(subtotal * 100);
       // Non-VAT-payer store: send "Без НДС" (vat_value=-1) for every line and ignore any
@@ -566,10 +629,15 @@ class RegosVcrService {
 
   // ── Fiscalize one sale ───────────────────────────────────────────────────────
   async fiscalizeSale(saleId: string): Promise<void> {
-    return this.runExclusive(() => this.fiscalizeSaleImpl(saleId));
+    // The timer starts HERE, before the queue, so its first phase measures how long this receipt
+    // waited behind other VCR work. That wait is invisible from inside the device and is the usual
+    // explanation for a receipt that took far longer than the device itself did.
+    const timer = new FiscalTimer();
+    return this.runExclusive(() => this.fiscalizeSaleImpl(saleId, timer));
   }
 
-  private async fiscalizeSaleImpl(saleId: string): Promise<void> {
+  private async fiscalizeSaleImpl(saleId: string, timer = new FiscalTimer()): Promise<void> {
+    timer.phase('queue');
     const cfg = await this.resolveConfig();
     if (!cfg.enabled) return;
     const prisma = getPrismaClient();
@@ -581,27 +649,38 @@ class RegosVcrService {
       }).catch(() => {});
       return;
     }
+    timer.phase('config');
 
     const sale = await prisma.sale.findUnique({ where: { id: saleId }, include: { items: true } });
     if (!sale || sale.fiscalStatus === 'FISCALIZED') return;
+    timer.phase('load');
 
     // Hoisted so the catch block can log the VAT rates / amounts actually sent to the VCR.
     let positions: VcrPosition[] = [];
     let meta: PositionMeta[] = [];
     try {
       await this.ensureZReportOpen(client, sale.smenaId);
+      timer.phase('zreport');
       ({ positions, meta } = await this.buildPositions(sale as never, cfg));
       const payments = this.buildPayments(sale as never);
       if (FISCAL_DEBUG) {
         console.log('[fiscal] positions:', JSON.stringify(positions));
         console.log('[fiscal] payments:', JSON.stringify(payments));
       }
+      timer.phase('build');
       let result: VcrReceiptResult | null = null;
-      // One heal-and-retry: if REGOS rejects the VAT rate, re-probe the device per position to
-      // learn the rate it accepts, correct it (and persist back to the product), then retry once.
-      for (let healed = false; result === null; ) {
+      // Straight to Receipt.Sale — no Receipt.ValidateSale pre-flight. Sale applies exactly the
+      // same validation and returns the same error, so the pre-flight only doubled the round-trips
+      // to a single-threaded device on every receipt to learn nothing new. Validation still has a
+      // job here, just on the failure path: healVatRates() probes with it.
+      //
+      // Two one-shot recoveries, each allowed once:
+      //  - Z-report not open → our cached belief was stale (closed in the REGOS app, or the 24h
+      //    auto-close). Re-check for real and retry.
+      //  - VAT rate rejected → re-probe the device per position for the rate it accepts, correct
+      //    it (and persist back to the product), then retry.
+      for (let healedVat = false, reopenedZ = false; result === null; ) {
         try {
-          await client.validateSale(positions, payments, false);
           result = await client.sale({
             positions,
             payments,
@@ -611,10 +690,17 @@ class RegosVcrService {
             pos_id: cfg.posId,
           });
         } catch (e) {
+          if (!reopenedZ && e instanceof VcrError && e.code === ERR_ZREPORT_NOT_OPEN) {
+            reopenedZ = true;
+            this.zReportOpen = false;
+            log.info(`[fiscal] Z-report was not open for ${sale.receiptNumber} — reopening`);
+            await this.ensureZReportOpen(client, sale.smenaId, true);
+            continue;
+          }
           // The VAT-rate heal probes numeric rates [0,12,6]; it's meaningless (and wrong) for a
           // non-VAT-payer store, whose only valid value is the "Без НДС" sentinel — skip it.
-          if (!healed && !cfg.nonVatPayer && e instanceof VcrError && isVatRateError(e)) {
-            healed = true;
+          if (!healedVat && !cfg.nonVatPayer && e instanceof VcrError && isVatRateError(e)) {
+            healedVat = true;
             if (await this.healVatRates(client, positions, meta)) {
               log.info(`[fiscal] VAT rates healed for ${sale.receiptNumber} — retrying`);
               continue;
@@ -623,6 +709,7 @@ class RegosVcrService {
           throw e;
         }
       }
+      timer.phase('vcr-sale');
       console.log(`[fiscal] FISCALIZED ${sale.receiptNumber} → ReceiptNo=${result.ReceiptNo}`);
       await prisma.sale.update({
         where: { id: saleId },
@@ -637,7 +724,12 @@ class RegosVcrService {
           fiscalError: null,
         },
       });
+      timer.phase('persist');
+      timer.finish(sale.receiptNumber, true);
     } catch (e) {
+      // Note: the timer is closed at each exit below, not here — the recovery path that follows
+      // can still turn this into a fiscalized receipt, and calling it a failure now would log a
+      // FAILED line for a sale that succeeded.
       // Use the electron-log instance (not raw console) so these lines land in the upload buffer
       // → terminal_logs → super-admin Logs dashboard. Main-process console is NOT captured.
       log.error(`[fiscal] ✗ fiscalize ${saleId} failed: ${this.errText(e)}`);
@@ -668,6 +760,8 @@ class RegosVcrService {
               fiscalError: null,
             },
           }).catch(() => {});
+          timer.phase('recover');
+          timer.finish(sale.receiptNumber, true);
           return; // recovered — do not propagate the error
         }
       }
@@ -678,6 +772,7 @@ class RegosVcrService {
           ? { fiscalStatus: 'PENDING', fiscalError: this.errText(e) }
           : { fiscalStatus: 'FAILED', fiscalAttempts: { increment: 1 }, fiscalError: this.errText(e) },
       }).catch(() => {});
+      timer.finish(sale.receiptNumber, false);
       throw e;
     }
   }
@@ -964,10 +1059,47 @@ class RegosVcrService {
     // reboot, so a "settings keep disappearing" report can be confirmed (or ruled out) from the
     // log instead of guesswork — including whether the stored VCR password decrypted.
     this.logStartupConfig().catch(() => {});
+    this.warmZReportCache().catch(() => {});
     // NOTE: the periodic background retry worker was removed by request. Fiscalization now happens
     // (a) immediately when a sale is created, (b) as a flush on shift close (smena:close →
     // processPending), and (c) on demand via the "Fiscalise all old receipts" admin button
     // (fiscalizeOldReceipts). A silently-looping retry that hammers the VCR every 30s is gone.
+  }
+
+  /**
+   * Learn the device's Z-report state once at startup, so the first receipt of the session does
+   * not pay for it.
+   *
+   * A shift opened in THIS session already warms the cache through openShift(). The cold case is
+   * an app restart with a shift already open — the terminal is relaunched mid-day and the next
+   * customer waits out a ZReport.GetInfo (measured at ~1.4s against a real device) on top of their
+   * own receipt.
+   *
+   * Read-only on purpose: this records what the device says and never opens a Z-report. Opening
+   * one is a fiscal action that belongs to smena:open or to the first sale, not to app startup.
+   */
+  private async warmZReportCache(): Promise<void> {
+    const cfg = await this.resolveConfig();
+    if (!cfg.enabled) return;
+    const client = this.buildClient(cfg);
+    if (!client) return;
+    // No open shift means no receipts are coming, so there is nothing to prepare for — and asking
+    // the device would be a pointless call on every launch of an idle terminal.
+    const smena = await getPrismaClient().smena.findFirst({
+      where: { status: 'OPEN' },
+      orderBy: { openedAt: 'desc' },
+    });
+    if (!smena) return;
+    try {
+      await this.runExclusive(async () => {
+        const info = await client.zGetInfo(false);
+        this.zReportOpen = Boolean(info.OpenTime?.trim()) && !info.CloseTime?.trim();
+      });
+      log.info(`[fiscal] Z-report state warmed at startup: open=${this.zReportOpen}`);
+    } catch (e) {
+      // The device may not be running yet. The first sale will ask again — this is only a warm-up.
+      log.info(`[fiscal] could not warm Z-report state at startup: ${this.errText(e)}`);
+    }
   }
 
   /**

@@ -23,6 +23,10 @@ export interface Sale {
   fiscalError?: string | null;
   regosReceiptNo?: string | null;
   regosQrCodeUrl?: string | null;
+  // Set only when a REGOS Payment.Create payment (UzQR) was confirmed before the sale was
+  // written. Its presence means money has already moved against this receipt, which is why the
+  // receipt can no longer be edited.
+  regosPaymentId?: string | null;
   refunded?: boolean;
 }
 

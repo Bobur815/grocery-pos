@@ -24,6 +24,7 @@
       "@components/common/*": ["../../src/renderer/components/common/*"],
       "@components/products/*": ["../../src/renderer/components/products/*"],
       "@components/suppliers/*": ["../../src/renderer/components/suppliers/*"],
+      "@components/analytics/*": ["../../src/renderer/components/analytics/*"],
       "@theme/*": ["../../src/renderer/theme/*"],
       "@context/*": ["../../src/renderer/context/*"],
       "@i18n/*": ["../../src/renderer/i18n/*"]

@@ -83,20 +83,13 @@ const MobileNavItem = styled(NavLink)`
   }
 `;
 
-const MobileNavButton = styled.button`
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 6px 4px;
-  gap: 2px;
-  color: ${({ theme }) => theme.colors.error};
-  background: none;
-  border: none;
-  font-size: 11px;
-  cursor: pointer;
-  transition: color 0.2s;
+const MobileNavLabel = styled.span`
+  font-size: 10px;
+  line-height: 1.1;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 `;
 
 const LogoSection = styled.div<{ $collapsed: boolean }>`
@@ -337,21 +330,39 @@ export function Sidebar() {
     </NavItemWrapper>
   );
 
+  /**
+   * The mobile bar holds SECTIONS, never individual pages — five is as many icons as stay
+   * tappable, and the app has ten destinations. Each section's sub-pages are tabs at the top of
+   * its own pages (see SubNav), so nothing is hidden behind a drawer and everything is two taps.
+   *
+   * Logout is not here either: it lives in Settings, where a destructive action belongs rather
+   * than one thumb-slip away from the Reports tab.
+   */
   const mobileNavItems = isSuperAdmin
-    ? [{ to: "/admin/stores", icon: Store }, { to: "/admin/logs", icon: ScrollText }, { to: "/admin/login-banner", icon: Image }, { to: "/admin/subscription-plans", icon: CreditCard }, { to: "/settings/user", icon: Settings }]
+    ? [
+        { to: "/admin/stores", icon: Store, label: "Stores" },
+        { to: "/admin/logs", icon: ScrollText, label: "Logs" },
+        { to: "/admin/login-banner", icon: Image, label: "Banner" },
+        { to: "/admin/subscription-plans", icon: CreditCard, label: "Plans" },
+        { to: "/settings/user", icon: Settings, label: t("nav.settings") },
+      ]
     : [
-        { to: "/products", icon: Package },
-        { to: "/products/stock", icon: ClipboardList },
-        // Stocktake is an admin-only route — showing it to a cashier would just bounce them.
-        ...(isAdmin
-          ? [
-              { to: "/products/stock/inventarizatsiya", icon: ClipboardCheck },
-              { to: "/products/stock/reconciliation", icon: Scale },
-            ]
-          : []),
-        { to: "/suppliers", icon: Truck },
-        { to: "/reports/daily", icon: BarChart3 },
-        { to: "/settings", icon: Settings },
+        { to: "/products", icon: Package, label: t("nav.products") },
+        { to: "/products/stock", icon: ClipboardList, label: t("nav.inventory") },
+        { to: "/suppliers", icon: Truck, label: t("suppliers.title") },
+        // This bar only ever renders on a phone, so it can name the mobile destination
+        // outright: Analytics is the report worth having on a small screen. A cashier cannot
+        // open it (admin-only), so they get the daily summary — their only report — instead.
+        isAdmin
+          ? { to: "/reports/analytics", icon: LineChart, label: t("nav.analytics") }
+          : { to: "/reports/daily", icon: BarChart3, label: t("nav.dailySummary") },
+        // A cashier cannot open /settings (admin-only), so send them to the one settings page
+        // they can use rather than to a route that bounces them.
+        {
+          to: isAdmin ? "/settings" : "/settings/user",
+          icon: Settings,
+          label: t("nav.settings"),
+        },
       ];
 
   return (
@@ -359,9 +370,7 @@ export function Sidebar() {
       {/* Desktop sidebar */}
       <Container $collapsed={isCollapsed}>
         <LogoSection $collapsed={isCollapsed}>
-          <Logo $collapsed={isCollapsed}>
-            {isCollapsed ? "PG" : "POSGRO"}
-          </Logo>
+          <Logo $collapsed={isCollapsed}>{isCollapsed ? "PG" : "POSGRO"}</Logo>
           <ToggleButton
             onClick={toggleSidebar}
             title={isCollapsed ? t("nav.expand") : t("nav.collapse")}
@@ -462,7 +471,11 @@ export function Sidebar() {
               {renderNavItem("/admin/stores", Store, "Stores")}
               {renderNavItem("/admin/logs", ScrollText, "Logs")}
               {renderNavItem("/admin/login-banner", Image, "Login Banner")}
-              {renderNavItem("/admin/subscription-plans", CreditCard, "Subscriptions")}
+              {renderNavItem(
+                "/admin/subscription-plans",
+                CreditCard,
+                "Subscriptions",
+              )}
               {renderNavItem("/settings/user", Settings, t("nav.settings"))}
             </NavSection>
           )}
@@ -490,7 +503,12 @@ export function Sidebar() {
             </NavItemWrapper>
           )}
           <NavItemWrapper>
-            <LogoutButton $collapsed={isCollapsed} onClick={handleLogout}>
+            <LogoutButton
+              $collapsed={isCollapsed}
+              // Confirm here too. The dialog existed only for the mobile button, which has moved to
+              // the account page — and signing out of a till mid-shift is worth one tap to confirm.
+              onClick={() => setShowLogoutConfirm(true)}
+            >
               <IconWrapper>
                 <LogOut size={18} />
               </IconWrapper>
@@ -501,16 +519,14 @@ export function Sidebar() {
         </BottomSection>
       </Container>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — five sections; sub-pages are tabs within each. */}
       <MobileBottomNav>
-        {mobileNavItems.map(({ to, icon: Icon }) => (
+        {mobileNavItems.map(({ to, icon: Icon, label }) => (
           <MobileNavItem key={to} to={to}>
-            <Icon size={24} />
+            <Icon size={22} />
+            <MobileNavLabel>{label}</MobileNavLabel>
           </MobileNavItem>
         ))}
-        <MobileNavButton onClick={() => setShowLogoutConfirm(true)}>
-          <LogOut size={24} />
-        </MobileNavButton>
       </MobileBottomNav>
 
       {showLogoutConfirm && (

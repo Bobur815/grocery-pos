@@ -2,6 +2,8 @@
 // REGOS:VCR app over HTTP. Promoted from scripts/regos-vcr-test.ts (proven against
 // vcr-test.regos.uz). VCR is single-threaded — callers must await each call.
 
+import { recordVcrCall } from './fiscal-timing';
+
 // Verbose VCR request/response logging — off unless FISCAL_DEBUG=true.
 const VCR_DEBUG = process.env.FISCAL_DEBUG === 'true';
 
@@ -136,6 +138,17 @@ export class RegosVcrClient {
   }
 
   private async call<T>(method: string, params: unknown = null): Promise<T> {
+    // Timed in a finally so failures count too — a 30s timeout is the single most informative
+    // sample there is, and dropping it would make the device look faster than it is.
+    const startedAt = performance.now();
+    try {
+      return await this.callImpl<T>(method, params);
+    } finally {
+      recordVcrCall(method, performance.now() - startedAt);
+    }
+  }
+
+  private async callImpl<T>(method: string, params: unknown = null): Promise<T> {
     const id = this.requestId++;
     const payload = { id, jsonrpc: '2.0' as const, method, params, auth: this.authToken };
     // Verbose request/response logging — enable with FISCAL_DEBUG=true for field support.

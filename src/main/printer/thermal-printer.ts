@@ -145,7 +145,11 @@ async function loadReceiptSettings(): Promise<ReceiptSettings> {
   };
 }
 
-async function printReceipt(saleId: string): Promise<boolean> {
+/**
+ * Render and print a sale's paper receipt. Exported so the sale flow can print it automatically
+ * (see printSaleReceipt in sales-handlers.ts) rather than only the manual print buttons in the UI.
+ */
+export async function printReceipt(saleId: string): Promise<boolean> {
   const prisma = getPrismaClient();
 
   const sale = await prisma.sale.findUnique({

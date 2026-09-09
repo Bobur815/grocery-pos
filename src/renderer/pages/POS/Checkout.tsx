@@ -12,38 +12,7 @@ import { formatCurrency as formatCurrencyBase } from "@shared/utils";
 import { UZQR_BRAND_COLOR, type SaleTender } from "@shared/constants";
 import { UzQrLogo } from "./UzQrLogo";
 import { UzQrPaymentModal } from "./UzQrPaymentModal";
-
-function parseSaleError(
-  err: unknown,
-  t: (key: string, params?: Record<string, unknown>) => string,
-): string {
-  const message = err instanceof Error ? err.message : String(err);
-  // Electron wraps IPC errors: "Error invoking remote method '...': Error: {json}"
-  const jsonStart = message.indexOf("{");
-  const jsonStr = jsonStart !== -1 ? message.slice(jsonStart) : "";
-  try {
-    const parsed = JSON.parse(jsonStr);
-    if (parsed.code === "PRODUCT_NOT_FOUND") {
-      return t("errors.productNotFound", { id: parsed.productId });
-    }
-    if (parsed.code === "PRODUCT_INACTIVE") {
-      return t("errors.productInactive", { name: parsed.name });
-    }
-    if (parsed.code === "INSUFFICIENT_STOCK") {
-      return t("errors.insufficientStock", {
-        name: parsed.name,
-        available: parsed.available,
-        requested: parsed.requested,
-      });
-    }
-    if (parsed.code === "NO_SMENA_OPEN") {
-      return t("smena.noOpenSmena");
-    }
-  } catch {
-    // not JSON, fall through
-  }
-  return message || t("common.error");
-}
+import { parseSaleError } from "./saleErrors";
 
 const Content = styled.div`
   display: grid;

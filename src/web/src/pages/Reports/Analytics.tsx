@@ -6,6 +6,9 @@ import {
   Area,
   BarChart,
   Bar,
+  PieChart,
+  Pie,
+  Cell,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -23,6 +26,27 @@ import {
   uztToday,
 } from "../../utils/uzt-date";
 import { analytics as analyticsApi } from "../../api/client";
+import {
+  RankList,
+  RankHeading,
+  RankNote,
+  metricValueOf,
+  sliceFor,
+  type RankedProduct,
+  type ProductRanking,
+  type RankingCategory,
+  type RankMetric,
+} from "@components/analytics/rankings";
+import {
+  CATEGORY_HUES_LIGHT,
+  CATEGORY_HUES_DARK,
+  foldCategorySlices,
+} from "@components/analytics/categoryPie";
+import {
+  SubNav,
+  useReportsSubNav,
+  REPORTS_HIDE_TABS_ON_MOBILE,
+} from "../../components/layout/SubNav";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,27 +60,8 @@ type DatePreset =
   | "last365"
   | "custom";
 
-/** Which measure the top/worst product lists are ordered by. */
-type RankMetric = "quantity" | "revenue" | "profit";
-
-interface RankedProduct {
-  productId: number;
-  nameRu: string;
-  nameUz: string;
-  quantity: number;
-  revenue: number;
-  /** Null when the product has no cost price — an unknown margin, not a zero one. */
-  profit: number | null;
-}
-
-interface ProductRanking {
-  byQuantity: { top: RankedProduct[]; bottom: RankedProduct[] };
-  byRevenue: { top: RankedProduct[]; bottom: RankedProduct[] };
-  byProfit: { top: RankedProduct[]; bottom: RankedProduct[] };
-  neverSoldCount: number;
-  noCostCount: number;
-  totalProducts: number;
-}
+// RankMetric, RankedProduct, ProductRanking and RankingCategory come from the shared module —
+// the POS terminal's analytics screen renders the same block from a different backend.
 
 interface AnalyticsData {
   salesTrend: { date: string; revenue: number; count: number }[];
@@ -69,6 +74,7 @@ interface AnalyticsData {
   hourlyDistribution: { hour: number; revenue: number; count: number }[];
   topProducts: { name: string; quantity: number; revenue: number }[];
   productRanking: ProductRanking;
+  rankingCategories: RankingCategory[];
   cashierPerformance: { name: string; revenue: number; count: number }[];
   profitMargins: {
     categoryRu: string;
@@ -167,7 +173,7 @@ const DateSep = styled.span`
 
 const KpiGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 2fr));
   gap: ${({ theme }) => theme.spacing.md};
 `;
 
@@ -238,149 +244,24 @@ const CardHead = styled.div`
 `;
 
 const MetricSelect = styled(Select)`
-  min-width: 220px;
+  min-width: 150px;
 `;
 
-const RankNote = styled.div`
-  font-size: 12px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  margin-bottom: ${({ theme }) => theme.spacing.md};
-`;
+/**
+ * The filter row above the rankings: category sized to its content, metric taking the rest.
+ *
+ * Stacks below 600px instead of splitting a phone's width two ways — at that size `auto` and
+ * `2fr` both land near 150px and the category names truncate to nothing useful.
+ */
+const CardControls = styled.div`
+  display: grid;
+  grid-template-columns: auto 2fr;
+  gap: ${({ theme }) => theme.spacing.sm};
 
-const RankHeading = styled.h4`
-  margin: 0 0 ${({ theme }) => theme.spacing.sm};
-  font-size: 14px;
-  color: ${({ theme }) => theme.colors.text};
-`;
-
-const RankTable = styled.table`
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-`;
-
-const RankRow = styled.tr`
-  border-bottom: 1px solid ${({ theme }) => theme.colors.border};
-
-  &:last-child {
-    border-bottom: none;
+  @media (max-width: 600px) {
+    grid-template-columns: 1fr;
   }
 `;
-
-const RankIndex = styled.td`
-  padding: ${({ theme }) => theme.spacing.xs} 0;
-  width: 22px;
-  color: ${({ theme }) => theme.colors.textSecondary};
-  font-variant-numeric: tabular-nums;
-`;
-
-const RankName = styled.td`
-  padding: ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
-  color: ${({ theme }) => theme.colors.text};
-`;
-
-/** Fixed width so the numbers form a column the eye can scan, independent of name length. */
-const RankValue = styled.td<{ $tone?: "bad" | "muted" }>`
-  padding: ${({ theme }) => theme.spacing.xs} 0;
-  width: 108px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  color: ${({ theme, $tone }) =>
-    $tone === "bad"
-      ? theme.colors.error
-      : $tone === "muted"
-        ? theme.colors.textSecondary
-        : theme.colors.text};
-`;
-
-/**
- * Inline proportional bar, in place of a chart.
- *
- * A bar chart is unreadable for the worst-sellers list — most of its entries are zero, so every
- * bar collapses to nothing. Scaling each table to its own maximum keeps the comparison visible
- * within a list while the exact figure stays on the row.
- */
-const BarCell = styled.td`
-  width: 76px;
-  padding: ${({ theme }) => theme.spacing.xs} 0
-    ${({ theme }) => theme.spacing.xs} ${({ theme }) => theme.spacing.sm};
-`;
-
-const BarTrack = styled.div`
-  height: 6px;
-  border-radius: 3px;
-  background-color: ${({ theme }) => theme.colors.border};
-  overflow: hidden;
-`;
-
-const BarFill = styled.div<{ $pct: number; $color: string }>`
-  height: 100%;
-  width: ${({ $pct }) => $pct}%;
-  background-color: ${({ $color }) => $color};
-`;
-
-// ── Ranking list ──────────────────────────────────────────────────────────────
-
-interface RankListProps {
-  rows: RankedProduct[];
-  lang: "ru" | "uz";
-  color: string;
-  metricValue: (p: RankedProduct) => number;
-  formatMetric: (p: RankedProduct) => string;
-  emptyLabel: string;
-}
-
-/**
- * Ten products with an inline proportional bar, used instead of a Recharts bar chart.
- *
- * The worst-sellers list is mostly zeros — a chart of it renders as ten invisible bars and a
- * column of truncated labels. A table keeps the names readable and the figures exact, and the
- * bar still carries the visual comparison where there is one to make.
- */
-function RankList({
-  rows,
-  lang,
-  color,
-  metricValue,
-  formatMetric,
-  emptyLabel,
-}: RankListProps) {
-  if (rows.length === 0) return <NoData>{emptyLabel}</NoData>;
-
-  // Scaled to this list's own maximum, not the other list's: the worst-sellers bars are about
-  // comparing dead stock with itself, and sharing a scale with the best sellers would flatten
-  // every one of them to nothing.
-  const peak = Math.max(...rows.map((r) => Math.abs(metricValue(r))), 0);
-
-  return (
-    <RankTable>
-      <tbody>
-        {rows.map((p, i) => {
-          const value = metricValue(p);
-          return (
-            <RankRow key={p.productId}>
-              <RankIndex>{i + 1}</RankIndex>
-              <RankName>{lang === "ru" ? p.nameRu : p.nameUz}</RankName>
-              <BarCell>
-                <BarTrack>
-                  <BarFill
-                    $pct={peak > 0 ? (Math.abs(value) / peak) * 100 : 0}
-                    $color={color}
-                  />
-                </BarTrack>
-              </BarCell>
-              {/* A negative figure is a product sold below cost — worth seeing in red. */}
-              <RankValue $tone={value < 0 ? "bad" : value === 0 ? "muted" : undefined}>
-                {formatMetric(p)}
-              </RankValue>
-            </RankRow>
-          );
-        })}
-      </tbody>
-    </RankTable>
-  );
-}
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
@@ -395,6 +276,9 @@ export function Analytics() {
   const [isLoading, setIsLoading] = useState(false);
   // All three rankings ship in one response, so switching the metric is instant — no refetch.
   const [rankMetric, setRankMetric] = useState<RankMetric>("quantity");
+  // The category, by contrast, DOES refetch: ranking has to happen within the category, and only
+  // the server holds every product. "" is all categories.
+  const [rankCategory, setRankCategory] = useState<string>("");
   
   const lang = i18n.language as "ru" | "uz";
   const fmt = (amount: number) => formatCurrencyBase(amount, lang);
@@ -418,6 +302,7 @@ export function Analytics() {
       const result = await analyticsApi.getData({
         startDate: start.toISOString(),
         endDate: end.toISOString(),
+        ...(rankCategory ? { categoryId: Number(rankCategory) } : {}),
       });
       setData(result as AnalyticsData);
     } catch (err) {
@@ -425,18 +310,25 @@ export function Analytics() {
     } finally {
       setIsLoading(false);
     }
-  }, [preset, customStart, customEnd]);
+  }, [preset, customStart, customEnd, rankCategory]);
   
   useEffect(() => {
     fetchData();
   }, [fetchData]);
 
   // Prepare localised data
-  const categoryData =
+  const categoryDataRaw =
     data?.salesByCategory.map((c) => ({
       name: lang === "ru" ? c.categoryRu : c.categoryUz,
       revenue: c.revenue,
     })) ?? [];
+
+  const categoryData = foldCategorySlices(
+    categoryDataRaw,
+    t("reports.otherCategories", "Прочие"),
+  );
+
+  const categoryTotal = categoryData.reduce((sum, c) => sum + c.revenue, 0);
 
   const profitData =
     data?.profitMargins.map((c) => ({
@@ -445,6 +337,19 @@ export function Analytics() {
       cost: c.cost,
     })) ?? [];
 
+  /**
+   * All categories plus an "all" entry. Sourced from the response rather than the categories API
+   * so the list can never offer one that would rank empty — and it survives a narrowed fetch,
+   * because the server always derives it from the unfiltered rows.
+   */
+  const categoryOptions = [
+    { value: "", label: t("reports.allCategories", "Все категории") },
+    ...(data?.rankingCategories ?? []).map((c) => ({
+      value: String(c.id),
+      label: lang === "ru" ? c.nameRu : c.nameUz,
+    })),
+  ];
+
   const metricOptions = [
     { value: "quantity", label: t("reports.rankByQuantity", "По количеству") },
     { value: "revenue", label: t("reports.rankByRevenue", "По выручке") },
@@ -452,20 +357,8 @@ export function Analytics() {
   ];
 
   const ranking = data?.productRanking;
-  const rankSlice =
-    rankMetric === "revenue"
-      ? ranking?.byRevenue
-      : rankMetric === "profit"
-        ? ranking?.byProfit
-        : ranking?.byQuantity;
-
-  /** The figure the current metric ranks on. Profit is null-safe: no cost price → no row here. */
-  const metricValue = (p: RankedProduct): number =>
-    rankMetric === "revenue"
-      ? p.revenue
-      : rankMetric === "profit"
-        ? (p.profit ?? 0)
-        : p.quantity;
+  const rankSlice = sliceFor(ranking, rankMetric);
+  const metricValue = (p: RankedProduct): number => metricValueOf(p, rankMetric);
 
   const formatMetric = (p: RankedProduct): string =>
     rankMetric === "quantity" ? String(p.quantity) : fmt(metricValue(p));
@@ -474,13 +367,14 @@ export function Analytics() {
   const SUCCESS = theme.colors.success;
   const WARNING = theme.colors.warning;
   const ERROR = theme.colors.error;
-  const INFO = theme.colors.info;
   const BORDER = theme.colors.border;
   const TEXT_SEC = theme.colors.textSecondary;
 
   const tickStyle = { fontSize: 11, fill: TEXT_SEC };
 
   const isDark = theme.colors.text === "#ffffff";
+  // Dark mode gets its own validated steps rather than an automatic lightening of the light ones.
+  const CATEGORY_HUES = isDark ? CATEGORY_HUES_DARK : CATEGORY_HUES_LIGHT;
   const tooltipStyle = {
     backgroundColor: theme.colors.surface,
     border: `1px solid ${theme.colors.border}`,
@@ -493,8 +387,13 @@ export function Analytics() {
     fill: isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.04)",
   };
 
+  const subNav = useReportsSubNav();
+
   return (
     <Container>
+      {/* Section tabs — the mobile bar carries sections only, so a section's sibling
+          pages live here. See components/layout/SubNav.tsx. */}
+      <SubNav items={subNav} hideOnMobile={REPORTS_HIDE_TABS_ON_MOBILE} />
       {/* ── Header / Filters ── */}
       <Header>
         <Title>{t("reports.analytics")}</Title>
@@ -632,33 +531,55 @@ export function Analytics() {
                 <NoData>{t("reports.noData")}</NoData>
               ) : (
                 <ResponsiveContainer width="100%" height={210}>
-                  <BarChart
-                    data={categoryData}
-                    layout="vertical"
-                    margin={{ top: 4, right: 16, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid strokeDasharray="3 3" stroke={BORDER} />
-                    <XAxis
-                      type="number"
-                      tickFormatter={(v: number) => fmt(v)}
-                      tick={tickStyle}
-                    />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={110}
-                      tick={tickStyle}
-                    />
+                  <PieChart margin={{ top: 4, right: 4, left: 4, bottom: 0 }}>
+                    <Pie
+                      data={categoryData}
+                      dataKey="revenue"
+                      nameKey="name"
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={44}
+                      outerRadius={76}
+                      // A 2px ring in the surface colour separates adjacent slices, so two
+                      // neighbouring hues never touch — the gap does the work colour alone cannot
+                      // for a red/green reader.
+                      stroke={theme.colors.surface}
+                      strokeWidth={2}
+                      paddingAngle={1}
+                      // The share, on the slice. The palette's lighter steps fall under 3:1
+                      // against a light surface, and a visible label is the relief that makes
+                      // that legal — it also stops the pie needing to be read by area alone.
+                      label={({ percent }: any) =>
+                        percent >= 0.05 ? `${Math.round(percent * 100)}%` : ""
+                      }
+                      labelLine={false}
+                      isAnimationActive={false}
+                    >
+                      {categoryData.map((entry, i) => (
+                        <Cell key={entry.name} fill={CATEGORY_HUES[i % CATEGORY_HUES.length]} />
+                      ))}
+                    </Pie>
                     <Tooltip
-                      formatter={(v: any) => [
-                        fmt(v ?? 0),
-                        t("reports.revenue"),
+                      formatter={(v: any, name: any) => [
+                        `${fmt(v ?? 0)} · ${
+                          categoryTotal > 0
+                            ? Math.round(((v ?? 0) / categoryTotal) * 100)
+                            : 0
+                        }%`,
+                        name,
                       ]}
                       contentStyle={tooltipStyle}
-                      cursor={tooltipCursor}
                     />
-                    <Bar dataKey="revenue" fill={INFO} radius={[0, 3, 3, 0]} />
-                  </BarChart>
+                    <Legend
+                      verticalAlign="bottom"
+                      height={36}
+                      iconType="circle"
+                      iconSize={8}
+                      formatter={(value: any) => (
+                        <span style={{ fontSize: 11, color: TEXT_SEC }}>{value}</span>
+                      )}
+                    />
+                  </PieChart>
                 </ResponsiveContainer>
               )}
             </Card>
@@ -670,12 +591,22 @@ export function Analytics() {
               <CardTitle style={{ margin: 0 }}>
                 {t("reports.productRankings", "Рейтинг товаров")}
               </CardTitle>
-              <MetricSelect
-                options={metricOptions}
-                value={rankMetric}
-                onChange={(e) => setRankMetric(e.target.value as RankMetric)}
-                selectSize="small"
-              />
+              <CardControls>
+                {/* Both filters drive the same two lists. Category refetches (the ranking must
+                    happen within it, server-side); metric does not. */}
+                <MetricSelect
+                  options={categoryOptions}
+                  value={rankCategory}
+                  onChange={(e) => setRankCategory(e.target.value)}
+                  selectSize="small"
+                />
+                <MetricSelect
+                  options={metricOptions}
+                  value={rankMetric}
+                  onChange={(e) => setRankMetric(e.target.value as RankMetric)}
+                  selectSize="small"
+                />
+              </CardControls>
             </CardHead>
 
             {/* What the lists are drawn from. Without this the worst-sellers list looks like a

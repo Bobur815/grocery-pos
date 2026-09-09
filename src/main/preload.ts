@@ -117,6 +117,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     previewPayload: (saleId: string) => ipcRenderer.invoke("fiscal:previewPayload", saleId),
     refund: (saleId: string) => ipcRenderer.invoke("fiscal:refund", saleId),
     printDuplicate: (saleId: string) => ipcRenderer.invoke("fiscal:printDuplicate", saleId),
+    getTimings: () => ipcRenderer.invoke("fiscal:getTimings"),
+    resetTimings: () => ipcRenderer.invoke("fiscal:resetTimings"),
     zInfo: () => ipcRenderer.invoke("fiscal:zInfo"),
     zOpen: () => ipcRenderer.invoke("fiscal:zOpen"),
     zClose: () => ipcRenderer.invoke("fiscal:zClose"),
@@ -569,6 +571,8 @@ declare global {
         ) => Promise<import("../shared/types/fiscal.types").FiscalSalePreview | null>;
         refund: (saleId: string) => Promise<{ ok: boolean; fiscalSign?: string; error?: string }>;
         printDuplicate: (saleId: string) => Promise<{ ok: boolean; error?: string }>;
+        getTimings: () => Promise<import("../shared/types/fiscal.types").FiscalTimings>;
+        resetTimings: () => Promise<boolean>;
         zInfo: () => Promise<import("../shared/types/fiscal.types").FiscalZReportStatus>;
         zOpen: () => Promise<import("../shared/types/fiscal.types").FiscalActionResult>;
         zClose: () => Promise<import("../shared/types/fiscal.types").FiscalActionResult>;
